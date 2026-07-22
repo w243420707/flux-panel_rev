@@ -48,6 +48,7 @@ Commands:
   uninstall     Stop and remove services
   status        Show service status
   logs          Follow service logs
+  cleanup       Clean old logs, unused images, and Docker build cache
   renew-cert    Renew Let's Encrypt certificate and reload Nginx
   menu          Interactive menu (default)
 
@@ -71,7 +72,7 @@ EOF
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      install|update|uninstall|status|logs|renew-cert|menu)
+      install|update|uninstall|status|logs|cleanup|renew-cert|menu)
         ACTION="$1"
         ;;
       --domain)
@@ -348,6 +349,8 @@ write_env_file() {
   DB_USER="${DB_USER:-$(random_string)}"
   DB_PASSWORD="${DB_PASSWORD:-$(random_string)}"
   JWT_SECRET="${JWT_SECRET:-$(random_string)}"
+  DOCKER_LOG_MAX_SIZE="${DOCKER_LOG_MAX_SIZE:-20m}"
+  DOCKER_LOG_MAX_FILE="${DOCKER_LOG_MAX_FILE:-3}"
   FRONTEND_PORT="${FRONTEND_PORT:-${FRONTEND_PORT_ENV:-6366}}"
   BACKEND_PORT="${BACKEND_PORT:-${BACKEND_PORT_ENV:-6365}}"
   PHPMYADMIN_PORT="${PHPMYADMIN_PORT:-${PHPMYADMIN_PORT_ENV:-8066}}"
@@ -383,6 +386,8 @@ DB_NAME=${DB_NAME}
 DB_USER=${DB_USER}
 DB_PASSWORD=${DB_PASSWORD}
 JWT_SECRET=${JWT_SECRET}
+DOCKER_LOG_MAX_SIZE=${DOCKER_LOG_MAX_SIZE}
+DOCKER_LOG_MAX_FILE=${DOCKER_LOG_MAX_FILE}
 FRONTEND_PORT=${FRONTEND_PORT}
 BACKEND_PORT=${BACKEND_PORT}
 PHPMYADMIN_PORT=${PHPMYADMIN_PORT}
@@ -482,6 +487,12 @@ start_stack() {
   compose up -d --build
   wait_for_health "${APP_SLUG}-mysql" 180 || true
   wait_for_health "${APP_SLUG}-backend" 240 || true
+}
+
+post_deploy_cleanup() {
+  log "Cleaning unused Docker build cache and dangling images..."
+  docker builder prune -af --filter "until=168h" >/dev/null 2>&1 || true
+  docker image prune -f >/dev/null 2>&1 || true
 }
 
 nginx_conf_path() {
@@ -778,6 +789,7 @@ install_flow() {
   write_env_file
   install_cli_wrapper
   start_stack
+  post_deploy_cleanup
   configure_nginx
   update_panel_address_in_db
   print_summary
@@ -791,6 +803,7 @@ update_flow() {
   load_env
   install_cli_wrapper
   start_stack
+  post_deploy_cleanup
   configure_nginx
   update_panel_address_in_db
   print_summary
@@ -856,6 +869,31 @@ logs_flow() {
   compose logs -f --tail=200
 }
 
+cleanup_flow() {
+  load_env
+  [[ -f "${APP_DIR}/${COMPOSE_FILE}" && -f "${ENV_FILE}" ]] || die "Stack is not installed."
+
+  log "Current Docker disk usage:"
+  docker system df || true
+
+  if ! confirm "Clean unused containers, networks, dangling images, build cache, and backend logs older than 14 days?"; then
+    log "Cancelled."
+    return 0
+  fi
+
+  docker container prune -f || true
+  docker network prune -f || true
+  docker image prune -f || true
+  docker builder prune -af --filter "until=24h" || true
+
+  if docker ps --format '{{.Names}}' | grep -Fxq "${APP_SLUG}-backend"; then
+    docker exec "${APP_SLUG}-backend" sh -c 'find /app/logs -type f -name "*.log" -mtime +14 -delete' || true
+  fi
+
+  log "Docker disk usage after cleanup:"
+  docker system df || true
+}
+
 renew_cert_flow() {
   detect_system
   install_packages
@@ -887,6 +925,7 @@ menu_loop() {
  4. 查看状态
  5. 查看日志
  6. 续期证书
+ 7. 清理日志 / 缓存
  0. 退出
 ===============================================
 EOF
@@ -898,6 +937,7 @@ EOF
       4) status_flow ;;
       5) logs_flow ;;
       6) renew_cert_flow ;;
+      7) cleanup_flow ;;
       0) exit 0 ;;
       *) warn "无效选择。" ;;
     esac
@@ -921,6 +961,7 @@ main() {
     uninstall) uninstall_flow ;;
     status) status_flow ;;
     logs) logs_flow ;;
+    cleanup) cleanup_flow ;;
     renew-cert) renew_cert_flow ;;
     menu) menu_loop ;;
     *) usage; exit 1 ;;

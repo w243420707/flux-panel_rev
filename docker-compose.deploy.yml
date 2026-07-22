@@ -1,3 +1,9 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${DOCKER_LOG_MAX_SIZE:-20m}
+    max-file: "${DOCKER_LOG_MAX_FILE:-3}"
+
 services:
   mysql:
     image: ${MYSQL_IMAGE:-mysql:5.7}
@@ -20,6 +26,7 @@ services:
       --innodb_buffer_pool_size=256M
     networks:
       - app-network
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       timeout: 10s
@@ -39,6 +46,7 @@ services:
       - "127.0.0.1:${PHPMYADMIN_PORT:-8066}:80"
     networks:
       - app-network
+    logging: *default-logging
 
   backend:
     build:
@@ -63,6 +71,7 @@ services:
         condition: service_healthy
     networks:
       - app-network
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:6365/flow/test || exit 1"]
       interval: 30s
@@ -83,6 +92,7 @@ services:
         condition: service_healthy
     networks:
       - app-network
+    logging: *default-logging
 
 volumes:
   mysql_data:
