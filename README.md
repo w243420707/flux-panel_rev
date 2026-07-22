@@ -49,7 +49,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 脚本会自动处理：
 
-- 识别 Linux 发行版、CPU 架构、包管理器和 systemd。
+- 识别 Linux 发行版、CPU 架构、包管理器、init system 和虚拟化环境。
 - 安装 Docker、Docker Compose、Nginx、Certbot、Git 等环境。
 - 拉取当前仓库源码并构建前端、后端镜像。
 - 前端依赖使用 `pnpm-lock.yaml` 锁定版本，降低后续构建漂移风险。
@@ -104,6 +104,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 简化节点端日志策略，节点日志循环保存 `50MB`，超过后旧日志自动删除。
 - 移除旧面板安装链路对第三方面板镜像的依赖，旧入口统一转发到 `deploy.sh`。
 - 节点安装脚本改为自动识别 Linux 架构，并从本仓库 `go-gost/releases/` 拉取 `gost-linux-*` 二进制。
+- 节点安装脚本补充 `armv8l`、`armhf`、`armel` 等常见 ARM 别名识别。
 - 新增并提交节点端 Linux `amd64`、`arm64`、`armv7`、`armv6` 二进制。
 - 移除旧的 macOS 节点二进制，避免 Linux VPS 误下载后无法运行。
 - 前端 Docker 构建切换到 `pnpm-lock.yaml` 锁定依赖版本。

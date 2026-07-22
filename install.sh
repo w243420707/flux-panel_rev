@@ -18,6 +18,12 @@ SECRET=""
 ASSUME_YES=0
 ARCH=""
 PKG_MANAGER=""
+OS_ID=""
+OS_VERSION=""
+OS_PRETTY=""
+KERNEL_RELEASE=""
+INIT_SYSTEM=""
+VIRT_TYPE=""
 
 log() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*"; }
@@ -47,6 +53,9 @@ Options:
 
 Binary source:
   ${RAW_BINARY_BASE_URL}/gost-linux-\${ARCH}
+
+Supported Linux architectures:
+  amd64, arm64, armv7, armv6
 EOF
 }
 
@@ -74,11 +83,14 @@ confirm() {
 
 detect_os() {
   [[ "$(uname -s)" == "Linux" ]] || die "This installer supports Linux only."
+  KERNEL_RELEASE="$(uname -r)"
 
   if [[ -f /etc/os-release ]]; then
     # shellcheck disable=SC1091
     . /etc/os-release
-    log "Detected OS: ${PRETTY_NAME:-$ID}"
+    OS_ID="${ID:-unknown}"
+    OS_VERSION="${VERSION_ID:-unknown}"
+    OS_PRETTY="${PRETTY_NAME:-$ID $VERSION_ID}"
   fi
 
   if command -v apt-get >/dev/null 2>&1; then
@@ -99,21 +111,41 @@ detect_os() {
 
   [[ -n "${PKG_MANAGER}" ]] || die "No supported package manager found."
 
+  if [[ -d /run/systemd/system ]]; then
+    INIT_SYSTEM="systemd"
+  elif command -v rc-service >/dev/null 2>&1; then
+    INIT_SYSTEM="openrc"
+  else
+    INIT_SYSTEM="unknown"
+  fi
+
   case "$(uname -m)" in
-    x86_64|amd64) ARCH="amd64" ;;
+    x86_64|amd64|x64) ARCH="amd64" ;;
     aarch64|arm64) ARCH="arm64" ;;
-    armv7l|armv7) ARCH="armv7" ;;
-    armv6l|armv6) ARCH="armv6" ;;
+    armv8l|armv7l|armv7|armv7hl|armhf) ARCH="armv7" ;;
+    armv6l|armv6|armel) ARCH="armv6" ;;
     *)
-      die "Unsupported architecture: $(uname -m)"
+      die "Unsupported architecture: $(uname -m). Supported: amd64, arm64, armv7, armv6."
       ;;
   esac
 
-  log "Detected architecture: ${ARCH}"
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    VIRT_TYPE="$(systemd-detect-virt 2>/dev/null || true)"
+    [[ -n "${VIRT_TYPE}" && "${VIRT_TYPE}" != "none" ]] || VIRT_TYPE="bare-metal"
+  else
+    VIRT_TYPE="unknown"
+  fi
+
+  log "Detected OS: ${OS_PRETTY:-unknown}"
+  log "Detected kernel: ${KERNEL_RELEASE}"
+  log "Detected init system: ${INIT_SYSTEM}"
+  log "Detected package manager: ${PKG_MANAGER}"
+  log "Detected environment: ${VIRT_TYPE}"
+  log "Detected architecture: ${ARCH} (from $(uname -m))"
 }
 
 install_packages() {
-  if command -v curl >/dev/null 2>&1 && command -v logrotate >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1; then
+  if command -v curl >/dev/null 2>&1 && command -v logrotate >/dev/null 2>&1 && [[ "${INIT_SYSTEM}" == "systemd" ]]; then
     return 0
   fi
 
@@ -140,7 +172,7 @@ install_packages() {
       ;;
   esac
 
-  command -v systemctl >/dev/null 2>&1 || die "systemd is required for this installer."
+  [[ "${INIT_SYSTEM}" == "systemd" ]] || die "systemd is required for this installer. Detected init system: ${INIT_SYSTEM}."
 }
 
 binary_name() {
