@@ -10,8 +10,7 @@ SERVICE_FILE="/etc/systemd/system/gost.service"
 LOGROTATE_FILE="/etc/logrotate.d/gost"
 REPO_OWNER="w243420707"
 REPO_NAME="flux-panel_rev"
-RELEASE_TAG="${GOST_RELEASE_TAG:-latest}"
-RELEASE_BASE_URL="${GOST_BINARY_BASE_URL:-https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/${RELEASE_TAG}/download}"
+RAW_BINARY_BASE_URL="${GOST_BINARY_BASE_URL:-https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/main/go-gost/releases}"
 
 ACTION=""
 SERVER_ADDR=""
@@ -47,7 +46,7 @@ Options:
   -h, --help        Show this help
 
 Binary source:
-  ${RELEASE_BASE_URL}/gost-linux-\${ARCH}
+  ${RAW_BINARY_BASE_URL}/gost-linux-\${ARCH}
 EOF
 }
 
@@ -153,7 +152,7 @@ binary_url() {
     printf '%s' "${GOST_BINARY_URL}"
     return 0
   fi
-  printf '%s/%s' "${RELEASE_BASE_URL}" "$(binary_name)"
+  printf '%s/%s' "${RAW_BINARY_BASE_URL}" "$(binary_name)"
 }
 
 prompt_config() {
@@ -199,7 +198,7 @@ download_binary() {
   log "Downloading node binary from: ${url}"
   curl -fsSL --retry 3 --retry-delay 2 "${url}" -o "${tmp_file}" || {
     rm -f "${tmp_file}"
-    die "Download failed. Make sure the repository release contains $(binary_name)."
+    die "Download failed. Make sure the repository contains $(binary_name) under go-gost/releases/."
   }
 
   install -m 755 "${tmp_file}" "${INSTALL_DIR}/${APP_NAME}"
@@ -325,7 +324,11 @@ status_flow() {
 
 logs_flow() {
   detect_os
-  journalctl -u "${APP_NAME}" -f --no-pager
+  if [[ -f "${LOG_FILE}" ]]; then
+    tail -n 200 -F "${LOG_FILE}"
+  else
+    journalctl -u "${APP_NAME}" -f --no-pager
+  fi
 }
 
 show_menu() {
