@@ -2,6 +2,9 @@
 # 下载地址
 DOWNLOAD_URL="https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/main/go-gost/gost"
 INSTALL_DIR="/etc/gost"
+LOG_DIR="/var/log/gost"
+LOG_FILE="$LOG_DIR/gost.log"
+LOGROTATE_FILE="/etc/logrotate.d/gost"
 COUNTRY=$(curl -s https://ipinfo.io/country)
 if [ "$COUNTRY" = "CN" ]; then
     # 拼接 URL
@@ -100,6 +103,98 @@ check_and_install_tcpkill() {
   return 0
 }
 
+check_and_install_logrotate() {
+  if command -v logrotate &> /dev/null; then
+    return 0
+  fi
+
+  if [[ $EUID -ne 0 ]]; then
+    SUDO_CMD="sudo"
+  else
+    SUDO_CMD=""
+  fi
+
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    DISTRO=$ID
+  elif [ -f /etc/redhat-release ]; then
+    DISTRO="rhel"
+  elif [ -f /etc/debian_version ]; then
+    DISTRO="debian"
+  else
+    return 0
+  fi
+
+  case $DISTRO in
+    ubuntu|debian)
+      $SUDO_CMD apt update &> /dev/null
+      $SUDO_CMD apt install -y logrotate &> /dev/null
+      ;;
+    centos|rhel|fedora)
+      if command -v dnf &> /dev/null; then
+        $SUDO_CMD dnf install -y logrotate &> /dev/null
+      elif command -v yum &> /dev/null; then
+        $SUDO_CMD yum install -y logrotate &> /dev/null
+      fi
+      ;;
+    alpine)
+      $SUDO_CMD apk add --no-cache logrotate &> /dev/null
+      ;;
+    arch|manjaro)
+      $SUDO_CMD pacman -S --noconfirm logrotate &> /dev/null
+      ;;
+    opensuse*|sles)
+      $SUDO_CMD zypper install -y logrotate &> /dev/null
+      ;;
+  esac
+
+  return 0
+}
+
+setup_gost_logging() {
+  check_and_install_logrotate
+  mkdir -p "$LOG_DIR"
+  touch "$LOG_FILE"
+  chmod 755 "$LOG_DIR"
+  chmod 640 "$LOG_FILE"
+
+  cat > "$LOGROTATE_FILE" <<EOF
+$LOG_FILE {
+    size 20M
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+}
+
+write_gost_service() {
+  setup_gost_logging
+
+  SERVICE_FILE="/etc/systemd/system/gost.service"
+  cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=Gost Proxy Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/gost
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:$LOG_FILE
+StandardError=append:$LOG_FILE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
 
 # 获取用户输入的配置参数
 get_config_params() {
@@ -189,20 +284,7 @@ EOF
   chmod 600 "$INSTALL_DIR"/*.json
 
   # 创建 systemd 服务
-  SERVICE_FILE="/etc/systemd/system/gost.service"
-  cat > "$SERVICE_FILE" <<EOF
-[Unit]
-Description=Gost Proxy Service
-After=network.target
-
-[Service]
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/gost
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
+  write_gost_service
 
   # 启动服务
   systemctl daemon-reload
@@ -258,6 +340,9 @@ update_gost() {
 
   # 重启服务
   echo "🔄 重启服务..."
+  write_gost_service
+  systemctl daemon-reload
+  systemctl enable gost
   systemctl start gost
   
   echo "✅ 更新完成，服务已重新启动。"
@@ -290,6 +375,16 @@ uninstall_gost() {
   if [[ -d "$INSTALL_DIR" ]]; then
     rm -rf "$INSTALL_DIR"
     echo "🧹 删除安装目录: $INSTALL_DIR"
+  fi
+
+  if [[ -f "$LOGROTATE_FILE" ]]; then
+    rm -f "$LOGROTATE_FILE"
+    echo "🧹 删除日志轮转配置: $LOGROTATE_FILE"
+  fi
+
+  if [[ -d "$LOG_DIR" ]]; then
+    rm -rf "$LOG_DIR"
+    echo "🧹 删除日志目录: $LOG_DIR"
   fi
 
   # 重载 systemd
