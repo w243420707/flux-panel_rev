@@ -52,6 +52,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     
     /** 隧道状态常量 */
     private static final int TUNNEL_STATUS_ACTIVE = 1;      // 启用状态
+    private static final String OPTIMIZED_TUNNEL_PROTOCOL = "mtls";
     
     /** 节点状态常量 */
     private static final int NODE_STATUS_ONLINE = 1;        // 节点在线状态
@@ -175,10 +176,13 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         if (nameValidationResult.getCode() != 0) {
             return nameValidationResult;
         }
+        String resolvedProtocol = existingTunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD
+                ? resolveTunnelProtocol(tunnelUpdateDto.getProtocol())
+                : null;
         int up = 0;
         if (!Objects.equals(existingTunnel.getTcpListenAddr(), tunnelUpdateDto.getTcpListenAddr()) ||
                 !Objects.equals(existingTunnel.getUdpListenAddr(), tunnelUpdateDto.getUdpListenAddr()) ||
-                !Objects.equals(existingTunnel.getProtocol(), tunnelUpdateDto.getProtocol()) ||
+                !Objects.equals(existingTunnel.getProtocol(), resolvedProtocol) ||
                 !Objects.equals(existingTunnel.getInterfaceName(), tunnelUpdateDto.getInterfaceName())) {
             up++;
         }
@@ -190,7 +194,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         existingTunnel.setTcpListenAddr(tunnelUpdateDto.getTcpListenAddr());
         existingTunnel.setUdpListenAddr(tunnelUpdateDto.getUdpListenAddr());
         existingTunnel.setTrafficRatio(tunnelUpdateDto.getTrafficRatio());
-        existingTunnel.setProtocol(tunnelUpdateDto.getProtocol());
+        existingTunnel.setProtocol(resolvedProtocol);
         existingTunnel.setInterfaceName(tunnelUpdateDto.getInterfaceName());
         this.updateById(existingTunnel);
         int err = 0;
@@ -396,9 +400,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         
         // 设置协议类型（仅隧道转发需要）
         if (tunnelDto.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
-            // 隧道转发时，设置协议类型，默认为tls
-            String protocol = StrUtil.isNotBlank(tunnelDto.getProtocol()) ? tunnelDto.getProtocol() : "tls";
-            tunnel.setProtocol(protocol);
+            tunnel.setProtocol(resolveTunnelProtocol(tunnelDto.getProtocol()));
         } else {
             // 端口转发时，协议类型为null
             tunnel.setProtocol(null);
@@ -464,10 +466,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         }
         
         // 验证协议类型
-        String protocol = tunnelDto.getProtocol();
-        if (StrUtil.isBlank(protocol)) {
-            return R.err("协议类型必选");
-        }
+        resolveTunnelProtocol(tunnelDto.getProtocol());
         
         // 验证出口节点是否存在
         Node outNode = nodeService.getById(tunnelDto.getOutNodeId());
@@ -504,10 +503,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
             }
         }
 
-        String protocol = tunnelDto.getProtocol();
-        if (StrUtil.isBlank(protocol)) {
-            return R.err("协议类型不能为空");
-        }
+        resolveTunnelProtocol(tunnelDto.getProtocol());
 
         NodeValidationResult outNodeValidation = validateNodes(outNodeIds, ERROR_OUT_NODE_NOT_FOUND, ERROR_OUT_NODE_OFFLINE);
         if (outNodeValidation.isHasError()) {
@@ -527,6 +523,35 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
                 .filter(Objects::nonNull)
                 .filter(StrUtil::isNotBlank)
                 .collect(Collectors.joining(","));
+    }
+
+    private String resolveTunnelProtocol(String protocol) {
+        if (StrUtil.isBlank(protocol) || "auto".equalsIgnoreCase(protocol.trim())) {
+            return OPTIMIZED_TUNNEL_PROTOCOL;
+        }
+
+        String normalized = protocol.trim().toLowerCase(Locale.ROOT);
+        switch (normalized) {
+            case "http2":
+            case "h2":
+            case "h2c":
+            case "http3":
+            case "wt":
+            case "ws":
+            case "mws":
+            case "tcp":
+            case "tls":
+            case "wss":
+            case "mtcp":
+            case "mtls":
+            case "mwss":
+            case "quic":
+            case "dtls":
+            case "udp":
+                return normalized;
+            default:
+                return OPTIMIZED_TUNNEL_PROTOCOL;
+        }
     }
 
     private void setDefaultTunnelProperties(Tunnel tunnel) {

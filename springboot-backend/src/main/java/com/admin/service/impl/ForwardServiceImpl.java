@@ -92,7 +92,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
 
         // 5. 创建并保存Forward对象
-        Forward forward = createForwardEntity(forwardDto, currentUser, portAllocation);
+        Forward forward = createForwardEntity(forwardDto, currentUser, portAllocation, tunnel);
         if (!this.save(forward)) {
             return R.err("端口转发创建失败");
         }
@@ -976,7 +976,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     /**
      * 创建Forward实体对象
      */
-    private Forward createForwardEntity(ForwardDto forwardDto, UserInfo currentUser, PortAllocation portAllocation) {
+    private Forward createForwardEntity(ForwardDto forwardDto, UserInfo currentUser, PortAllocation portAllocation, Tunnel tunnel) {
         Forward forward = new Forward();
         // 先复制DTO的属性，再设置其他属性，避免被覆盖
         BeanUtils.copyProperties(forwardDto, forward);
@@ -987,6 +987,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         forward.setUserName(currentUser.getUserName());
         forward.setCreatedTime(System.currentTimeMillis());
         forward.setUpdatedTime(System.currentTimeMillis());
+        forward.setStrategy(resolveForwardStrategy(forward.getStrategy(), forward.getRemoteAddr(), tunnel));
         return forward;
     }
 
@@ -1022,8 +1023,51 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             forward.setOutPort(existForward.getOutPort());
         }
 
+        forward.setStrategy(resolveForwardStrategy(forward.getStrategy(), forward.getRemoteAddr(), tunnel));
         forward.setUpdatedTime(System.currentTimeMillis());
         return forward;
+    }
+
+    private String resolveForwardStrategy(String strategy, String remoteAddr, Tunnel tunnel) {
+        boolean hasMultipleTargets = countRemoteAddresses(remoteAddr) > 1;
+        boolean hasMultipleOutNodes = tunnel != null
+                && tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD
+                && TunnelNodeUtil.getOutNodeIds(tunnel).size() > 1;
+
+        if (!hasMultipleTargets && !hasMultipleOutNodes) {
+            return "fifo";
+        }
+
+        if (strategy == null || strategy.trim().isEmpty()) {
+            return "round";
+        }
+
+        String normalized = strategy.trim().toLowerCase(Locale.ROOT);
+        if (Objects.equals(normalized, "fifo") || Objects.equals(normalized, "ha")) {
+            return "round";
+        }
+        if (isSupportedStrategy(normalized)) {
+            return normalized;
+        }
+        return "round";
+    }
+
+    private int countRemoteAddresses(String remoteAddr) {
+        if (remoteAddr == null || remoteAddr.trim().isEmpty()) {
+            return 0;
+        }
+        return (int) Arrays.stream(remoteAddr.split(","))
+                .map(String::trim)
+                .filter(addr -> !addr.isEmpty())
+                .count();
+    }
+
+    private boolean isSupportedStrategy(String strategy) {
+        return Objects.equals(strategy, "round")
+                || Objects.equals(strategy, "rr")
+                || Objects.equals(strategy, "random")
+                || Objects.equals(strategy, "rand")
+                || Objects.equals(strategy, "hash");
     }
 
     /**

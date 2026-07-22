@@ -80,6 +80,8 @@ interface DiagnosisResult {
   }>;
 }
 
+const OPTIMIZED_TUNNEL_PROTOCOL = 'mtls';
+
 export default function TunnelPage() {
   const [loading, setLoading] = useState(true);
   const [tunnels, setTunnels] = useState<Tunnel[]>([]);
@@ -105,7 +107,7 @@ export default function TunnelPage() {
     inNodeIds: [],
     outNodeId: null,
     outNodeIds: [],
-    protocol: 'tls',
+    protocol: OPTIMIZED_TUNNEL_PROTOCOL,
     tcpListenAddr: '[::]',
     udpListenAddr: '[::]',
     interfaceName: '',
@@ -222,9 +224,6 @@ export default function TunnelPage() {
         newErrors.outNodeId = '隧道转发模式下，入口和出口不能是同一个节点';
       }
       
-      if (!form.protocol) {
-        newErrors.protocol = '请选择协议类型';
-      }
     }
     
     setErrors(newErrors);
@@ -241,7 +240,7 @@ export default function TunnelPage() {
       inNodeIds: [],
       outNodeId: null,
       outNodeIds: [],
-      protocol: 'tls',
+      protocol: OPTIMIZED_TUNNEL_PROTOCOL,
       tcpListenAddr: '[::]',
       udpListenAddr: '[::]',
       interfaceName: '',
@@ -264,7 +263,7 @@ export default function TunnelPage() {
       inNodeIds: normalizeNodeIds(tunnel.inNodeIds, tunnel.inNodeId),
       outNodeId: tunnel.outNodeId || null,
       outNodeIds: normalizeNodeIds(tunnel.outNodeIds, tunnel.outNodeId || null),
-      protocol: tunnel.protocol || 'tls',
+      protocol: tunnel.protocol || OPTIMIZED_TUNNEL_PROTOCOL,
       tcpListenAddr: tunnel.tcpListenAddr || '[::]',
       udpListenAddr: tunnel.udpListenAddr || '[::]',
       interfaceName: tunnel.interfaceName || '',
@@ -311,7 +310,7 @@ export default function TunnelPage() {
       type,
       outNodeId: type === 1 ? null : prev.outNodeId,
       outNodeIds: type === 1 ? [] : prev.outNodeIds,
-      protocol: type === 1 ? 'tls' : prev.protocol
+      protocol: type === 1 ? OPTIMIZED_TUNNEL_PROTOCOL : (prev.protocol || OPTIMIZED_TUNNEL_PROTOCOL)
     }));
   };
 
@@ -323,6 +322,7 @@ export default function TunnelPage() {
     try {
       const data = {
         ...form,
+        protocol: form.type === 2 ? (form.protocol || OPTIMIZED_TUNNEL_PROTOCOL) : OPTIMIZED_TUNNEL_PROTOCOL,
         inNodeId: form.inNodeIds[0] || null,
         outNodeId: form.type === 1 ? (form.inNodeIds[0] || null) : (form.outNodeIds[0] || null),
         outNodeIds: form.type === 1 ? form.inNodeIds : form.outNodeIds,
@@ -837,28 +837,6 @@ export default function TunnelPage() {
                       <>
                         <Divider />
                         <h3 className="text-lg font-semibold">出口配置</h3>
-
-                        <Select
-                          label="协议类型"
-                          placeholder="请选择协议类型"
-                          selectedKeys={[form.protocol]}
-                          onSelectionChange={(keys) => {
-                            const selectedKey = Array.from(keys)[0] as string;
-                            if (selectedKey) {
-                              setForm(prev => ({ ...prev, protocol: selectedKey }));
-                            }
-                          }}
-                          isInvalid={!!errors.protocol}
-                          errorMessage={errors.protocol}
-                          variant="bordered"
-                        >
-                          <SelectItem key="tls">TLS</SelectItem>
-                          <SelectItem key="wss">WSS</SelectItem>
-                          <SelectItem key="tcp">TCP</SelectItem>
-                          <SelectItem key="mtls">MTLS</SelectItem>
-                          <SelectItem key="mwss">MWSS</SelectItem>
-                          <SelectItem key="mtcp">MTCP</SelectItem>
-                        </Select>
 
                         <Select
                           label="出口节点"

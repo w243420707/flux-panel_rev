@@ -38,7 +38,7 @@ public class TunnelDto {
 
     private String interfaceName;
     
-    // 协议类型，默认为tls
+    // 协议类型，默认使用优化后的mtls
     private String protocol;
     
     // TCP监听地址，默认为0.0.0.0

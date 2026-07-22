@@ -10,9 +10,18 @@ import org.aspectj.apache.bcel.generic.RET;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 public class GostUtil {
+
+    private static final int DEFAULT_MUX_VERSION = 2;
+    private static final int DEFAULT_MUX_MAX_FRAME_SIZE = 32768;
+    private static final int DEFAULT_MUX_MAX_RECEIVE_BUFFER = 33554432;
+    private static final int DEFAULT_MUX_MAX_STREAM_BUFFER = 4194304;
+    private static final String DEFAULT_MUX_KEEPALIVE_INTERVAL = "15s";
+    private static final String DEFAULT_MUX_KEEPALIVE_TIMEOUT = "90s";
+    private static final String DEFAULT_QUIC_TTL = "10s";
 
 
     public static GostDto AddLimiters(Long node_id, Long name, String speed) {
@@ -80,6 +89,10 @@ public class GostUtil {
         data.put("handler", handler);
         JSONObject listener = new JSONObject();
         listener.put("type", protocol);
+        JSONObject listenerMetadata = createTransportMetadata(protocol);
+        if (!listenerMetadata.isEmpty()) {
+            listener.put("metadata", listenerMetadata);
+        }
         data.put("listener", listener);
         JSONObject forwarder = new JSONObject();
         JSONArray nodes = new JSONArray();
@@ -126,6 +139,10 @@ public class GostUtil {
         data.put("handler", handler);
         JSONObject listener = new JSONObject();
         listener.put("type", protocol);
+        JSONObject listenerMetadata = createTransportMetadata(protocol);
+        if (!listenerMetadata.isEmpty()) {
+            listener.put("metadata", listenerMetadata);
+        }
         data.put("listener", listener);
         JSONObject forwarder = new JSONObject();
         JSONArray nodes = new JSONArray();
@@ -221,10 +238,8 @@ public class GostUtil {
     private static JSONObject createChainsData(String name, List<String> remoteAddrs, String protocol, String interfaceName, String strategy) {
         JSONObject dialer = new JSONObject();
         dialer.put("type", protocol);
-        if (Objects.equals(protocol, "quic")){
-            JSONObject metadata = new JSONObject();
-            metadata.put("keepAlive", true);
-            metadata.put("ttl", "10s");
+        JSONObject metadata = createTransportMetadata(protocol);
+        if (!metadata.isEmpty()) {
             dialer.put("metadata", metadata);
         }
 
@@ -334,9 +349,8 @@ public class GostUtil {
     private static JSONObject createListener(String protocol) {
         JSONObject listener = new JSONObject();
         listener.put("type", protocol);
-        if (Objects.equals(protocol, "udp")){
-            JSONObject metadata = new JSONObject();
-            metadata.put("keepAlive", true);
+        JSONObject metadata = createTransportMetadata(protocol);
+        if (!metadata.isEmpty()) {
             listener.put("metadata", metadata);
         }
         return listener;
@@ -371,6 +385,38 @@ public class GostUtil {
         forwarder.put("nodes", nodes);
         forwarder.put("selector", createSelector(strategy));
         return forwarder;
+    }
+
+    private static JSONObject createTransportMetadata(String protocol) {
+        JSONObject metadata = new JSONObject();
+        if (protocol == null) {
+            return metadata;
+        }
+
+        String normalized = protocol.trim().toLowerCase(Locale.ROOT);
+        switch (normalized) {
+            case "mtcp":
+            case "mtls":
+            case "mws":
+            case "mwss":
+                metadata.put("mux.version", DEFAULT_MUX_VERSION);
+                metadata.put("mux.keepaliveInterval", DEFAULT_MUX_KEEPALIVE_INTERVAL);
+                metadata.put("mux.keepaliveTimeout", DEFAULT_MUX_KEEPALIVE_TIMEOUT);
+                metadata.put("mux.maxFrameSize", DEFAULT_MUX_MAX_FRAME_SIZE);
+                metadata.put("mux.maxReceiveBuffer", DEFAULT_MUX_MAX_RECEIVE_BUFFER);
+                metadata.put("mux.maxStreamBuffer", DEFAULT_MUX_MAX_STREAM_BUFFER);
+                break;
+            case "quic":
+                metadata.put("keepAlive", true);
+                metadata.put("ttl", DEFAULT_QUIC_TTL);
+                break;
+            case "udp":
+                metadata.put("keepAlive", true);
+                break;
+            default:
+                break;
+        }
+        return metadata;
     }
 
     private static boolean isPortForwarding(Integer fow_type) {
