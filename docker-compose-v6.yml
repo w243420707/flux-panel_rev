@@ -87,6 +87,7 @@ services:
     build:
       context: ./vite-frontend
       args:
+        FRONTEND_NODE_VERSION: ${FRONTEND_NODE_VERSION:-22.13.1}
         PNPM_VERSION: ${PNPM_VERSION:-11.7.0}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         NPM_FALLBACK_REGISTRY: ${NPM_FALLBACK_REGISTRY:-https://registry.npmmirror.com}
