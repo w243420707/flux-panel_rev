@@ -235,7 +235,41 @@ download_binary() {
 
   install -m 755 "${tmp_file}" "${INSTALL_DIR}/${APP_NAME}"
   rm -f "${tmp_file}"
-  "${INSTALL_DIR}/${APP_NAME}" -V >/dev/null 2>&1 || die "Downloaded binary failed verification."
+  verify_binary "${INSTALL_DIR}/${APP_NAME}"
+}
+
+verify_binary() {
+  local bin="$1" size header machine expected_machine
+
+  [[ -s "${bin}" ]] || die "Downloaded binary is empty."
+  [[ -x "${bin}" ]] || die "Downloaded binary is not executable."
+
+  size="$(wc -c < "${bin}" | tr -d '[:space:]')"
+  if [[ "${size}" -lt 1048576 ]]; then
+    die "Downloaded file is too small to be a valid node binary."
+  fi
+
+  if ! command -v od >/dev/null 2>&1; then
+    warn "Cannot find od; skipped ELF architecture verification."
+    return 0
+  fi
+
+  header="$(od -An -tx1 -N20 "${bin}" | tr -d '[:space:]')"
+  [[ "${header:0:8}" == "7f454c46" ]] || die "Downloaded file is not a Linux ELF binary."
+
+  case "${ARCH}" in
+    amd64) expected_machine="3e00" ;;
+    arm64) expected_machine="b700" ;;
+    armv6|armv7) expected_machine="2800" ;;
+    *) expected_machine="" ;;
+  esac
+
+  machine="${header:36:4}"
+  if [[ -n "${expected_machine}" && "${machine}" != "${expected_machine}" ]]; then
+    die "Downloaded binary architecture mismatch. Expected ${ARCH}, got ELF machine 0x${machine}."
+  fi
+
+  log "Binary verification passed."
 }
 
 setup_logging() {
@@ -281,6 +315,21 @@ refresh_service() {
   systemctl enable --now "${APP_NAME}"
 }
 
+ensure_service_running() {
+  sleep 2
+  if systemctl is-active --quiet "${APP_NAME}"; then
+    log "Service is running."
+    return 0
+  fi
+
+  err "Service failed to start. Showing diagnostics:"
+  systemctl --no-pager --full status "${APP_NAME}" || true
+  if [[ -f "${LOG_FILE}" ]]; then
+    tail -n 80 "${LOG_FILE}" || true
+  fi
+  exit 1
+}
+
 install_flow() {
   detect_os
   install_packages
@@ -292,13 +341,13 @@ install_flow() {
   fi
 
   setup_logging
-  download_binary
   write_config
+  download_binary
   write_service
   refresh_service
+  ensure_service_running
 
   log "Install complete."
-  systemctl is-active --quiet "${APP_NAME}" && log "Service is running."
 }
 
 update_flow() {
@@ -321,6 +370,7 @@ update_flow() {
   download_binary
   write_service
   refresh_service
+  ensure_service_running
 
   log "Update complete."
 }
