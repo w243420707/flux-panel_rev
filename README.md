@@ -65,7 +65,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/main/deploy.sh -o deploy.sh && chmod +x deploy.sh && sudo ./deploy.sh install
 ```
 
-更新会拉取最新代码、重新构建镜像、重启服务，并保留数据库数据。
+更新会通过 `git fetch --tags --prune --force` 拉取分支和标签，默认部署 `main`，也支持用 `DEPLOY_REF`/`--ref` 指定分支、标签或 commit。更新时会重新构建镜像、拉取基础镜像并强制重建容器，自动应用最新代码，同时保留数据库数据。
 
 ### 面板端卸载
 
@@ -105,6 +105,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 移除旧面板安装链路对第三方面板镜像的依赖，旧入口统一转发到 `deploy.sh`。
 - 节点安装脚本改为自动识别 Linux 架构，并从本仓库 `go-gost/releases/` 拉取 `gost-linux-*` 二进制。
 - 节点安装脚本补充 `armv8l`、`armhf`、`armel` 等常见 ARM 别名识别。
+- 面板更新脚本支持识别 Git branch、tag、commit，并在更新时强制重建容器应用最新代码。
 - 新增并提交节点端 Linux `amd64`、`arm64`、`armv7`、`armv6` 二进制。
 - 移除旧的 macOS 节点二进制，避免 Linux VPS 误下载后无法运行。
 - 前端 Docker 构建切换到 `pnpm-lock.yaml` 锁定依赖版本。

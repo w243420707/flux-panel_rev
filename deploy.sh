@@ -4,11 +4,11 @@ set -Eeuo pipefail
 APP_NAME="flux-panel_rev"
 APP_SLUG="flux-panel-rev"
 REPO_URL="${REPO_URL:-https://github.com/w243420707/flux-panel_rev.git}"
-BRANCH="${BRANCH:-main}"
+DEPLOY_REF="${DEPLOY_REF:-${BRANCH:-main}}"
 APP_DIR="${APP_DIR:-/opt/${APP_NAME}}"
 COMPOSE_FILE="docker-compose.deploy.yml"
 ENV_FILE="${APP_DIR}/.env"
-RAW_DEPLOY_URL="https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/main/deploy.sh"
+RAW_DEPLOY_URL="${RAW_DEPLOY_URL:-https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/main/deploy.sh}"
 
 ACTION=""
 DOMAIN=""
@@ -16,6 +16,7 @@ EMAIL=""
 FRONTEND_PORT=""
 BACKEND_PORT=""
 PHPMYADMIN_PORT=""
+DEPLOY_REF_ARG=""
 ASSUME_YES=0
 SKIP_SSL=0
 WITH_PHPMYADMIN=0
@@ -58,6 +59,7 @@ Options:
   --frontend-port PORT   Local frontend port, default 6366
   --backend-port PORT    Local backend port, default 6365
   --phpmyadmin-port PORT Local phpMyAdmin port, default 8066
+  --ref REF              Git branch, tag, or commit to deploy, default main
   --with-phpmyadmin      Enable phpMyAdmin container profile
   --skip-ssl             Configure Nginx HTTP only, no certificate request
   --purge                With uninstall, remove database volumes and app dir
@@ -95,6 +97,11 @@ parse_args() {
         PHPMYADMIN_PORT="${2:-}"
         shift
         ;;
+      --ref|--branch)
+        DEPLOY_REF="${2:-}"
+        DEPLOY_REF_ARG="${DEPLOY_REF}"
+        shift
+        ;;
       --with-phpmyadmin)
         WITH_PHPMYADMIN=1
         ;;
@@ -117,6 +124,7 @@ parse_args() {
     esac
     shift
   done
+  [[ -n "${DEPLOY_REF}" ]] || die "--ref requires a non-empty value."
   ACTION="${ACTION:-menu}"
 }
 
@@ -344,6 +352,7 @@ set_env_value() {
 write_env_file() {
   mkdir -p "${APP_DIR}"
   load_env
+  [[ -n "${DEPLOY_REF_ARG}" ]] && DEPLOY_REF="${DEPLOY_REF_ARG}"
 
   DB_NAME="${DB_NAME:-gost}"
   DB_USER="${DB_USER:-$(random_string)}"
@@ -381,6 +390,7 @@ write_env_file() {
 APP_NAME=${APP_NAME}
 APP_SLUG=${APP_SLUG}
 COMPOSE_PROJECT_NAME=${APP_SLUG}
+DEPLOY_REF=${DEPLOY_REF}
 MYSQL_IMAGE=${MYSQL_IMAGE}
 DB_NAME=${DB_NAME}
 DB_USER=${DB_USER}
@@ -437,18 +447,40 @@ collect_install_config() {
 sync_repo() {
   if [[ -d "${APP_DIR}/.git" ]]; then
     log "Updating repository in ${APP_DIR}..."
-    git -C "${APP_DIR}" fetch origin "${BRANCH}"
-    git -C "${APP_DIR}" reset --hard "origin/${BRANCH}"
   else
     if [[ -d "${APP_DIR}" && -n "$(find "${APP_DIR}" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
       die "${APP_DIR} exists and is not a Git checkout. Move it away first."
     fi
     log "Cloning ${REPO_URL} to ${APP_DIR}..."
     mkdir -p "$(dirname "${APP_DIR}")"
-    git clone --branch "${BRANCH}" "${REPO_URL}" "${APP_DIR}"
+    git clone "${REPO_URL}" "${APP_DIR}"
   fi
 
+  git -C "${APP_DIR}" fetch origin --prune --tags --force
+  checkout_deploy_ref
   [[ -f "${APP_DIR}/${COMPOSE_FILE}" ]] || die "Missing ${COMPOSE_FILE} in ${APP_DIR}."
+}
+
+checkout_deploy_ref() {
+  [[ -n "${DEPLOY_REF}" ]] || DEPLOY_REF="main"
+
+  if git -C "${APP_DIR}" show-ref --verify --quiet "refs/remotes/origin/${DEPLOY_REF}"; then
+    log "Deploying branch: ${DEPLOY_REF}"
+    git -C "${APP_DIR}" checkout -B "${DEPLOY_REF}" "origin/${DEPLOY_REF}"
+    git -C "${APP_DIR}" reset --hard "origin/${DEPLOY_REF}"
+  elif git -C "${APP_DIR}" show-ref --verify --quiet "refs/tags/${DEPLOY_REF}"; then
+    log "Deploying tag: ${DEPLOY_REF}"
+    git -C "${APP_DIR}" checkout --detach -f "refs/tags/${DEPLOY_REF}"
+  elif git -C "${APP_DIR}" rev-parse --verify --quiet "${DEPLOY_REF}^{commit}" >/dev/null; then
+    log "Deploying commit: ${DEPLOY_REF}"
+    git -C "${APP_DIR}" checkout --detach -f "${DEPLOY_REF}"
+  else
+    die "Git ref not found: ${DEPLOY_REF}. Use a branch, tag, or commit from ${REPO_URL}."
+  fi
+
+  local commit
+  commit="$(git -C "${APP_DIR}" rev-parse --short HEAD)"
+  log "Checked out commit: ${commit}"
 }
 
 compose() {
@@ -483,8 +515,14 @@ wait_for_health() {
 }
 
 start_stack() {
+  local recreate="${1:-0}"
   log "Building and starting containers in background..."
-  compose up -d --build
+  if [[ "${recreate}" -eq 1 ]]; then
+    compose build --pull
+    compose up -d --force-recreate
+  else
+    compose up -d --build
+  fi
   wait_for_health "${APP_SLUG}-mysql" 180 || true
   wait_for_health "${APP_SLUG}-backend" 240 || true
 }
@@ -799,10 +837,12 @@ update_flow() {
   detect_system
   install_packages
   install_docker
-  sync_repo
   load_env
+  [[ -n "${DEPLOY_REF_ARG}" ]] && DEPLOY_REF="${DEPLOY_REF_ARG}"
+  sync_repo
+  set_env_value DEPLOY_REF "${DEPLOY_REF}"
   install_cli_wrapper
-  start_stack
+  start_stack 1
   post_deploy_cleanup
   configure_nginx
   update_panel_address_in_db
@@ -899,10 +939,16 @@ renew_cert_flow() {
 
 print_summary() {
   load_env
+  local current_commit="unknown"
+  if [[ -d "${APP_DIR}/.git" ]]; then
+    current_commit="$(git -C "${APP_DIR}" rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
+  fi
   echo
   log "Deployment is ready."
   echo "Panel URL: ${PANEL_URL:-http://$(detect_public_ip_or_hostname)}"
   echo "Deploy dir: ${APP_DIR}"
+  echo "Deploy ref: ${DEPLOY_REF:-main}"
+  echo "Deploy commit: ${current_commit}"
   echo "Command helper: ${APP_SLUG} status | logs | update | uninstall"
   echo "Default admin: admin_user / admin_user"
   echo "Please change the default password after first login."
