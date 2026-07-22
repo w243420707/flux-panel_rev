@@ -13,6 +13,7 @@ import com.admin.service.UserTunnelService;
 import com.admin.service.ForwardService;
 import com.admin.service.NodeService;
 import com.admin.common.utils.GostUtil;
+import com.admin.common.utils.TunnelNodeUtil;
 import com.admin.entity.Forward;
 import com.admin.entity.Tunnel;
 import com.admin.entity.Node;
@@ -301,6 +302,18 @@ public class UserTunnelServiceImpl extends ServiceImpl<UserTunnelMapper, UserTun
             Node outNode = nodeService.getById(tunnel.getOutNodeId());
             
             String serviceName = buildServiceName(forward.getId(), Long.valueOf(userId), userTunnelId);
+
+            for (Long inNodeId : TunnelNodeUtil.getInNodeIds(tunnel)) {
+                GostUtil.DeleteService(inNodeId, serviceName);
+                if (tunnel.getType() == 2) {
+                    GostUtil.DeleteChains(inNodeId, serviceName);
+                }
+            }
+            if (tunnel.getType() == 2) {
+                for (Long outNodeId : TunnelNodeUtil.getOutNodeIds(tunnel)) {
+                    GostUtil.DeleteRemoteService(outNodeId, serviceName);
+                }
+            }
             
             // 1. 先删除主服务
             if (inNode != null) {
@@ -441,7 +454,9 @@ public class UserTunnelServiceImpl extends ServiceImpl<UserTunnelMapper, UserTun
             }
 
             // 6. 更新入口节点的主服务限速配置（使用批量UpdateService接口）
-            GostUtil.UpdateService(inNode.getId(), serviceName, forward.getInPort(), speedId, forward.getRemoteAddr(), tunnel.getType(), tunnel, forward.getStrategy(), interfaceName);
+            for (Long inNodeId : TunnelNodeUtil.getInNodeIds(tunnel)) {
+                GostUtil.UpdateService(inNodeId, serviceName, forward.getInPort(), speedId, forward.getRemoteAddr(), tunnel.getType(), tunnel, forward.getStrategy(), interfaceName);
+            }
         }
     }
 }

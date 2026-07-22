@@ -30,6 +30,11 @@ public class Tunnel extends BaseEntity {
     private Long inNodeId;
 
     /**
+     * JSON array of entry node IDs. inNodeId remains the first ID for compatibility.
+     */
+    private String inNodeIds;
+
+    /**
      * 入口IP (兼容字段)
      */
     private String inIp;
@@ -38,6 +43,11 @@ public class Tunnel extends BaseEntity {
      * 出口节点ID
      */
     private Long outNodeId;
+
+    /**
+     * JSON array of exit node IDs. outNodeId remains the first ID for compatibility.
+     */
+    private String outNodeIds;
 
     /**
      * 出口IP (兼容字段)

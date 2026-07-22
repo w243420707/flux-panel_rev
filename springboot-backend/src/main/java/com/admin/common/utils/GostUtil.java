@@ -8,6 +8,8 @@ import com.alibaba.fastjson.JSONObject;
 import org.apache.commons.lang3.StringUtils;
 import org.aspectj.apache.bcel.generic.RET;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 public class GostUtil {
@@ -196,53 +198,29 @@ public class GostUtil {
     }
 
     public static GostDto AddChains(Long node_id, String name, String remoteAddr, String protocol, String interfaceName) {
-        JSONObject dialer = new JSONObject();
-        dialer.put("type", protocol);
-        if (Objects.equals(protocol, "quic")){
-            JSONObject metadata = new JSONObject();
-            metadata.put("keepAlive", true);
-            metadata.put("ttl", "10s");
-            dialer.put("metadata", metadata);
-        }
+        return AddChains(node_id, name, Collections.singletonList(remoteAddr), protocol, interfaceName, null);
+    }
 
-
-
-
-        JSONObject connector = new JSONObject();
-        connector.put("type", "relay");
-
-        JSONObject node = new JSONObject();
-        node.put("name", "node-" + name);
-        node.put("addr", remoteAddr);
-        node.put("connector", connector);
-        node.put("dialer", dialer);
-
-        if (StringUtils.isNotBlank(interfaceName)) {
-            node.put("interface", interfaceName);
-        }
-
-
-        JSONArray nodes = new JSONArray();
-        nodes.add(node);
-
-        JSONObject hop = new JSONObject();
-        hop.put("name", "hop-" + name);
-        hop.put("nodes", nodes);
-
-        JSONArray hops = new JSONArray();
-        hops.add(hop);
-
-        JSONObject data = new JSONObject();
-        data.put("name", name + "_chains");
-        data.put("hops", hops);
-
+    public static GostDto AddChains(Long node_id, String name, List<String> remoteAddrs, String protocol, String interfaceName, String strategy) {
+        JSONObject data = createChainsData(name, remoteAddrs, protocol, interfaceName, strategy);
         return WebSocketServer.send_msg(node_id, data, "AddChains");
     }
 
     public static GostDto UpdateChains(Long node_id, String name, String remoteAddr, String protocol, String interfaceName) {
+        return UpdateChains(node_id, name, Collections.singletonList(remoteAddr), protocol, interfaceName, null);
+    }
+
+    public static GostDto UpdateChains(Long node_id, String name, List<String> remoteAddrs, String protocol, String interfaceName, String strategy) {
+        JSONObject data = createChainsData(name, remoteAddrs, protocol, interfaceName, strategy);
+        JSONObject req = new JSONObject();
+        req.put("chain", name + "_chains");
+        req.put("data", data);
+       return WebSocketServer.send_msg(node_id, req, "UpdateChains");
+    }
+
+    private static JSONObject createChainsData(String name, List<String> remoteAddrs, String protocol, String interfaceName, String strategy) {
         JSONObject dialer = new JSONObject();
         dialer.put("type", protocol);
-
         if (Objects.equals(protocol, "quic")){
             JSONObject metadata = new JSONObject();
             metadata.put("keepAlive", true);
@@ -251,25 +229,34 @@ public class GostUtil {
         }
 
 
+
         JSONObject connector = new JSONObject();
         connector.put("type", "relay");
 
-        JSONObject node = new JSONObject();
-        node.put("name", "node-" + name);
-        node.put("addr", remoteAddr);
-        node.put("connector", connector);
-        node.put("dialer", dialer);
-
-        if (StringUtils.isNotBlank(interfaceName)) {
-            node.put("interface", interfaceName);
-        }
-
         JSONArray nodes = new JSONArray();
-        nodes.add(node);
+        int index = 1;
+        for (String remoteAddr : remoteAddrs) {
+            if (StringUtils.isBlank(remoteAddr)) {
+                continue;
+            }
+            JSONObject node = new JSONObject();
+            node.put("name", "node-" + name + "-" + index);
+            node.put("addr", remoteAddr);
+            node.put("connector", connector);
+            node.put("dialer", dialer);
+
+            if (StringUtils.isNotBlank(interfaceName)) {
+                node.put("interface", interfaceName);
+            }
+
+            nodes.add(node);
+            index++;
+        }
 
         JSONObject hop = new JSONObject();
         hop.put("name", "hop-" + name);
         hop.put("nodes", nodes);
+        hop.put("selector", createSelector(strategy));
 
         JSONArray hops = new JSONArray();
         hops.add(hop);
@@ -277,10 +264,7 @@ public class GostUtil {
         JSONObject data = new JSONObject();
         data.put("name", name + "_chains");
         data.put("hops", hops);
-        JSONObject req = new JSONObject();
-        req.put("chain", name + "_chains");
-        req.put("data", data);
-       return WebSocketServer.send_msg(node_id, req, "UpdateChains");
+        return data;
     }
 
     public static GostDto DeleteChains(Long node_id, String name) {
@@ -358,6 +342,18 @@ public class GostUtil {
         return listener;
     }
 
+    private static JSONObject createSelector(String strategy) {
+        if (strategy == null || strategy.equals("")){
+            strategy = "fifo";
+        }
+
+        JSONObject selector = new JSONObject();
+        selector.put("strategy", strategy);
+        selector.put("maxFails", 1);
+        selector.put("failTimeout", "600s");
+        return selector;
+    }
+
     private static JSONObject createForwarder(String remoteAddr, String strategy) {
         JSONObject forwarder = new JSONObject();
         JSONArray nodes = new JSONArray();
@@ -372,17 +368,8 @@ public class GostUtil {
             num ++;
         }
 
-        if (strategy == null || strategy.equals("")){
-            strategy = "fifo";
-        }
-
         forwarder.put("nodes", nodes);
-
-        JSONObject selector = new JSONObject();
-        selector.put("strategy", strategy);
-        selector.put("maxFails", 1);
-        selector.put("failTimeout", "600s");
-        forwarder.put("selector", selector);
+        forwarder.put("selector", createSelector(strategy));
         return forwarder;
     }
 

@@ -5,6 +5,7 @@ import com.admin.common.dto.SpeedLimitDto;
 import com.admin.common.dto.SpeedLimitUpdateDto;
 import com.admin.common.lang.R;
 import com.admin.common.utils.GostUtil;
+import com.admin.common.utils.TunnelNodeUtil;
 import com.admin.entity.Node;
 import com.admin.entity.SpeedLimit;
 import com.admin.entity.Tunnel;
@@ -287,6 +288,41 @@ public class SpeedLimitServiceImpl extends ServiceImpl<SpeedLimitMapper, SpeedLi
      */
     private R addGostLimiter(SpeedLimit speedLimit, Tunnel tunnel) {
         String speedInMBps = convertBitsToMBps(speedLimit.getSpeed());
+        for (Long inNodeId : TunnelNodeUtil.getInNodeIds(tunnel)) {
+            GostDto gostResult = GostUtil.AddLimiters(inNodeId, speedLimit.getId(), speedInMBps);
+            if (!isGostOperationSuccess(gostResult)) {
+                return R.err(gostResult.getMsg());
+            }
+        }
+        return R.ok();
+    }
+
+    private R updateGostLimiter(SpeedLimit speedLimit, Tunnel tunnel) {
+        String speedInMBps = convertBitsToMBps(speedLimit.getSpeed());
+        for (Long inNodeId : TunnelNodeUtil.getInNodeIds(tunnel)) {
+            GostDto gostResult = GostUtil.UpdateLimiters(inNodeId, speedLimit.getId(), speedInMBps);
+            if (gostResult.getMsg().contains(GOST_NOT_FOUND_MSG)) {
+                gostResult = GostUtil.AddLimiters(inNodeId, speedLimit.getId(), speedInMBps);
+            }
+            if (!isGostOperationSuccess(gostResult)) {
+                return R.err(gostResult.getMsg());
+            }
+        }
+        return R.ok();
+    }
+
+    private R deleteGostLimiter(Long speedLimitId, Tunnel tunnel) {
+        for (Long inNodeId : TunnelNodeUtil.getInNodeIds(tunnel)) {
+            GostDto gostResult = GostUtil.DeleteLimiters(inNodeId, speedLimitId);
+            if (!isGostOperationSuccess(gostResult)) {
+                return R.err(gostResult.getMsg());
+            }
+        }
+        return R.ok();
+    }
+
+    private R addGostLimiterLegacy(SpeedLimit speedLimit, Tunnel tunnel) {
+        String speedInMBps = convertBitsToMBps(speedLimit.getSpeed());
         Node node = nodeService.getNodeById(tunnel.getInNodeId());
         
         GostDto gostResult = GostUtil.AddLimiters(
@@ -305,7 +341,7 @@ public class SpeedLimitServiceImpl extends ServiceImpl<SpeedLimitMapper, SpeedLi
      * @param tunnel 隧道对象
      * @return 操作结果响应
      */
-    private R updateGostLimiter(SpeedLimit speedLimit, Tunnel tunnel) {
+    private R updateGostLimiterLegacy(SpeedLimit speedLimit, Tunnel tunnel) {
         String speedInMBps = convertBitsToMBps(speedLimit.getSpeed());
         Node node = nodeService.getNodeById(tunnel.getInNodeId());
 
@@ -327,7 +363,7 @@ public class SpeedLimitServiceImpl extends ServiceImpl<SpeedLimitMapper, SpeedLi
      * @param tunnel 隧道对象
      * @return 操作结果响应
      */
-    private R deleteGostLimiter(Long speedLimitId, Tunnel tunnel) {
+    private R deleteGostLimiterLegacy(Long speedLimitId, Tunnel tunnel) {
         Node node = nodeService.getNodeById(tunnel.getInNodeId());
         GostDto gostResult = GostUtil.DeleteLimiters(node.getId(), speedLimitId);
         

@@ -1,6 +1,7 @@
 package com.admin.common.dto;
 
 import lombok.Data;
+import java.util.List;
 
 @Data
 public class TunnelListDto {
@@ -13,6 +14,12 @@ public class TunnelListDto {
      * 入口IP
      */
     private String ip;
+
+    private String outIp;
+
+    private List<Long> inNodeIds;
+
+    private List<Long> outNodeIds;
     
     /**
      * 入口节点端口起始范围

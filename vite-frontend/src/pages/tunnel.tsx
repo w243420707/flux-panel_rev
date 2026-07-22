@@ -25,7 +25,9 @@ interface Tunnel {
   name: string;
   type: number; // 1: 端口转发, 2: 隧道转发
   inNodeId: number;
+  inNodeIds?: number[] | string;
   outNodeId?: number;
+  outNodeIds?: number[] | string;
   inIp: string;
   outIp?: string;
   protocol?: string;
@@ -49,7 +51,9 @@ interface TunnelForm {
   name: string;
   type: number;
   inNodeId: number | null;
+  inNodeIds: number[];
   outNodeId?: number | null;
+  outNodeIds: number[];
   protocol: string;
   tcpListenAddr: string;
   udpListenAddr: string;
@@ -98,7 +102,9 @@ export default function TunnelPage() {
     name: '',
     type: 1,
     inNodeId: null,
+    inNodeIds: [],
     outNodeId: null,
+    outNodeIds: [],
     protocol: 'tls',
     tcpListenAddr: '[::]',
     udpListenAddr: '[::]',
@@ -143,6 +149,45 @@ export default function TunnelPage() {
     }
   };
 
+  const normalizeNodeIds = (value?: number[] | string, fallback?: number | null): number[] => {
+    const ids: number[] = [];
+    const pushId = (id: unknown) => {
+      const num = typeof id === 'number' ? id : parseInt(String(id), 10);
+      if (!Number.isNaN(num) && num > 0 && !ids.includes(num)) {
+        ids.push(num);
+      }
+    };
+
+    if (Array.isArray(value)) {
+      value.forEach(pushId);
+    } else if (typeof value === 'string' && value.trim()) {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(pushId);
+        }
+      } catch {
+        value.replace(/[\[\]"']/g, '').split(',').forEach(part => pushId(part.trim()));
+      }
+    }
+
+    if (ids.length === 0 && fallback) {
+      pushId(fallback);
+    }
+    return ids;
+  };
+
+  const selectedKeysToNodeIds = (keys: any): number[] => {
+    if (keys === 'all') {
+      return nodes.map(node => node.id);
+    }
+    return Array.from(keys || [])
+      .map(key => parseInt(String(key), 10))
+      .filter(id => !Number.isNaN(id));
+  };
+
+  const nodeIdsToSelectedKeys = (ids: number[]) => new Set(ids.map(id => id.toString()));
+
   // 表单验证
   const validateForm = (): boolean => {
     const newErrors: {[key: string]: string} = {};
@@ -153,7 +198,7 @@ export default function TunnelPage() {
       newErrors.name = '隧道名称长度应在2-50个字符之间';
     }
     
-    if (!form.inNodeId) {
+    if (form.inNodeIds.length === 0) {
       newErrors.inNodeId = '请选择入口节点';
     }
     
@@ -171,9 +216,9 @@ export default function TunnelPage() {
     
     // 隧道转发时的验证
     if (form.type === 2) {
-      if (!form.outNodeId) {
+      if (form.outNodeIds.length === 0) {
         newErrors.outNodeId = '请选择出口节点';
-      } else if (form.inNodeId === form.outNodeId) {
+      } else if (form.outNodeIds.some(outNodeId => form.inNodeIds.includes(outNodeId))) {
         newErrors.outNodeId = '隧道转发模式下，入口和出口不能是同一个节点';
       }
       
@@ -193,7 +238,9 @@ export default function TunnelPage() {
       name: '',
       type: 1,
       inNodeId: null,
+      inNodeIds: [],
       outNodeId: null,
+      outNodeIds: [],
       protocol: 'tls',
       tcpListenAddr: '[::]',
       udpListenAddr: '[::]',
@@ -214,7 +261,9 @@ export default function TunnelPage() {
       name: tunnel.name,
       type: tunnel.type,
       inNodeId: tunnel.inNodeId,
+      inNodeIds: normalizeNodeIds(tunnel.inNodeIds, tunnel.inNodeId),
       outNodeId: tunnel.outNodeId || null,
+      outNodeIds: normalizeNodeIds(tunnel.outNodeIds, tunnel.outNodeId || null),
       protocol: tunnel.protocol || 'tls',
       tcpListenAddr: tunnel.tcpListenAddr || '[::]',
       udpListenAddr: tunnel.udpListenAddr || '[::]',
@@ -261,6 +310,7 @@ export default function TunnelPage() {
       ...prev,
       type,
       outNodeId: type === 1 ? null : prev.outNodeId,
+      outNodeIds: type === 1 ? [] : prev.outNodeIds,
       protocol: type === 1 ? 'tls' : prev.protocol
     }));
   };
@@ -271,7 +321,12 @@ export default function TunnelPage() {
     
     setSubmitLoading(true);
     try {
-      const data = { ...form };
+      const data = {
+        ...form,
+        inNodeId: form.inNodeIds[0] || null,
+        outNodeId: form.type === 1 ? (form.inNodeIds[0] || null) : (form.outNodeIds[0] || null),
+        outNodeIds: form.type === 1 ? form.inNodeIds : form.outNodeIds,
+      };
       
       const response = isEdit 
         ? await updateTunnel(data)
@@ -362,6 +417,12 @@ export default function TunnelPage() {
   };
 
   // 获取状态显示
+  const getNodeSummary = (nodeIds: number[]): string => {
+    if (nodeIds.length === 0) return '-';
+    const firstName = getNodeName(nodeIds[0]);
+    return nodeIds.length === 1 ? firstName : `${firstName} 等 ${nodeIds.length} 个`;
+  };
+
   const getStatusDisplay = (status: number) => {
     switch (status) {
       case 1:
@@ -487,7 +548,7 @@ export default function TunnelPage() {
                             <span className="text-xs font-medium text-default-600">入口节点</span>
                           </div>
                           <code className="text-xs font-mono text-foreground block truncate">
-                            {getNodeName(tunnel.inNodeId)}
+                            {getNodeSummary(normalizeNodeIds(tunnel.inNodeIds, tunnel.inNodeId))}
                           </code>
                           <code className="text-xs font-mono text-default-500 block truncate">
                             {getDisplayIp(tunnel.inIp)}
@@ -507,7 +568,7 @@ export default function TunnelPage() {
                             </span>
                           </div>
                           <code className="text-xs font-mono text-foreground block truncate">
-                            {tunnel.type === 1 ? getNodeName(tunnel.inNodeId) : getNodeName(tunnel.outNodeId)}
+                            {tunnel.type === 1 ? getNodeSummary(normalizeNodeIds(tunnel.inNodeIds, tunnel.inNodeId)) : getNodeSummary(normalizeNodeIds(tunnel.outNodeIds, tunnel.outNodeId || null))}
                           </code>
                           <code className="text-xs font-mono text-default-500 block truncate">
                             {tunnel.type === 1 ? getDisplayIp(tunnel.inIp) : getDisplayIp(tunnel.outIp)}
@@ -696,12 +757,11 @@ export default function TunnelPage() {
                     <Select
                       label="入口节点"
                       placeholder="请选择入口节点"
-                      selectedKeys={form.inNodeId ? [form.inNodeId.toString()] : []}
+                      selectionMode="multiple"
+                      selectedKeys={nodeIdsToSelectedKeys(form.inNodeIds)}
                       onSelectionChange={(keys) => {
-                        const selectedKey = Array.from(keys)[0] as string;
-                        if (selectedKey) {
-                          setForm(prev => ({ ...prev, inNodeId: parseInt(selectedKey) }));
-                        }
+                        const inNodeIds = selectedKeysToNodeIds(keys);
+                        setForm(prev => ({ ...prev, inNodeIds, inNodeId: inNodeIds[0] || null }));
                       }}
                       isInvalid={!!errors.inNodeId}
                       errorMessage={errors.inNodeId}
@@ -803,12 +863,11 @@ export default function TunnelPage() {
                         <Select
                           label="出口节点"
                           placeholder="请选择出口节点"
-                          selectedKeys={form.outNodeId ? [form.outNodeId.toString()] : []}
+                          selectionMode="multiple"
+                          selectedKeys={nodeIdsToSelectedKeys(form.outNodeIds)}
                           onSelectionChange={(keys) => {
-                            const selectedKey = Array.from(keys)[0] as string;
-                            if (selectedKey) {
-                              setForm(prev => ({ ...prev, outNodeId: parseInt(selectedKey) }));
-                            }
+                            const outNodeIds = selectedKeysToNodeIds(keys);
+                            setForm(prev => ({ ...prev, outNodeIds, outNodeId: outNodeIds[0] || null }));
                           }}
                           isInvalid={!!errors.outNodeId}
                           errorMessage={errors.outNodeId}
@@ -830,7 +889,7 @@ export default function TunnelPage() {
                                   >
                                     {node.status === 1 ? '在线' : '离线'}
                                   </Chip>
-                                  {form.inNodeId === node.id && (
+                                  {form.inNodeIds.includes(node.id) && (
                                     <Chip color="warning" variant="flat" size="sm">
                                       已选为入口
                                     </Chip>
@@ -1052,4 +1111,4 @@ export default function TunnelPage() {
       </div>
     
   );
-} 
+}

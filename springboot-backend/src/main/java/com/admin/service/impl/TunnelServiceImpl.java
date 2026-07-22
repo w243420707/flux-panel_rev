@@ -6,6 +6,7 @@ import com.admin.common.dto.*;
 import com.admin.common.lang.R;
 import com.admin.common.utils.GostUtil;
 import com.admin.common.utils.JwtUtil;
+import com.admin.common.utils.TunnelNodeUtil;
 import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.Forward;
 import com.admin.entity.Node;
@@ -22,7 +23,6 @@ import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.Data;
-import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 
@@ -123,16 +123,17 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         }
 
         // 3. 验证入口节点和端口
-        NodeValidationResult inNodeValidation = validateInNode(tunnelDto);
+        List<Long> inNodeIds = TunnelNodeUtil.normalizeNodeIds(tunnelDto.getInNodeIds(), tunnelDto.getInNodeId());
+        NodeValidationResult inNodeValidation = validateNodes(inNodeIds, ERROR_IN_NODE_NOT_FOUND, ERROR_IN_NODE_OFFLINE);
         if (inNodeValidation.isHasError()) {
             return R.err(inNodeValidation.getErrorMessage());
         }
 
         // 4. 构建隧道实体
-        Tunnel tunnel = buildTunnelEntity(tunnelDto, inNodeValidation.getNode());
+        Tunnel tunnel = buildTunnelEntity(tunnelDto, inNodeValidation.getNodes());
 
         // 5. 根据隧道类型设置出口参数
-        R outNodeSetupResult = setupOutNodeParameters(tunnel, tunnelDto, inNodeValidation.getNode().getServerIp());
+        R outNodeSetupResult = setupOutNodeParameters(tunnel, tunnelDto, inNodeValidation.getNodes());
         if (outNodeSetupResult.getCode() != 0) {
             return outNodeSetupResult;
         }
@@ -319,7 +320,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
      */
     private R validateTunnelForwardCreate(TunnelDto tunnelDto) {
         // 验证出口节点不能为空
-        if (tunnelDto.getOutNodeId() == null) {
+        if (TunnelNodeUtil.normalizeNodeIds(tunnelDto.getOutNodeIds(), tunnelDto.getOutNodeId()).isEmpty()) {
             return R.err(ERROR_OUT_NODE_REQUIRED);
         }
         return R.ok();
@@ -346,6 +347,26 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         return NodeValidationResult.success(inNode);
     }
 
+    private NodeValidationResult validateNodes(List<Long> nodeIds, String notFoundMessage, String offlineMessage) {
+        if (nodeIds == null || nodeIds.isEmpty()) {
+            return NodeValidationResult.error(notFoundMessage);
+        }
+
+        List<Node> nodes = new ArrayList<>();
+        for (Long nodeId : nodeIds) {
+            Node node = nodeService.getById(nodeId);
+            if (node == null) {
+                return NodeValidationResult.error(notFoundMessage + ": " + nodeId);
+            }
+            if (node.getStatus() != NODE_STATUS_ONLINE) {
+                return NodeValidationResult.error(offlineMessage + ": " + node.getName());
+            }
+            nodes.add(node);
+        }
+
+        return NodeValidationResult.success(nodes);
+    }
+
     /**
      * 构建隧道实体对象
      * 
@@ -353,13 +374,15 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
      * @param inNode 入口节点
      * @return 构建完成的隧道对象
      */
-    private Tunnel buildTunnelEntity(TunnelDto tunnelDto, Node inNode) {
+    private Tunnel buildTunnelEntity(TunnelDto tunnelDto, List<Node> inNodes) {
         Tunnel tunnel = new Tunnel();
         BeanUtils.copyProperties(tunnelDto, tunnel);
+        Node firstInNode = inNodes.get(0);
         
         // 设置入口节点信息
-        tunnel.setInNodeId(tunnelDto.getInNodeId());
-        tunnel.setInIp(inNode.getIp());
+        tunnel.setInNodeId(firstInNode.getId());
+        tunnel.setInNodeIds(TunnelNodeUtil.toJsonArray(inNodes.stream().map(Node::getId).collect(Collectors.toList())));
+        tunnel.setInIp(joinNodeIps(inNodes, false));
         
         // 设置流量计算类型
         tunnel.setFlow(tunnelDto.getFlow());
@@ -397,13 +420,13 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
      * @param tunnelDto 隧道创建DTO
      * @return 设置结果响应
      */
-    private R setupOutNodeParameters(Tunnel tunnel, TunnelDto tunnelDto, String server_ip) {
+    private R setupOutNodeParameters(Tunnel tunnel, TunnelDto tunnelDto, List<Node> inNodes) {
         if (tunnelDto.getType() == TUNNEL_TYPE_PORT_FORWARD) {
             // 端口转发：出口参数使用入口参数
-            return setupPortForwardOutParameters(tunnel, tunnelDto, server_ip);
+            return setupPortForwardOutParameters(tunnel, inNodes);
         } else {
             // 隧道转发：需要验证出口参数
-            return setupTunnelForwardOutParameters(tunnel, tunnelDto);
+            return setupTunnelForwardOutParametersMulti(tunnel, tunnelDto);
         }
     }
 
@@ -414,9 +437,11 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
      * @param tunnelDto 隧道创建DTO
      * @return 设置结果响应
      */
-    private R setupPortForwardOutParameters(Tunnel tunnel, TunnelDto tunnelDto, String server_ip) {
-        tunnel.setOutNodeId(tunnelDto.getInNodeId());
-        tunnel.setOutIp(server_ip);
+    private R setupPortForwardOutParameters(Tunnel tunnel, List<Node> inNodes) {
+        Node firstInNode = inNodes.get(0);
+        tunnel.setOutNodeId(firstInNode.getId());
+        tunnel.setOutNodeIds(TunnelNodeUtil.toJsonArray(inNodes.stream().map(Node::getId).collect(Collectors.toList())));
+        tunnel.setOutIp(joinNodeIps(inNodes, true));
         return R.ok();
     }
 
@@ -466,6 +491,44 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
      * 
      * @param tunnel 隧道对象
      */
+    private R setupTunnelForwardOutParametersMulti(Tunnel tunnel, TunnelDto tunnelDto) {
+        List<Long> outNodeIds = TunnelNodeUtil.normalizeNodeIds(tunnelDto.getOutNodeIds(), tunnelDto.getOutNodeId());
+        if (outNodeIds.isEmpty()) {
+            return R.err(ERROR_OUT_NODE_REQUIRED);
+        }
+
+        Set<Long> inNodeIds = new HashSet<>(TunnelNodeUtil.getInNodeIds(tunnel));
+        for (Long outNodeId : outNodeIds) {
+            if (inNodeIds.contains(outNodeId)) {
+                return R.err(ERROR_SAME_NODE_NOT_ALLOWED);
+            }
+        }
+
+        String protocol = tunnelDto.getProtocol();
+        if (StrUtil.isBlank(protocol)) {
+            return R.err("协议类型不能为空");
+        }
+
+        NodeValidationResult outNodeValidation = validateNodes(outNodeIds, ERROR_OUT_NODE_NOT_FOUND, ERROR_OUT_NODE_OFFLINE);
+        if (outNodeValidation.isHasError()) {
+            return R.err(outNodeValidation.getErrorMessage());
+        }
+
+        List<Node> outNodes = outNodeValidation.getNodes();
+        tunnel.setOutNodeId(outNodes.get(0).getId());
+        tunnel.setOutNodeIds(TunnelNodeUtil.toJsonArray(outNodes.stream().map(Node::getId).collect(Collectors.toList())));
+        tunnel.setOutIp(joinNodeIps(outNodes, true));
+        return R.ok();
+    }
+
+    private String joinNodeIps(List<Node> nodes, boolean serverIp) {
+        return nodes.stream()
+                .map(node -> serverIp ? node.getServerIp() : node.getIp())
+                .filter(Objects::nonNull)
+                .filter(StrUtil::isNotBlank)
+                .collect(Collectors.joining(","));
+    }
+
     private void setDefaultTunnelProperties(Tunnel tunnel) {
         tunnel.setStatus(TUNNEL_STATUS_ACTIVE);
         long currentTime = System.currentTimeMillis();
@@ -610,16 +673,20 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         dto.setId(tunnel.getId().intValue());
         dto.setName(tunnel.getName());
         dto.setIp(tunnel.getInIp());
+        dto.setOutIp(tunnel.getOutIp());
+        dto.setInNodeIds(TunnelNodeUtil.getInNodeIds(tunnel));
+        dto.setOutNodeIds(TunnelNodeUtil.getOutNodeIds(tunnel));
         dto.setType(tunnel.getType());
         dto.setProtocol(tunnel.getProtocol());
         
         // 获取入口节点的端口范围信息
-        if (tunnel.getInNodeId() != null) {
-            Node inNode = nodeService.getById(tunnel.getInNodeId());
-            if (inNode != null) {
-                dto.setInNodePortSta(inNode.getPortSta());
-                dto.setInNodePortEnd(inNode.getPortEnd());
-            }
+        List<Node> inNodes = TunnelNodeUtil.getInNodeIds(tunnel).stream()
+                .map(nodeService::getById)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+        if (!inNodes.isEmpty()) {
+            dto.setInNodePortSta(inNodes.stream().map(Node::getPortSta).filter(Objects::nonNull).max(Integer::compareTo).orElse(null));
+            dto.setInNodePortEnd(inNodes.stream().map(Node::getPortEnd).filter(Objects::nonNull).min(Integer::compareTo).orElse(null));
         }
         
         return dto;
@@ -831,19 +898,32 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         private final boolean hasError;
         private final String errorMessage;
         private final Node node;
+        private final List<Node> nodes;
 
         private NodeValidationResult(boolean hasError, String errorMessage, Node node) {
             this.hasError = hasError;
             this.errorMessage = errorMessage;
             this.node = node;
+            this.nodes = node == null ? java.util.Collections.emptyList() : java.util.Collections.singletonList(node);
+        }
+
+        private NodeValidationResult(boolean hasError, String errorMessage, List<Node> nodes) {
+            this.hasError = hasError;
+            this.errorMessage = errorMessage;
+            this.nodes = nodes == null ? java.util.Collections.emptyList() : nodes;
+            this.node = this.nodes.isEmpty() ? null : this.nodes.get(0);
         }
 
         public static NodeValidationResult success(Node node) {
             return new NodeValidationResult(false, null, node);
         }
 
+        public static NodeValidationResult success(List<Node> nodes) {
+            return new NodeValidationResult(false, null, nodes);
+        }
+
         public static NodeValidationResult error(String errorMessage) {
-            return new NodeValidationResult(true, errorMessage, null);
+            return new NodeValidationResult(true, errorMessage, (Node) null);
         }
     }
 

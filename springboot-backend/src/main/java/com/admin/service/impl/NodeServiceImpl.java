@@ -5,6 +5,7 @@ import cn.hutool.core.util.StrUtil;
 import com.admin.common.dto.NodeDto;
 import com.admin.common.dto.NodeUpdateDto;
 import com.admin.common.lang.R;
+import com.admin.common.utils.TunnelNodeUtil;
 import com.admin.entity.Node;
 import com.admin.entity.Tunnel;
 import com.admin.entity.ViteConfig;
@@ -140,6 +141,8 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
             tunnelService.updateBatchById(outNodeId);
         }
 
+        refreshMultiNodeTunnelIps(updateNode.getId());
+
         return result ? R.ok(SUCCESS_UPDATE_MSG) : R.err(ERROR_UPDATE_MSG);
     }
 
@@ -150,6 +153,43 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
      * @param id 节点ID
      * @return 删除结果响应
      */
+    private void refreshMultiNodeTunnelIps(Long nodeId) {
+        List<Tunnel> tunnels = tunnelService.list();
+        for (Tunnel tunnel : tunnels) {
+            boolean changed = false;
+            if (TunnelNodeUtil.containsInNode(tunnel, nodeId)) {
+                tunnel.setInIp(joinNodeIps(TunnelNodeUtil.getInNodeIds(tunnel), false));
+                changed = true;
+            }
+            if (TunnelNodeUtil.containsOutNode(tunnel, nodeId)) {
+                tunnel.setOutIp(joinNodeIps(TunnelNodeUtil.getOutNodeIds(tunnel), true));
+                changed = true;
+            }
+            if (changed) {
+                tunnelService.updateById(tunnel);
+            }
+        }
+    }
+
+    private String joinNodeIps(List<Long> nodeIds, boolean serverIp) {
+        StringBuilder builder = new StringBuilder();
+        for (Long id : nodeIds) {
+            Node node = this.getById(id);
+            if (node == null) {
+                continue;
+            }
+            String ip = serverIp ? node.getServerIp() : node.getIp();
+            if (StrUtil.isBlank(ip)) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(",");
+            }
+            builder.append(ip);
+        }
+        return builder.toString();
+    }
+
     @Override
     public R deleteNode(Long id) {
         // 1. 验证节点是否存在
@@ -277,6 +317,28 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
      * @return 检查结果响应
      */
     private R checkInNodeUsage(Long nodeId) {
+        long tunnelCount = tunnelService.list().stream()
+                .filter(tunnel -> TunnelNodeUtil.containsInNode(tunnel, nodeId))
+                .count();
+        if (tunnelCount > 0) {
+            String errorMsg = String.format(ERROR_IN_NODE_IN_USE, tunnelCount);
+            return R.err(errorMsg);
+        }
+        return R.ok();
+    }
+
+    private R checkOutNodeUsage(Long nodeId) {
+        long tunnelCount = tunnelService.list().stream()
+                .filter(tunnel -> TunnelNodeUtil.containsOutNode(tunnel, nodeId))
+                .count();
+        if (tunnelCount > 0) {
+            String errorMsg = String.format(ERROR_OUT_NODE_IN_USE, tunnelCount);
+            return R.err(errorMsg);
+        }
+        return R.ok();
+    }
+
+    private R checkInNodeUsageLegacy(Long nodeId) {
         QueryWrapper<Tunnel> query = new QueryWrapper<>();
         query.eq("in_node_id", nodeId);
         
@@ -295,7 +357,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
      * @param nodeId 节点ID
      * @return 检查结果响应
      */
-    private R checkOutNodeUsage(Long nodeId) {
+    private R checkOutNodeUsageLegacy(Long nodeId) {
         QueryWrapper<Tunnel> query = new QueryWrapper<>();
         query.eq("out_node_id", nodeId);
         

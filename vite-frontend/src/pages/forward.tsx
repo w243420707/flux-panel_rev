@@ -71,6 +71,8 @@ interface Tunnel {
   name: string;
   inNodePortSta?: number;
   inNodePortEnd?: number;
+  type?: number;
+  outNodeIds?: number[] | string;
 }
 
 interface ForwardForm {
@@ -529,6 +531,7 @@ export default function ForwardPage() {
         .join(',');
 
       const addressCount = processedRemoteAddr.split(',').length;
+      const tunnelExitCount = getTunnelExitCount(selectedTunnel);
       
       let res;
       if (isEdit) {
@@ -541,7 +544,7 @@ export default function ForwardPage() {
           inPort: form.inPort,
           remoteAddr: processedRemoteAddr,
           interfaceName: form.interfaceName,
-          strategy: addressCount > 1 ? form.strategy : 'fifo'
+          strategy: (addressCount > 1 || tunnelExitCount > 1) ? form.strategy : 'fifo'
         };
         res = await updateForward(updateData);
       } else {
@@ -552,7 +555,7 @@ export default function ForwardPage() {
           inPort: form.inPort,
           remoteAddr: processedRemoteAddr,
           interfaceName: form.interfaceName,
-          strategy: addressCount > 1 ? form.strategy : 'fifo'
+          strategy: (addressCount > 1 || tunnelExitCount > 1) ? form.strategy : 'fifo'
         };
         res = await createForward(createData);
       }
@@ -1024,6 +1027,35 @@ export default function ForwardPage() {
     if (!addressString) return 0;
     const addresses = addressString.split('\n').map(addr => addr.trim()).filter(addr => addr);
     return addresses.length;
+  };
+
+  const normalizeNodeIds = (value?: number[] | string): number[] => {
+    const ids: number[] = [];
+    const pushId = (id: unknown) => {
+      const num = typeof id === 'number' ? id : parseInt(String(id), 10);
+      if (!Number.isNaN(num) && num > 0 && !ids.includes(num)) {
+        ids.push(num);
+      }
+    };
+
+    if (Array.isArray(value)) {
+      value.forEach(pushId);
+    } else if (typeof value === 'string' && value.trim()) {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(pushId);
+        }
+      } catch {
+        value.replace(/[\[\]"']/g, '').split(',').forEach(part => pushId(part.trim()));
+      }
+    }
+    return ids;
+  };
+
+  const getTunnelExitCount = (tunnel: Tunnel | null): number => {
+    if (!tunnel || tunnel.type !== 2) return 0;
+    return normalizeNodeIds(tunnel.outNodeIds).length;
   };
 
   // 处理拖拽结束
@@ -1639,7 +1671,7 @@ export default function ForwardPage() {
                       description="用于多IP服务器指定使用那个IP请求远程地址，不懂的默认为空就行"
                     />
                     
-                    {getAddressCount(form.remoteAddr) > 1 && (
+                    {(getAddressCount(form.remoteAddr) > 1 || getTunnelExitCount(selectedTunnel) > 1) && (
                       <Select
                         label="负载策略"
                         placeholder="请选择负载均衡策略"

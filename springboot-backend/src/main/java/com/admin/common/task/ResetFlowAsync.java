@@ -1,6 +1,7 @@
 package com.admin.common.task;
 
 import com.admin.common.utils.GostUtil;
+import com.admin.common.utils.TunnelNodeUtil;
 import com.admin.entity.Forward;
 import com.admin.entity.Tunnel;
 import com.admin.entity.User;
@@ -231,9 +232,14 @@ public class ResetFlowAsync {
         Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
         if (tunnel == null) return;
 
-        GostUtil.PauseService(tunnel.getInNodeId(), buildServiceName(forward.getId(), forward.getUserId(), userTunnelId));
+        String serviceName = buildServiceName(forward.getId(), forward.getUserId(), userTunnelId);
+        for (Long inNodeId : TunnelNodeUtil.getInNodeIds(tunnel)) {
+            GostUtil.PauseService(inNodeId, serviceName);
+        }
         if (tunnel.getType() == 2){
-            GostUtil.PauseRemoteService(tunnel.getOutNodeId(), buildServiceName(forward.getId(), forward.getUserId(), userTunnelId));
+            for (Long outNodeId : TunnelNodeUtil.getOutNodeIds(tunnel)) {
+                GostUtil.PauseRemoteService(outNodeId, serviceName);
+            }
         }
     }
 

@@ -9,6 +9,7 @@ import com.admin.common.lang.R;
 import com.admin.common.utils.GostUtil;
 import com.admin.common.utils.JwtUtil;
 import com.admin.common.utils.Md5Util;
+import com.admin.common.utils.TunnelNodeUtil;
 import com.admin.entity.*;
 import com.admin.mapper.ForwardMapper;
 import com.admin.mapper.UserMapper;
@@ -565,9 +566,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
         if (tunnel == null) return;
 
-        Node inNode = nodeService.getNodeById(tunnel.getInNodeId());
-        if (inNode == null) return;
-
         // 获取用户隧道关系
         UserTunnel userTunnel = getUserTunnelRelation(userId, tunnel.getId());
         if (userTunnel == null) return;
@@ -575,11 +573,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         String serviceName = buildServiceName(forward.getId(), userId, userTunnel.getId());
 
         // 删除主服务
-        GostUtil.DeleteService(inNode.getId(), serviceName);
+        for (Long inNodeId : TunnelNodeUtil.getInNodeIds(tunnel)) {
+            GostUtil.DeleteService(inNodeId, serviceName);
+        }
 
         // 如果是隧道转发，还需要删除链和远程服务
         if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
-            deleteGostTunnelForwardServices(tunnel, serviceName, inNode);
+            deleteGostTunnelForwardServices(tunnel, serviceName, null);
         }
     }
 
@@ -591,10 +591,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      * @param inNode 入口节点
      */
     private void deleteGostTunnelForwardServices(Tunnel tunnel, String serviceName, Node inNode) {
-        Node outNode = nodeService.getNodeById(tunnel.getOutNodeId());
-        if (outNode != null) {
-            GostUtil.DeleteChains(inNode.getId(), serviceName);
-            GostUtil.DeleteRemoteService(outNode.getId(), serviceName);
+        for (Long inNodeId : TunnelNodeUtil.getInNodeIds(tunnel)) {
+            GostUtil.DeleteChains(inNodeId, serviceName);
+        }
+        for (Long outNodeId : TunnelNodeUtil.getOutNodeIds(tunnel)) {
+            GostUtil.DeleteRemoteService(outNodeId, serviceName);
         }
     }
 
