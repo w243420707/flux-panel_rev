@@ -1,0 +1,94 @@
+services:
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:5.7}
+    container_name: ${APP_SLUG:-flux-panel-rev}-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./gost.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_connections=1000
+      --innodb_buffer_pool_size=256M
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 10
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: ${APP_SLUG:-flux-panel-rev}-phpmyadmin
+    restart: unless-stopped
+    profiles:
+      - tools
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_ARBITRARY: 1
+    ports:
+      - "127.0.0.1:${PHPMYADMIN_PORT:-8066}:80"
+    networks:
+      - app-network
+
+  backend:
+    build:
+      context: ./springboot-backend
+    image: ${APP_SLUG:-flux-panel-rev}-backend:local
+    container_name: ${APP_SLUG:-flux-panel-rev}-backend
+    restart: unless-stopped
+    environment:
+      DB_HOST: mysql
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      LOG_DIR: /app/logs
+      JAVA_OPTS: "-Xms256m -Xmx512m -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai"
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-6365}:6365"
+    volumes:
+      - backend_logs:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:6365/flow/test || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  frontend:
+    build:
+      context: ./vite-frontend
+    image: ${APP_SLUG:-flux-panel-rev}-frontend:local
+    container_name: ${APP_SLUG:-flux-panel-rev}-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-6366}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - app-network
+
+volumes:
+  mysql_data:
+  backend_logs:
+
+networks:
+  app-network:
+    name: ${APP_SLUG:-flux-panel-rev}-network
+    driver: bridge
