@@ -6,6 +6,11 @@ WORKDIR /app
 ARG PNPM_VERSION=11.7.0
 ARG NPM_REGISTRY=https://registry.npmjs.org
 ARG NPM_FALLBACK_REGISTRY=https://registry.npmmirror.com
+ARG FRONTEND_BUILD_MAX_OLD_SPACE_SIZE=1536
+ARG VITE_LEGACY_BUILD=false
+
+ENV NODE_OPTIONS=--max-old-space-size=${FRONTEND_BUILD_MAX_OLD_SPACE_SIZE}
+ENV VITE_LEGACY_BUILD=${VITE_LEGACY_BUILD}
 
 RUN set -eux; \
     npm install -g "pnpm@${PNPM_VERSION}" --registry="${NPM_REGISTRY}" \
