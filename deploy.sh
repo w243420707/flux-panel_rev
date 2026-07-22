@@ -879,18 +879,18 @@ menu_loop() {
     cat <<EOF
 
 ===============================================
- ${APP_NAME} VPS deploy menu
+ ${APP_NAME} VPS 部署菜单
 ===============================================
- 1. Install / reinstall
- 2. Update and rebuild
- 3. Uninstall
- 4. Status
- 5. Logs
- 6. Renew certificate
- 0. Exit
+ 1. 安装 / 重装
+ 2. 更新并重新构建
+ 3. 卸载
+ 4. 查看状态
+ 5. 查看日志
+ 6. 续期证书
+ 0. 退出
 ===============================================
 EOF
-    read -r -p "Choose: " choice
+    read -r -p "请选择: " choice
     case "${choice}" in
       1) install_flow ;;
       2) update_flow ;;
@@ -899,7 +899,7 @@ EOF
       5) logs_flow ;;
       6) renew_cert_flow ;;
       0) exit 0 ;;
-      *) warn "Invalid choice." ;;
+      *) warn "无效选择。" ;;
     esac
   done
 }
@@ -910,7 +910,13 @@ main() {
   require_root "${original_args[@]}"
 
   case "${ACTION}" in
-    install) install_flow ;;
+    install)
+      if [[ "${ASSUME_YES}" -eq 1 || -n "${DOMAIN}" || -n "${EMAIL}" || -n "${FRONTEND_PORT}" || -n "${BACKEND_PORT}" || -n "${PHPMYADMIN_PORT}" || "${SKIP_SSL}" -eq 1 || "${WITH_PHPMYADMIN}" -eq 1 ]]; then
+        install_flow
+      else
+        menu_loop
+      fi
+      ;;
     update) update_flow ;;
     uninstall) uninstall_flow ;;
     status) status_flow ;;
