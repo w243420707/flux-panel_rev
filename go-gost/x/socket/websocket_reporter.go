@@ -935,13 +935,50 @@ func getMemoryInfo() MemoryInfo {
 func StartWebSocketReporterWithConfig(Addr string, Secret string, Version string) *WebSocketReporter {
 
 	// 构建包含本机IP的WebSocket URL
-	var fullURL = "ws://" + Addr + "/system-info?type=1&secret=" + Secret + "&version=" + Version
+	fullURL := buildWebSocketURL(Addr, Secret, Version)
 
 	fmt.Printf("🔗 WebSocket连接URL: %s\n", fullURL)
 
 	reporter := NewWebSocketReporter(fullURL, Secret) // Pass Secret here
 	reporter.Start()
 	return reporter
+}
+
+func buildWebSocketURL(addr string, secret string, version string) string {
+	raw := strings.TrimSpace(addr)
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + strings.Trim(raw, "/")
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		host := strings.TrimSpace(addr)
+		host = strings.TrimPrefix(host, "http://")
+		host = strings.TrimPrefix(host, "https://")
+		host = strings.TrimPrefix(host, "ws://")
+		host = strings.TrimPrefix(host, "wss://")
+		host = strings.Trim(host, "/")
+		u = &url.URL{Scheme: "ws", Host: host}
+	}
+
+	switch strings.ToLower(u.Scheme) {
+	case "https", "wss":
+		u.Scheme = "wss"
+	default:
+		u.Scheme = "ws"
+	}
+
+	u.Path = strings.TrimRight(u.Path, "/") + "/system-info"
+	u.RawQuery = ""
+	u.Fragment = ""
+
+	q := u.Query()
+	q.Set("type", "1")
+	q.Set("secret", secret)
+	q.Set("version", version)
+	u.RawQuery = q.Encode()
+
+	return u.String()
 }
 
 // handleTcpPing 处理TCP ping诊断命令

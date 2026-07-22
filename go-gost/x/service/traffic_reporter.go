@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -27,8 +28,8 @@ type TrafficReportItem struct {
 }
 
 func SetHTTPReportURL(addr string, secret string) {
-	httpReportURL = "http://" + addr + "/flow/upload?secret=" + secret
-	configReportURL = "http://" + addr + "/flow/config?secret=" + secret
+	httpReportURL = buildReportURL(addr, "/flow/upload", secret)
+	configReportURL = buildReportURL(addr, "/flow/config", secret)
 
 	// 创建 AES 加密器
 	var err error
@@ -39,6 +40,41 @@ func SetHTTPReportURL(addr string, secret string) {
 	} else {
 		fmt.Printf("🔐 HTTP AES 加密器创建成功\n")
 	}
+}
+
+func buildReportURL(addr string, path string, secret string) string {
+	raw := strings.TrimSpace(addr)
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + strings.Trim(raw, "/")
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		host := strings.TrimSpace(addr)
+		host = strings.TrimPrefix(host, "http://")
+		host = strings.TrimPrefix(host, "https://")
+		host = strings.TrimPrefix(host, "ws://")
+		host = strings.TrimPrefix(host, "wss://")
+		host = strings.Trim(host, "/")
+		u = &url.URL{Scheme: "http", Host: host}
+	}
+
+	switch strings.ToLower(u.Scheme) {
+	case "https", "wss":
+		u.Scheme = "https"
+	default:
+		u.Scheme = "http"
+	}
+
+	u.Path = strings.TrimRight(u.Path, "/") + path
+	u.RawQuery = ""
+	u.Fragment = ""
+
+	q := u.Query()
+	q.Set("secret", secret)
+	u.RawQuery = q.Encode()
+
+	return u.String()
 }
 
 // sendTrafficReport 发送流量报告到HTTP接口
