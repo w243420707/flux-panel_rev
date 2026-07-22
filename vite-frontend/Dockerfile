@@ -8,18 +8,18 @@ ARG NPM_REGISTRY=https://registry.npmjs.org
 ARG NPM_FALLBACK_REGISTRY=https://registry.npmmirror.com
 
 RUN set -eux; \
-    npm config set fetch-retries 5; \
-    npm config set fetch-retry-mintimeout 20000; \
-    npm config set fetch-retry-maxtimeout 120000; \
-    npm config set registry "${NPM_REGISTRY}"; \
     npm install -g "pnpm@${PNPM_VERSION}" --registry="${NPM_REGISTRY}" \
-      || npm install -g "pnpm@${PNPM_VERSION}" --registry="${NPM_FALLBACK_REGISTRY}"
+      || npm install -g "pnpm@${PNPM_VERSION}" --registry="${NPM_FALLBACK_REGISTRY}"; \
+    pnpm config set registry "${NPM_REGISTRY}"; \
+    pnpm config set fetchRetries 5; \
+    pnpm config set fetchRetryMintimeout 20000; \
+    pnpm config set fetchRetryMaxtimeout 120000; \
+    pnpm config set fetchTimeout 600000
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm config set registry "${NPM_REGISTRY}" \
-    && (pnpm install --frozen-lockfile --network-timeout 600000 \
-      || (pnpm config set registry "${NPM_FALLBACK_REGISTRY}" \
-        && pnpm install --frozen-lockfile --network-timeout 600000))
+RUN pnpm ci \
+    || (pnpm config set registry "${NPM_FALLBACK_REGISTRY}" \
+      && pnpm ci)
 
 COPY . .
 RUN pnpm run build
