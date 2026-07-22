@@ -1,165 +1,220 @@
-#!/bin/bash
-# 下载地址
-DOWNLOAD_URL="https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/main/go-gost/gost"
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+APP_NAME="gost"
 INSTALL_DIR="/etc/gost"
 LOG_DIR="/var/log/gost"
-LOG_FILE="$LOG_DIR/gost.log"
+LOG_FILE="${LOG_DIR}/gost.log"
+SERVICE_FILE="/etc/systemd/system/gost.service"
 LOGROTATE_FILE="/etc/logrotate.d/gost"
-COUNTRY=$(curl -s https://ipinfo.io/country)
-if [ "$COUNTRY" = "CN" ]; then
-    # 拼接 URL
-    DOWNLOAD_URL="https://ghfast.top/${DOWNLOAD_URL}"
-fi
+REPO_OWNER="w243420707"
+REPO_NAME="flux-panel_rev"
+RELEASE_TAG="${GOST_RELEASE_TAG:-latest}"
+RELEASE_BASE_URL="${GOST_BINARY_BASE_URL:-https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/${RELEASE_TAG}/download}"
 
+ACTION=""
+SERVER_ADDR=""
+SECRET=""
+ASSUME_YES=0
+ARCH=""
+PKG_MANAGER=""
 
+log() { printf '[INFO] %s\n' "$*"; }
+warn() { printf '[WARN] %s\n' "$*"; }
+err() { printf '[ERR ] %s\n' "$*" >&2; }
+die() { err "$*"; exit 1; }
 
-# 显示菜单
-show_menu() {
-  echo "==============================================="
-  echo "              管理脚本"
-  echo "==============================================="
-  echo "请选择操作："
-  echo "1. 安装"
-  echo "2. 更新"  
-  echo "3. 卸载"
-  echo "4. 退出"
-  echo "==============================================="
+usage() {
+  cat <<EOF
+${APP_NAME} node installer
+
+Usage:
+  sudo bash install.sh [action] [options]
+
+Actions:
+  install     Install or reinstall the node
+  update      Download the latest binary and restart the service
+  uninstall   Stop and remove the node
+  status      Show service status
+  logs        Follow service logs
+  menu        Interactive menu (default)
+
+Options:
+  -a, --addr ADDR    Panel/server address
+  -s, --secret KEY   Node secret
+  -y, --yes         Non-interactive yes for confirmations
+  -h, --help        Show this help
+
+Binary source:
+  ${RELEASE_BASE_URL}/gost-linux-\${ARCH}
+EOF
 }
 
-# 删除脚本自身
-delete_self() {
-  echo ""
-  echo "🗑️ 操作已完成，正在清理脚本文件..."
-  SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
-  sleep 1
-  rm -f "$SCRIPT_PATH" && echo "✅ 脚本文件已删除" || echo "❌ 删除脚本文件失败"
+ensure_root() {
+  if [[ "${EUID}" -eq 0 ]]; then
+    return 0
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    exec sudo -E bash "$0" "$@"
+  fi
+  die "Please run this script as root."
 }
 
-# 检查并安装 tcpkill
-check_and_install_tcpkill() {
-  # 检查 tcpkill 是否已安装
-  if command -v tcpkill &> /dev/null; then
+confirm() {
+  local prompt="$1"
+  if [[ "${ASSUME_YES}" -eq 1 ]]; then
     return 0
   fi
-  
-  # 检测操作系统类型
-  OS_TYPE=$(uname -s)
-  
-  # 检查是否需要 sudo
-  if [[ $EUID -ne 0 ]]; then
-    SUDO_CMD="sudo"
-  else
-    SUDO_CMD=""
-  fi
-  
-  if [[ "$OS_TYPE" == "Darwin" ]]; then
-    if command -v brew &> /dev/null; then
-      brew install dsniff &> /dev/null
-    fi
-    return 0
-  fi
-  
-  # 检测 Linux 发行版并安装对应的包
-  if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    DISTRO=$ID
-  elif [ -f /etc/redhat-release ]; then
-    DISTRO="rhel"
-  elif [ -f /etc/debian_version ]; then
-    DISTRO="debian"
-  else
-    return 0
-  fi
-  
-  case $DISTRO in
-    ubuntu|debian)
-      $SUDO_CMD apt update &> /dev/null
-      $SUDO_CMD apt install -y dsniff &> /dev/null
-      ;;
-    centos|rhel|fedora)
-      if command -v dnf &> /dev/null; then
-        $SUDO_CMD dnf install -y dsniff &> /dev/null
-      elif command -v yum &> /dev/null; then
-        $SUDO_CMD yum install -y dsniff &> /dev/null
-      fi
-      ;;
-    alpine)
-      $SUDO_CMD apk add --no-cache dsniff &> /dev/null
-      ;;
-    arch|manjaro)
-      $SUDO_CMD pacman -S --noconfirm dsniff &> /dev/null
-      ;;
-    opensuse*|sles)
-      $SUDO_CMD zypper install -y dsniff &> /dev/null
-      ;;
-    gentoo)
-      $SUDO_CMD emerge --ask=n net-analyzer/dsniff &> /dev/null
-      ;;
-    void)
-      $SUDO_CMD xbps-install -Sy dsniff &> /dev/null
-      ;;
+  read -r -p "${prompt} [y/N]: " answer
+  case "${answer}" in
+    y|Y|yes|YES) return 0 ;;
+    *) return 1 ;;
   esac
-  
-  return 0
 }
 
-check_and_install_logrotate() {
-  if command -v logrotate &> /dev/null; then
-    return 0
-  fi
+detect_os() {
+  [[ "$(uname -s)" == "Linux" ]] || die "This installer supports Linux only."
 
-  if [[ $EUID -ne 0 ]]; then
-    SUDO_CMD="sudo"
-  else
-    SUDO_CMD=""
-  fi
-
-  if [ -f /etc/os-release ]; then
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
     . /etc/os-release
-    DISTRO=$ID
-  elif [ -f /etc/redhat-release ]; then
-    DISTRO="rhel"
-  elif [ -f /etc/debian_version ]; then
-    DISTRO="debian"
-  else
-    return 0
+    log "Detected OS: ${PRETTY_NAME:-$ID}"
   fi
 
-  case $DISTRO in
-    ubuntu|debian)
-      $SUDO_CMD apt update &> /dev/null
-      $SUDO_CMD apt install -y logrotate &> /dev/null
-      ;;
-    centos|rhel|fedora)
-      if command -v dnf &> /dev/null; then
-        $SUDO_CMD dnf install -y logrotate &> /dev/null
-      elif command -v yum &> /dev/null; then
-        $SUDO_CMD yum install -y logrotate &> /dev/null
-      fi
-      ;;
-    alpine)
-      $SUDO_CMD apk add --no-cache logrotate &> /dev/null
-      ;;
-    arch|manjaro)
-      $SUDO_CMD pacman -S --noconfirm logrotate &> /dev/null
-      ;;
-    opensuse*|sles)
-      $SUDO_CMD zypper install -y logrotate &> /dev/null
+  if command -v apt-get >/dev/null 2>&1; then
+    PKG_MANAGER="apt-get"
+  elif command -v dnf >/dev/null 2>&1; then
+    PKG_MANAGER="dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    PKG_MANAGER="yum"
+  elif command -v apk >/dev/null 2>&1; then
+    PKG_MANAGER="apk"
+  elif command -v pacman >/dev/null 2>&1; then
+    PKG_MANAGER="pacman"
+  elif command -v zypper >/dev/null 2>&1; then
+    PKG_MANAGER="zypper"
+  else
+    PKG_MANAGER=""
+  fi
+
+  [[ -n "${PKG_MANAGER}" ]] || die "No supported package manager found."
+
+  case "$(uname -m)" in
+    x86_64|amd64) ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
+    armv7l|armv7) ARCH="armv7" ;;
+    armv6l|armv6) ARCH="armv6" ;;
+    *)
+      die "Unsupported architecture: $(uname -m)"
       ;;
   esac
 
-  return 0
+  log "Detected architecture: ${ARCH}"
 }
 
-setup_gost_logging() {
-  check_and_install_logrotate
-  mkdir -p "$LOG_DIR"
-  touch "$LOG_FILE"
-  chmod 755 "$LOG_DIR"
-  chmod 640 "$LOG_FILE"
+install_packages() {
+  if command -v curl >/dev/null 2>&1 && command -v logrotate >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
 
-  cat > "$LOGROTATE_FILE" <<EOF
-$LOG_FILE {
+  log "Installing required packages..."
+  case "${PKG_MANAGER}" in
+    apt-get)
+      apt-get update
+      apt-get install -y curl ca-certificates logrotate
+      ;;
+    dnf)
+      dnf install -y curl ca-certificates logrotate
+      ;;
+    yum)
+      yum install -y curl ca-certificates logrotate
+      ;;
+    apk)
+      apk add --no-cache curl ca-certificates logrotate
+      ;;
+    pacman)
+      pacman -Sy --noconfirm curl ca-certificates logrotate
+      ;;
+    zypper)
+      zypper --non-interactive install curl ca-certificates logrotate
+      ;;
+  esac
+
+  command -v systemctl >/dev/null 2>&1 || die "systemd is required for this installer."
+}
+
+binary_name() {
+  printf 'gost-linux-%s' "${ARCH}"
+}
+
+binary_url() {
+  if [[ -n "${GOST_BINARY_URL:-}" ]]; then
+    printf '%s' "${GOST_BINARY_URL}"
+    return 0
+  fi
+  printf '%s/%s' "${RELEASE_BASE_URL}" "$(binary_name)"
+}
+
+prompt_config() {
+  if [[ -z "${SERVER_ADDR}" ]]; then
+    read -r -p "Panel/server address: " SERVER_ADDR
+  fi
+  if [[ -z "${SECRET}" ]]; then
+    read -r -p "Node secret: " SECRET
+  fi
+  [[ -n "${SERVER_ADDR}" && -n "${SECRET}" ]] || die "Address and secret are required."
+}
+
+stop_service() {
+  systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
+}
+
+disable_service() {
+  systemctl disable "${APP_NAME}" >/dev/null 2>&1 || true
+}
+
+write_config() {
+  mkdir -p "${INSTALL_DIR}"
+  cat > "${INSTALL_DIR}/config.json" <<EOF
+{
+  "addr": "${SERVER_ADDR}",
+  "secret": "${SECRET}"
+}
+EOF
+  chmod 600 "${INSTALL_DIR}/config.json"
+
+  if [[ ! -f "${INSTALL_DIR}/gost.json" ]]; then
+    printf '{}\n' > "${INSTALL_DIR}/gost.json"
+    chmod 600 "${INSTALL_DIR}/gost.json"
+  fi
+}
+
+download_binary() {
+  mkdir -p "${INSTALL_DIR}"
+  local url tmp_file
+  url="$(binary_url)"
+  tmp_file="$(mktemp)"
+
+  log "Downloading node binary from: ${url}"
+  curl -fsSL --retry 3 --retry-delay 2 "${url}" -o "${tmp_file}" || {
+    rm -f "${tmp_file}"
+    die "Download failed. Make sure the repository release contains $(binary_name)."
+  }
+
+  install -m 755 "${tmp_file}" "${INSTALL_DIR}/${APP_NAME}"
+  rm -f "${tmp_file}"
+  "${INSTALL_DIR}/${APP_NAME}" -V >/dev/null 2>&1 || die "Downloaded binary failed verification."
+}
+
+setup_logging() {
+  mkdir -p "${LOG_DIR}"
+  touch "${LOG_FILE}"
+  chmod 755 "${LOG_DIR}"
+  chmod 640 "${LOG_FILE}"
+
+  cat > "${LOGROTATE_FILE}" <<EOF
+${LOG_FILE} {
     size 50M
     rotate 0
     missingok
@@ -169,275 +224,189 @@ $LOG_FILE {
 EOF
 }
 
-write_gost_service() {
-  setup_gost_logging
-
-  SERVICE_FILE="/etc/systemd/system/gost.service"
-  cat > "$SERVICE_FILE" <<EOF
+write_service() {
+  cat > "${SERVICE_FILE}" <<EOF
 [Unit]
-Description=Gost Proxy Service
+Description=Flux Panel Gost Node
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/gost
+WorkingDirectory=${INSTALL_DIR}
+ExecStart=${INSTALL_DIR}/${APP_NAME}
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:$LOG_FILE
-StandardError=append:$LOG_FILE
+StandardOutput=append:${LOG_FILE}
+StandardError=append:${LOG_FILE}
 
 [Install]
 WantedBy=multi-user.target
 EOF
 }
 
-
-# 获取用户输入的配置参数
-get_config_params() {
-  if [[ -z "$SERVER_ADDR" || -z "$SECRET" ]]; then
-    echo "请输入配置参数："
-    
-    if [[ -z "$SERVER_ADDR" ]]; then
-      read -p "服务器地址: " SERVER_ADDR
-    fi
-    
-    if [[ -z "$SECRET" ]]; then
-      read -p "密钥: " SECRET
-    fi
-    
-    if [[ -z "$SERVER_ADDR" || -z "$SECRET" ]]; then
-      echo "❌ 参数不完整，操作取消。"
-      exit 1
-    fi
-  fi
-}
-
-# 解析命令行参数
-while getopts "a:s:" opt; do
-  case $opt in
-    a) SERVER_ADDR="$OPTARG" ;;
-    s) SECRET="$OPTARG" ;;
-    *) echo "❌ 无效参数"; exit 1 ;;
-  esac
-done
-
-# 安装功能
-install_gost() {
-  echo "🚀 开始安装 GOST..."
-  get_config_params
-
-    # 检查并安装 tcpkill
-  check_and_install_tcpkill
-  
-
-  mkdir -p "$INSTALL_DIR"
-
-  # 停止并禁用已有服务
-  if systemctl list-units --full -all | grep -Fq "gost.service"; then
-    echo "🔍 检测到已存在的gost服务"
-    systemctl stop gost 2>/dev/null && echo "🛑 停止服务"
-    systemctl disable gost 2>/dev/null && echo "🚫 禁用自启"
-  fi
-
-  # 删除旧文件
-  [[ -f "$INSTALL_DIR/gost" ]] && echo "🧹 删除旧文件 gost" && rm -f "$INSTALL_DIR/gost"
-
-  # 下载 gost
-  echo "⬇️ 下载 gost 中..."
-  curl -L "$DOWNLOAD_URL" -o "$INSTALL_DIR/gost"
-  if [[ ! -f "$INSTALL_DIR/gost" || ! -s "$INSTALL_DIR/gost" ]]; then
-    echo "❌ 下载失败，请检查网络或下载链接。"
-    exit 1
-  fi
-  chmod +x "$INSTALL_DIR/gost"
-  echo "✅ 下载完成"
-
-  # 打印版本
-  echo "🔎 gost 版本：$($INSTALL_DIR/gost -V)"
-
-  # 写入 config.json (安装时总是创建新的)
-  CONFIG_FILE="$INSTALL_DIR/config.json"
-  echo "📄 创建新配置: config.json"
-  cat > "$CONFIG_FILE" <<EOF
-{
-  "addr": "$SERVER_ADDR",
-  "secret": "$SECRET"
-}
-EOF
-
-  # 写入 gost.json
-  GOST_CONFIG="$INSTALL_DIR/gost.json"
-  if [[ -f "$GOST_CONFIG" ]]; then
-    echo "⏭️ 跳过配置文件: gost.json (已存在)"
-  else
-    echo "📄 创建新配置: gost.json"
-    cat > "$GOST_CONFIG" <<EOF
-{}
-EOF
-  fi
-
-  # 加强权限
-  chmod 600 "$INSTALL_DIR"/*.json
-
-  # 创建 systemd 服务
-  write_gost_service
-
-  # 启动服务
+refresh_service() {
   systemctl daemon-reload
-  systemctl enable gost
-  systemctl start gost
-
-  # 检查状态
-  echo "🔄 检查服务状态..."
-  if systemctl is-active --quiet gost; then
-    echo "✅ 安装完成，gost服务已启动并设置为开机启动。"
-    echo "📁 配置目录: $INSTALL_DIR"
-    echo "🔧 服务状态: $(systemctl is-active gost)"
-  else
-    echo "❌ gost服务启动失败，请执行以下命令查看日志："
-    echo "journalctl -u gost -f"
-  fi
+  systemctl enable --now "${APP_NAME}"
 }
 
-# 更新功能
-update_gost() {
-  echo "🔄 开始更新 GOST..."
-  
-  if [[ ! -d "$INSTALL_DIR" ]]; then
-    echo "❌ GOST 未安装，请先选择安装。"
-    return 1
-  fi
-  
-  echo "📥 使用下载地址: $DOWNLOAD_URL"
-  
-  # 检查并安装 tcpkill
-  check_and_install_tcpkill
-  
-  # 先下载新版本
-  echo "⬇️ 下载最新版本..."
-  curl -L "$DOWNLOAD_URL" -o "$INSTALL_DIR/gost.new"
-  if [[ ! -f "$INSTALL_DIR/gost.new" || ! -s "$INSTALL_DIR/gost.new" ]]; then
-    echo "❌ 下载失败。"
-    return 1
+install_flow() {
+  detect_os
+  install_packages
+  prompt_config
+
+  if systemctl list-unit-files --type=service | grep -Fq "${APP_NAME}.service"; then
+    stop_service
+    disable_service
   fi
 
-  # 停止服务
-  if systemctl list-units --full -all | grep -Fq "gost.service"; then
-    echo "🛑 停止 gost 服务..."
-    systemctl stop gost
-  fi
+  setup_logging
+  download_binary
+  write_config
+  write_service
+  refresh_service
 
-  # 替换文件
-  mv "$INSTALL_DIR/gost.new" "$INSTALL_DIR/gost"
-  chmod +x "$INSTALL_DIR/gost"
-  
-  # 打印版本
-  echo "🔎 新版本：$($INSTALL_DIR/gost -V)"
-
-  # 重启服务
-  echo "🔄 重启服务..."
-  write_gost_service
-  systemctl daemon-reload
-  systemctl enable gost
-  systemctl start gost
-  
-  echo "✅ 更新完成，服务已重新启动。"
+  log "Install complete."
+  systemctl is-active --quiet "${APP_NAME}" && log "Service is running."
 }
 
-# 卸载功能
-uninstall_gost() {
-  echo "🗑️ 开始卸载 GOST..."
-  
-  read -p "确认卸载 GOST 吗？此操作将删除所有相关文件 (y/N): " confirm
-  if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-    echo "❌ 取消卸载"
+update_flow() {
+  detect_os
+  install_packages
+
+  [[ -d "${INSTALL_DIR}" ]] || die "The node is not installed."
+  [[ -x "${INSTALL_DIR}/${APP_NAME}" ]] || die "Binary not found in ${INSTALL_DIR}."
+
+  if [[ -n "${SERVER_ADDR}" || -n "${SECRET}" ]]; then
+    prompt_config
+    write_config
+  elif [[ ! -f "${INSTALL_DIR}/config.json" ]]; then
+    prompt_config
+    write_config
+  fi
+
+  setup_logging
+  stop_service
+  download_binary
+  write_service
+  refresh_service
+
+  log "Update complete."
+}
+
+uninstall_flow() {
+  detect_os
+  install_packages
+
+  if ! confirm "Remove the node, its config, logs, and service file?"; then
+    log "Cancelled."
     return 0
   fi
 
-  # 停止并禁用服务
-  if systemctl list-units --full -all | grep -Fq "gost.service"; then
-    echo "🛑 停止并禁用服务..."
-    systemctl stop gost 2>/dev/null
-    systemctl disable gost 2>/dev/null
-  fi
-
-  # 删除服务文件
-  if [[ -f "/etc/systemd/system/gost.service" ]]; then
-    rm -f "/etc/systemd/system/gost.service"
-    echo "🧹 删除服务文件"
-  fi
-
-  # 删除安装目录
-  if [[ -d "$INSTALL_DIR" ]]; then
-    rm -rf "$INSTALL_DIR"
-    echo "🧹 删除安装目录: $INSTALL_DIR"
-  fi
-
-  if [[ -f "$LOGROTATE_FILE" ]]; then
-    rm -f "$LOGROTATE_FILE"
-    echo "🧹 删除日志轮转配置: $LOGROTATE_FILE"
-  fi
-
-  if [[ -d "$LOG_DIR" ]]; then
-    rm -rf "$LOG_DIR"
-    echo "🧹 删除日志目录: $LOG_DIR"
-  fi
-
-  # 重载 systemd
+  stop_service
+  disable_service
+  rm -f "${SERVICE_FILE}"
+  rm -f "${LOGROTATE_FILE}"
+  rm -rf "${INSTALL_DIR}"
+  rm -rf "${LOG_DIR}"
   systemctl daemon-reload
 
-  echo "✅ 卸载完成"
+  log "Uninstall complete."
 }
 
-# 主逻辑
-main() {
-  # 如果提供了命令行参数，直接执行安装
-  if [[ -n "$SERVER_ADDR" && -n "$SECRET" ]]; then
-    install_gost
-    delete_self
-    exit 0
+status_flow() {
+  detect_os
+  if [[ -f "${SERVICE_FILE}" ]]; then
+    systemctl --no-pager --full status "${APP_NAME}" || true
+  else
+    warn "Service file not found."
   fi
+}
 
-  # 显示交互式菜单
-  while true; do
-    show_menu
-    read -p "请输入选项 (1-5): " choice
-    
-    case $choice in
-      1)
-        install_gost
-        delete_self
-        exit 0
+logs_flow() {
+  detect_os
+  journalctl -u "${APP_NAME}" -f --no-pager
+}
+
+show_menu() {
+  cat <<EOF
+===============================================
+              ${APP_NAME} manager
+===============================================
+1. Install / reinstall
+2. Update
+3. Uninstall
+4. Status
+5. Logs
+0. Exit
+===============================================
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      install|update|uninstall|status|logs|menu)
+        ACTION="$1"
+        shift
         ;;
-      2)
-        update_gost
-        delete_self
-        exit 0
+      -a|--addr)
+        [[ $# -ge 2 ]] || die "$1 requires a value."
+        SERVER_ADDR="${2:-}"
+        shift 2
         ;;
-      3)
-        uninstall_gost
-        delete_self
-        exit 0
+      -s|--secret)
+        [[ $# -ge 2 ]] || die "$1 requires a value."
+        SECRET="${2:-}"
+        shift 2
         ;;
-      4)
-        block_protocol
-        delete_self
-        exit 0
+      -y|--yes)
+        ASSUME_YES=1
+        shift
         ;;
-      5)
-        echo "👋 退出脚本"
-        delete_self
+      -h|--help)
+        usage
         exit 0
         ;;
       *)
-        echo "❌ 无效选项，请输入 1-5"
-        echo ""
+        die "Unknown argument: $1"
         ;;
     esac
   done
+
+  if [[ -z "${ACTION}" && ( -n "${SERVER_ADDR}" || -n "${SECRET}" ) ]]; then
+    ACTION="install"
+  fi
+
+  ACTION="${ACTION:-menu}"
 }
 
-# 执行主函数
-main
+main() {
+  ensure_root "$@"
+  parse_args "$@"
+
+  case "${ACTION}" in
+    install) install_flow ;;
+    update) update_flow ;;
+    uninstall) uninstall_flow ;;
+    status) status_flow ;;
+    logs) logs_flow ;;
+    menu)
+      while true; do
+        show_menu
+        read -r -p "Choose [0-5]: " choice
+        case "${choice}" in
+          1) install_flow; break ;;
+          2) update_flow; break ;;
+          3) uninstall_flow; break ;;
+          4) status_flow ;;
+          5) logs_flow ;;
+          0) exit 0 ;;
+          *) echo "Invalid choice." ;;
+        esac
+      done
+      ;;
+  esac
+}
+
+main "$@"

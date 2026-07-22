@@ -1,3 +1,9 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${DOCKER_LOG_MAX_SIZE:-50m}
+    max-file: "${DOCKER_LOG_MAX_FILE:-1}"
+
 services:
   mysql:
     image: mysql:5.7
@@ -20,6 +26,7 @@ services:
       --innodb_buffer_pool_size=256M
     networks:
       - gost-network
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       timeout: 10s
@@ -29,6 +36,8 @@ services:
     image: phpmyadmin/phpmyadmin
     container_name: gost-phpmyadmin
     restart: unless-stopped
+    profiles:
+      - tools
     environment:
       PMA_HOST: mysql           # 这里写 MySQL 服务名
       PMA_PORT: 3306
@@ -39,9 +48,12 @@ services:
       - "8066:80"               # phpMyAdmin 对外暴露 http://localhost:8066
     networks:
       - gost-network
+    logging: *default-logging
 
   backend:
-    image: brunuhville/springboot-backend:latest
+    build:
+      context: ./springboot-backend
+    image: ${APP_SLUG:-flux-panel-rev}-backend:local
     container_name: springboot-backend
     restart: unless-stopped
     environment:
@@ -61,6 +73,7 @@ services:
         condition: service_healthy
     networks:
       - gost-network
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "sh", "-c", "wget --no-verbose --tries=1 --spider http://localhost:6365/flow/test || exit 1"]
       interval: 30s
@@ -69,7 +82,9 @@ services:
       start_period: 90s
 
   frontend:
-    image: brunuhville/vite-frontend:latest
+    build:
+      context: ./vite-frontend
+    image: ${APP_SLUG:-flux-panel-rev}-frontend:local
     container_name: vite-frontend
     restart: unless-stopped
     ports:
@@ -79,6 +94,7 @@ services:
         condition: service_healthy
     networks:
       - gost-network
+    logging: *default-logging
 
 
 volumes:

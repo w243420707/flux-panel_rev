@@ -1,0 +1,98 @@
+name: Build Gost Node Binaries
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "go-gost/**"
+      - ".github/workflows/build-gost-binaries.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.asset }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            goarm: ""
+            asset: gost-linux-amd64
+          - goarch: arm64
+            goarm: ""
+            asset: gost-linux-arm64
+          - goarch: arm
+            goarm: "7"
+            asset: gost-linux-armv7
+          - goarch: arm
+            goarm: "6"
+            asset: gost-linux-armv6
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.4"
+          cache-dependency-path: |
+            go-gost/go.sum
+            go-gost/x/go.sum
+
+      - name: Build
+        working-directory: go-gost
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+        run: |
+          mkdir -p ../dist
+          go build -trimpath -ldflags="-s -w" -o "../dist/${{ matrix.asset }}" .
+
+      - name: Check binary
+        run: |
+          file "dist/${{ matrix.asset }}"
+          chmod +x "dist/${{ matrix.asset }}"
+          if [ "${{ matrix.goarch }}" = "amd64" ]; then
+            ./dist/${{ matrix.asset }} -V
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: gost-binaries-${{ github.sha }}
+          name: Gost node binaries ${{ github.sha }}
+          body: |
+            Linux gost node binaries built from this repository.
+
+            Assets:
+            - gost-linux-amd64
+            - gost-linux-arm64
+            - gost-linux-armv7
+            - gost-linux-armv6
+          files: dist/gost-linux-*

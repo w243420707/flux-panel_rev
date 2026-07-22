@@ -1,15 +1,15 @@
-# 多阶段构建 - 构建阶段
 FROM node:20.19.0 AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install --legacy-peer-deps
+RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
-# 生产阶段
 FROM nginx:stable-alpine AS production-stage
 
 COPY nginx.conf /etc/nginx/nginx.conf

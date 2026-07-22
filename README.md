@@ -13,6 +13,7 @@
 - 限速管理：支持按用户、隧道维度配置限速规则。
 - 自动部署：支持 VPS 一键安装、更新、卸载、状态查看、日志查看、证书续期和 Docker 缓存清理。
 - 运行维护：面板容器后台运行并随 Docker 自动恢复，节点端使用 systemd 开机自启。
+- 长期复用：面板前后端从本仓库源码构建，不再依赖第三方面板镜像；节点端 Linux 二进制由本仓库 Release 发布。
 
 ## 部署教程
 
@@ -51,6 +52,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 识别 Linux 发行版、CPU 架构、包管理器和 systemd。
 - 安装 Docker、Docker Compose、Nginx、Certbot、Git 等环境。
 - 拉取当前仓库源码并构建前端、后端镜像。
+- 前端依赖使用 `pnpm-lock.yaml` 锁定版本，降低后续构建漂移风险。
 - 使用 Docker Compose 后台启动 MySQL、后端、前端等服务。
 - 配置 Nginx 反向代理和 HTTPS 证书。
 - 面板端 Docker 日志循环保存 `50MB`，超过后旧日志自动删除；同时可清理无用构建缓存和旧镜像。
@@ -81,7 +83,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 节点安装脚本会自动：
 
-- 下载节点端 `gost` 程序。
+- 自动识别 Linux CPU 架构，并从本仓库 Release 下载对应节点端 `gost` 程序。
 - 写入 `/etc/gost/config.json` 和 `/etc/gost/gost.json`。
 - 创建 `gost.service`。
 - 设置 systemd 开机自启和后台运行。
@@ -100,3 +102,8 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 简化面板端日志策略，Docker 日志循环保存 `50MB`，超过后旧日志自动删除。
 - 增加菜单项 `清理 Docker 缓存`。
 - 简化节点端日志策略，节点日志循环保存 `50MB`，超过后旧日志自动删除。
+- 移除旧面板安装链路对第三方面板镜像的依赖，旧入口统一转发到 `deploy.sh`。
+- 节点安装脚本改为自动识别 Linux 架构，并从本仓库 Release 拉取 `gost-linux-*` 二进制。
+- 新增 GitHub Actions 自动构建节点端 Linux `amd64`、`arm64`、`armv7`、`armv6` 二进制。
+- 移除旧的 macOS 节点二进制，避免 Linux VPS 误下载后无法运行。
+- 前端 Docker 构建切换到 `pnpm-lock.yaml` 锁定依赖版本。
