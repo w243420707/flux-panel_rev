@@ -110,6 +110,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 前端 Docker 构建镜像升级到 Node `22.13.1`，匹配 `pnpm@11.7.0` 的运行要求。
 - 前端 Docker 构建改用 `pnpm ci` 和 pnpm 配置项，移除无效的 `network-timeout` 命令行参数。
 - 前端默认关闭 legacy 构建并提升 Node heap，降低 VPS 上的打包内存峰值。
+- 修复关闭 legacy 构建后 `toFile.mjs` 误删现代浏览器入口脚本导致页面黑屏的问题。
 - 新增并提交节点端 Linux `amd64`、`arm64`、`armv7`、`armv6` 二进制。
 - 移除旧的 macOS 节点二进制，避免 Linux VPS 误下载后无法运行。
 - 前端 Docker 构建切换到 `pnpm-lock.yaml` 锁定依赖版本。
