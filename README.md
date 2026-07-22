@@ -106,6 +106,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 节点安装脚本改为自动识别 Linux 架构，并从本仓库 `go-gost/releases/` 拉取 `gost-linux-*` 二进制。
 - 节点安装脚本补充 `armv8l`、`armhf`、`armel` 等常见 ARM 别名识别。
 - 面板更新脚本支持识别 Git branch、tag、commit，并在更新时强制重建容器应用最新代码。
+- 前端 Docker 构建移除 Corepack 下载链路，改为 npm 安装 pnpm，并支持 npm registry fallback。
 - 新增并提交节点端 Linux `amd64`、`arm64`、`armv7`、`armv6` 二进制。
 - 移除旧的 macOS 节点二进制，避免 Linux VPS 误下载后无法运行。
 - 前端 Docker 构建切换到 `pnpm-lock.yaml` 锁定依赖版本。

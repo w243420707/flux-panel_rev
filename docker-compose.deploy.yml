@@ -51,6 +51,8 @@ services:
   backend:
     build:
       context: ./springboot-backend
+      args:
+        MAVEN_MIRROR_URL: ${MAVEN_MIRROR_URL:-}
     image: ${APP_SLUG:-flux-panel-rev}-backend:local
     container_name: ${APP_SLUG:-flux-panel-rev}-backend
     restart: unless-stopped
@@ -82,6 +84,10 @@ services:
   frontend:
     build:
       context: ./vite-frontend
+      args:
+        PNPM_VERSION: ${PNPM_VERSION:-11.7.0}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        NPM_FALLBACK_REGISTRY: ${NPM_FALLBACK_REGISTRY:-https://registry.npmmirror.com}
     image: ${APP_SLUG:-flux-panel-rev}-frontend:local
     container_name: ${APP_SLUG:-flux-panel-rev}-frontend
     restart: unless-stopped
