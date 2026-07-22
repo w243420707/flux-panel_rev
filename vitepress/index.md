@@ -11,7 +11,7 @@ hero:
       link: /getting-started
     - theme: alt
       text: 查看源码（仅为fork纪念版，原作者已删库。方便后人使用。十分少见的开源面板，不该湮灭断绝。）
-      link: https://github.com/BrunuhVille/flux-panel
+      link: https://github.com/w243420707/flux-panel_rev
 
 features:
   - icon: 🔄

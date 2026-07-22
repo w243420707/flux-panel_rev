@@ -1,7 +1,7 @@
 {
-  "name": "flux-panel-docs",
+  "name": "flux-panel_rev-docs",
   "version": "1.0.0",
-  "description": "flux-panel转发面板文档",
+  "description": "flux-panel_rev转发面板文档",
   "type": "module",
   "scripts": {
     "dev": "vitepress dev",
