@@ -19,9 +19,9 @@
     <appender name="logFile" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
             <FileNamePattern>${FILE_PATH}</FileNamePattern>
-            <maxFileSize>20MB</maxFileSize>
-            <maxHistory>14</maxHistory>
-            <totalSizeCap>200MB</totalSizeCap>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>1</maxHistory>
+            <totalSizeCap>50MB</totalSizeCap>
         </rollingPolicy>
         <layout class="ch.qos.logback.classic.PatternLayout">
             <Pattern>

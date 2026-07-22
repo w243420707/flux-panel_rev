@@ -160,10 +160,8 @@ setup_gost_logging() {
 
   cat > "$LOGROTATE_FILE" <<EOF
 $LOG_FILE {
-    size 20M
-    rotate 7
-    compress
-    delaycompress
+    size 50M
+    rotate 0
     missingok
     notifempty
     copytruncate

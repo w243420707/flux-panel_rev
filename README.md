@@ -11,7 +11,7 @@
 - 用户管理：支持用户、套餐、隧道权限和转发数量控制。
 - 流量统计：支持入站/出站流量统计，支持单向或双向计费模式。
 - 限速管理：支持按用户、隧道维度配置限速规则。
-- 自动部署：支持 VPS 一键安装、更新、卸载、状态查看、日志查看、证书续期、日志和缓存清理。
+- 自动部署：支持 VPS 一键安装、更新、卸载、状态查看、日志查看、证书续期和 Docker 缓存清理。
 - 运行维护：面板容器后台运行并随 Docker 自动恢复，节点端使用 systemd 开机自启。
 
 ## 部署教程
@@ -33,7 +33,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 4. 查看状态
 5. 查看日志
 6. 续期证书
-7. 清理日志 / 缓存
+7. 清理 Docker 缓存
 0. 退出
 ```
 
@@ -53,7 +53,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 拉取当前仓库源码并构建前端、后端镜像。
 - 使用 Docker Compose 后台启动 MySQL、后端、前端等服务。
 - 配置 Nginx 反向代理和 HTTPS 证书。
-- 限制 Docker 容器日志大小，清理无用构建缓存和旧镜像。
+- 面板端 Docker 日志循环保存 `50MB`，超过后旧日志自动删除；同时可清理无用构建缓存和旧镜像。
 
 ### 面板端更新
 
@@ -86,7 +86,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 创建 `gost.service`。
 - 设置 systemd 开机自启和后台运行。
 - 将节点日志写入 `/var/log/gost/gost.log`。
-- 配置 logrotate，单个日志文件 `20MB`，保留 `7` 份并压缩旧日志。
+- 配置 logrotate，节点端日志循环保存 `50MB`，超过后旧日志自动删除。
 
 ## 更新日志
 
@@ -97,6 +97,6 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 新增源码构建部署编排 `docker-compose.deploy.yml`。
 - 统一部署入口，运行后进入安装、更新、卸载等交互菜单。
 - 修复前端 Docker 构建时 npm peer dependency 解析失败的问题。
-- 增加面板端日志轮转和 Docker 缓存清理控制。
-- 增加菜单项 `清理日志 / 缓存`。
-- 增加节点端日志文件和 logrotate 控制，避免节点日志持续增长。
+- 简化面板端日志策略，Docker 日志循环保存 `50MB`，超过后旧日志自动删除。
+- 增加菜单项 `清理 Docker 缓存`。
+- 简化节点端日志策略，节点日志循环保存 `50MB`，超过后旧日志自动删除。

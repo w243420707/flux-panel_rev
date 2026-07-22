@@ -48,7 +48,7 @@ Commands:
   uninstall     Stop and remove services
   status        Show service status
   logs          Follow service logs
-  cleanup       Clean old logs, unused images, and Docker build cache
+  cleanup       Clean unused Docker resources and build cache
   renew-cert    Renew Let's Encrypt certificate and reload Nginx
   menu          Interactive menu (default)
 
@@ -349,8 +349,8 @@ write_env_file() {
   DB_USER="${DB_USER:-$(random_string)}"
   DB_PASSWORD="${DB_PASSWORD:-$(random_string)}"
   JWT_SECRET="${JWT_SECRET:-$(random_string)}"
-  DOCKER_LOG_MAX_SIZE="${DOCKER_LOG_MAX_SIZE:-20m}"
-  DOCKER_LOG_MAX_FILE="${DOCKER_LOG_MAX_FILE:-3}"
+  DOCKER_LOG_MAX_SIZE="${DOCKER_LOG_MAX_SIZE:-50m}"
+  DOCKER_LOG_MAX_FILE="${DOCKER_LOG_MAX_FILE:-1}"
   FRONTEND_PORT="${FRONTEND_PORT:-${FRONTEND_PORT_ENV:-6366}}"
   BACKEND_PORT="${BACKEND_PORT:-${BACKEND_PORT_ENV:-6365}}"
   PHPMYADMIN_PORT="${PHPMYADMIN_PORT:-${PHPMYADMIN_PORT_ENV:-8066}}"
@@ -876,7 +876,7 @@ cleanup_flow() {
   log "Current Docker disk usage:"
   docker system df || true
 
-  if ! confirm "Clean unused containers, networks, dangling images, build cache, and backend logs older than 14 days?"; then
+  if ! confirm "Clean unused containers, networks, dangling images, and build cache?"; then
     log "Cancelled."
     return 0
   fi
@@ -885,10 +885,6 @@ cleanup_flow() {
   docker network prune -f || true
   docker image prune -f || true
   docker builder prune -af --filter "until=24h" || true
-
-  if docker ps --format '{{.Names}}' | grep -Fxq "${APP_SLUG}-backend"; then
-    docker exec "${APP_SLUG}-backend" sh -c 'find /app/logs -type f -name "*.log" -mtime +14 -delete' || true
-  fi
 
   log "Docker disk usage after cleanup:"
   docker system df || true
@@ -925,7 +921,7 @@ menu_loop() {
  4. 查看状态
  5. 查看日志
  6. 续期证书
- 7. 清理日志 / 缓存
+ 7. 清理 Docker 缓存
  0. 退出
 ===============================================
 EOF
