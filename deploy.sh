@@ -569,15 +569,85 @@ compose() {
 }
 
 stop_existing_stack_for_install() {
-  [[ -f "${APP_DIR}/${COMPOSE_FILE}" && -f "${ENV_FILE}" ]] || return 0
+  if [[ -f "${APP_DIR}/${COMPOSE_FILE}" && -f "${ENV_FILE}" ]]; then
+    log "Stopping existing project containers before install/reinstall..."
+    compose down --remove-orphans || warn "Docker Compose down failed; removing known project containers directly."
+  fi
 
-  log "Stopping existing project containers before install/reinstall..."
-  compose down --remove-orphans || warn "Docker Compose down failed; removing known project containers directly."
   docker rm -f \
     "${APP_SLUG}-frontend" \
     "${APP_SLUG}-backend" \
     "${APP_SLUG}-phpmyadmin" \
     "${APP_SLUG}-mysql" >/dev/null 2>&1 || true
+}
+
+extract_allocated_port() {
+  sed -n 's/.*Bind for .*:\([0-9][0-9]*\) failed: port is already allocated.*/\1/p' | tail -n 1
+}
+
+bump_conflicting_port() {
+  local port="$1"
+  local key=""
+  local next
+
+  load_env
+  if [[ "${port}" == "${FRONTEND_PORT:-}" ]]; then
+    key="FRONTEND_PORT"
+  elif [[ "${port}" == "${BACKEND_PORT:-}" ]]; then
+    key="BACKEND_PORT"
+  elif [[ "${port}" == "${PHPMYADMIN_PORT:-}" ]]; then
+    key="PHPMYADMIN_PORT"
+  else
+    warn "Could not map conflicting port ${port} to a managed service port."
+    return 1
+  fi
+
+  next=$((port + 1))
+  while port_in_use_by_other "${next}"; do
+    next=$((next + 1))
+  done
+
+  warn "${key} ${port} is unavailable. Retrying with ${next}."
+  set_env_value "${key}" "${next}"
+  printf -v "${key}" '%s' "${next}"
+}
+
+compose_up_with_port_retry() {
+  local recreate="${1:-0}"
+  local attempt=1
+  local max_attempts=8
+  local output
+  local status
+  local port
+
+  while [[ "${attempt}" -le "${max_attempts}" ]]; do
+    if [[ "${recreate}" -eq 1 ]]; then
+      if output="$(compose up -d --force-recreate --remove-orphans 2>&1)"; then
+        printf '%s\n' "${output}"
+        return 0
+      else
+        status=$?
+      fi
+    else
+      if output="$(compose up -d --remove-orphans 2>&1)"; then
+        printf '%s\n' "${output}"
+        return 0
+      else
+        status=$?
+      fi
+    fi
+
+    printf '%s\n' "${output}" >&2
+    port="$(printf '%s\n' "${output}" | extract_allocated_port)"
+    [[ -n "${port}" ]] || return "${status}"
+
+    warn "Port ${port} was allocated during container startup. Releasing partial stack and retrying."
+    compose down --remove-orphans >/dev/null 2>&1 || true
+    bump_conflicting_port "${port}" || return "${status}"
+    attempt=$((attempt + 1))
+  done
+
+  die "Could not find an available local bind port after ${max_attempts} attempts."
 }
 
 install_cli_wrapper() {
@@ -610,12 +680,8 @@ wait_for_health() {
 start_stack() {
   local recreate="${1:-0}"
   log "Building and starting containers in background..."
-  if [[ "${recreate}" -eq 1 ]]; then
-    compose build
-    compose up -d --force-recreate --remove-orphans
-  else
-    compose up -d --build --remove-orphans
-  fi
+  compose build
+  compose_up_with_port_retry "${recreate}"
   wait_for_health "${APP_SLUG}-mysql" 180 || true
   wait_for_health "${APP_SLUG}-backend" 240 || true
 }
