@@ -367,6 +367,7 @@ write_env_file() {
   MAVEN_MIRROR_URL="${MAVEN_MIRROR_URL:-}"
   DOCKER_LOG_MAX_SIZE="${DOCKER_LOG_MAX_SIZE:-50m}"
   DOCKER_LOG_MAX_FILE="${DOCKER_LOG_MAX_FILE:-1}"
+  DOCKER_BUILD_CACHE_KEEP="${DOCKER_BUILD_CACHE_KEEP:-512MB}"
   FRONTEND_PORT="${FRONTEND_PORT:-${FRONTEND_PORT_ENV:-6366}}"
   BACKEND_PORT="${BACKEND_PORT:-${BACKEND_PORT_ENV:-6365}}"
   PHPMYADMIN_PORT="${PHPMYADMIN_PORT:-${PHPMYADMIN_PORT_ENV:-8066}}"
@@ -412,6 +413,7 @@ NPM_FALLBACK_REGISTRY=${NPM_FALLBACK_REGISTRY}
 MAVEN_MIRROR_URL=${MAVEN_MIRROR_URL}
 DOCKER_LOG_MAX_SIZE=${DOCKER_LOG_MAX_SIZE}
 DOCKER_LOG_MAX_FILE=${DOCKER_LOG_MAX_FILE}
+DOCKER_BUILD_CACHE_KEEP=${DOCKER_BUILD_CACHE_KEEP}
 FRONTEND_PORT=${FRONTEND_PORT}
 BACKEND_PORT=${BACKEND_PORT}
 PHPMYADMIN_PORT=${PHPMYADMIN_PORT}
@@ -542,9 +544,32 @@ start_stack() {
 }
 
 post_deploy_cleanup() {
-  log "Cleaning unused Docker build cache and dangling images..."
-  docker builder prune -af --filter "until=168h" >/dev/null 2>&1 || true
+  log "Cleaning Docker build cache and dangling images..."
+  if ! docker builder prune -af --keep-storage "${DOCKER_BUILD_CACHE_KEEP:-512MB}" >/dev/null 2>&1; then
+    docker builder prune -af >/dev/null 2>&1 || true
+  fi
   docker image prune -f >/dev/null 2>&1 || true
+  cleanup_package_cache
+  docker system df || true
+}
+
+cleanup_package_cache() {
+  log "Cleaning package manager cache..."
+  case "${PKG_MANAGER}" in
+    apt)
+      apt-get clean >/dev/null 2>&1 || true
+      rm -rf /var/lib/apt/lists/* >/dev/null 2>&1 || true
+      ;;
+    dnf)
+      dnf clean all >/dev/null 2>&1 || true
+      ;;
+    yum)
+      yum clean all >/dev/null 2>&1 || true
+      ;;
+    apk)
+      rm -rf /var/cache/apk/* >/dev/null 2>&1 || true
+      ;;
+  esac
 }
 
 nginx_conf_path() {
@@ -930,7 +955,7 @@ cleanup_flow() {
   log "Current Docker disk usage:"
   docker system df || true
 
-  if ! confirm "Clean unused containers, networks, dangling images, and build cache?"; then
+  if ! confirm "Clean unused containers, networks, images, package cache, and build cache?"; then
     log "Cancelled."
     return 0
   fi
@@ -938,7 +963,10 @@ cleanup_flow() {
   docker container prune -f || true
   docker network prune -f || true
   docker image prune -f || true
-  docker builder prune -af --filter "until=24h" || true
+  if ! docker builder prune -af --keep-storage "${DOCKER_BUILD_CACHE_KEEP:-512MB}" >/dev/null 2>&1; then
+    docker builder prune -af >/dev/null 2>&1 || true
+  fi
+  cleanup_package_cache
 
   log "Docker disk usage after cleanup:"
   docker system df || true
