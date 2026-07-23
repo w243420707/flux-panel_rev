@@ -313,10 +313,37 @@ random_string() {
 port_in_use() {
   local port="$1"
   if command -v ss >/dev/null 2>&1; then
-    ss -ltn "( sport = :${port} )" 2>/dev/null | grep -q ":${port}"
-  else
-    netstat -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${port}$"
+    ss -H -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${port}$" && return 0
+  elif command -v netstat >/dev/null 2>&1; then
+    netstat -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${port}$" && return 0
   fi
+
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker ps --format '{{.Ports}}' 2>/dev/null | grep -Eq "(:|\\[::\\]:|0\\.0\\.0\\.0:)${port}->" && return 0
+  fi
+
+  return 1
+}
+
+own_container_uses_port() {
+  local port="$1"
+  local container ports
+  for container in "${APP_SLUG}-frontend" "${APP_SLUG}-backend" "${APP_SLUG}-phpmyadmin"; do
+    ports="$(docker inspect -f '{{range $port, $bindings := .NetworkSettings.Ports}}{{range $bindings}}{{.HostIp}}:{{.HostPort}} {{end}}{{end}}' "${container}" 2>/dev/null || true)"
+    if printf '%s\n' "${ports}" | tr ' ' '\n' | grep -Eq "[:.]${port}$"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+port_in_use_by_other() {
+  local port="$1"
+  port_in_use "${port}" || return 1
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && own_container_uses_port "${port}"; then
+    return 1
+  fi
+  return 0
 }
 
 pick_port() {
@@ -325,6 +352,34 @@ pick_port() {
     port=$((port + 1))
   done
   printf '%s' "${port}"
+}
+
+ensure_runtime_port() {
+  local var_name="$1"
+  local label="$2"
+  local current="${!var_name:-}"
+  local next
+
+  [[ -n "${current}" ]] || return 0
+  next="${current}"
+  while port_in_use_by_other "${next}"; do
+    next=$((next + 1))
+  done
+
+  if [[ "${next}" != "${current}" ]]; then
+    warn "${label} port ${current} is already used by another process/container. Using ${next} instead."
+    printf -v "${var_name}" '%s' "${next}"
+    set_env_value "${var_name}" "${next}"
+  fi
+}
+
+ensure_runtime_ports() {
+  load_env
+  ensure_runtime_port FRONTEND_PORT "Frontend"
+  ensure_runtime_port BACKEND_PORT "Backend"
+  if [[ "${COMPOSE_PROFILES:-}" == *tools* ]]; then
+    ensure_runtime_port PHPMYADMIN_PORT "phpMyAdmin"
+  fi
 }
 
 load_env() {
@@ -513,6 +568,18 @@ compose() {
   DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose --env-file "${ENV_FILE}" -f "${APP_DIR}/${COMPOSE_FILE}" "$@"
 }
 
+stop_existing_stack_for_install() {
+  [[ -f "${APP_DIR}/${COMPOSE_FILE}" && -f "${ENV_FILE}" ]] || return 0
+
+  log "Stopping existing project containers before install/reinstall..."
+  compose down --remove-orphans || warn "Docker Compose down failed; removing known project containers directly."
+  docker rm -f \
+    "${APP_SLUG}-frontend" \
+    "${APP_SLUG}-backend" \
+    "${APP_SLUG}-phpmyadmin" \
+    "${APP_SLUG}-mysql" >/dev/null 2>&1 || true
+}
+
 install_cli_wrapper() {
   cat > "/usr/local/bin/${APP_SLUG}" <<EOF
 #!/usr/bin/env bash
@@ -545,9 +612,9 @@ start_stack() {
   log "Building and starting containers in background..."
   if [[ "${recreate}" -eq 1 ]]; then
     compose build
-    compose up -d --force-recreate
+    compose up -d --force-recreate --remove-orphans
   else
-    compose up -d --build
+    compose up -d --build --remove-orphans
   fi
   wait_for_health "${APP_SLUG}-mysql" 180 || true
   wait_for_health "${APP_SLUG}-backend" 240 || true
@@ -884,8 +951,10 @@ install_flow() {
   configure_firewall
   collect_install_config
   sync_repo
+  stop_existing_stack_for_install
   write_env_file
   install_cli_wrapper
+  ensure_runtime_ports
   start_stack
   post_deploy_cleanup
   configure_nginx
@@ -902,6 +971,7 @@ update_flow() {
   sync_repo
   set_env_value DEPLOY_REF "${DEPLOY_REF}"
   install_cli_wrapper
+  ensure_runtime_ports
   start_stack 1
   post_deploy_cleanup
   configure_nginx

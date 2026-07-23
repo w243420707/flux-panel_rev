@@ -109,6 +109,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 后端运行镜像不再把 apt 源切到国内镜像，避免海外环境下载变慢。
 - 前后端 Docker 构建启用 BuildKit 依赖缓存，Maven 和 pnpm 下载结果会在后续更新中复用。
 - 面板更新默认不再强制拉取基础镜像，减少海外 VPS 的重复网络下载。
+- 部署脚本增强端口占用检测，安装/重装前会清理本项目旧容器，并在外部进程占用端口时自动切换到可用端口。
 
 ### 2026-07-23
 
