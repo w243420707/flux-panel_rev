@@ -42,6 +42,16 @@ export const updateTunnel = (data: any) => Network.post("/tunnel/update", data);
 export const deleteTunnel = (id: number) => Network.post("/tunnel/delete", { id });
 export const diagnoseTunnel = (tunnelId: number) => Network.post("/tunnel/diagnose", { tunnelId });
 
+// Cloudflare DNS/DDNS 管理
+export const getCloudflareDnsSetting = () => Network.post("/cloudflare-dns/setting");
+export const updateCloudflareDnsSetting = (data: any) => Network.post("/cloudflare-dns/setting/update", data);
+export const testCloudflareDnsSetting = (data: any) => Network.post("/cloudflare-dns/test", data);
+export const getCloudflareDnsBindingList = () => Network.post("/cloudflare-dns/binding/list");
+export const saveCloudflareDnsBinding = (data: any) => Network.post("/cloudflare-dns/binding/save", data);
+export const deleteCloudflareDnsBinding = (id: number) => Network.post("/cloudflare-dns/binding/delete", { id });
+export const syncCloudflareDnsBinding = (id: number) => Network.post("/cloudflare-dns/binding/sync", { id });
+export const syncCloudflareDnsAll = () => Network.post("/cloudflare-dns/sync");
+
 // 用户隧道权限管理操作 - 全部使用POST请求
 export const assignUserTunnel = (data: any) => Network.post("/tunnel/user/assign", data);
 export const getUserTunnelList = (queryData: any = {}) => Network.post("/tunnel/user/list", queryData);
@@ -88,4 +98,4 @@ export const updateConfig = (name: string, value: string) => Network.post("/conf
 // 验证码相关接口
 export const checkCaptcha = () => Network.post("/captcha/check");
 export const generateCaptcha = () => Network.post(`/captcha/generate`);
-export const verifyCaptcha = (data: { captchaId: string; trackData: string }) => Network.post("/captcha/verify", data); 
+export const verifyCaptcha = (data: { captchaId: string; trackData: string }) => Network.post("/captcha/verify", data);

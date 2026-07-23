@@ -12,6 +12,8 @@ import com.admin.entity.Tunnel;
 import com.admin.entity.ViteConfig;
 import com.admin.mapper.NodeMapper;
 import com.admin.mapper.TunnelMapper;
+import com.admin.service.CloudflareDnsSettingService;
+import com.admin.service.CloudflareDnsSyncService;
 import com.admin.service.ForwardService;
 import com.admin.service.NodeService;
 import com.admin.service.TunnelService;
@@ -24,8 +26,11 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.List;
-import org.springframework.beans.factory.annotation.Value;
 
 /**
  * <p>
@@ -80,6 +85,14 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
     @Resource
     ViteConfigService viteConfigService;
+
+    @Resource
+    @Lazy
+    private CloudflareDnsSettingService cloudflareDnsSettingService;
+
+    @Resource
+    @Lazy
+    private CloudflareDnsSyncService cloudflareDnsSyncService;
 
 
     // ========== 公共接口实现 ==========
@@ -152,6 +165,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
         refreshMultiNodeTunnelIps(updateNode.getId());
         refreshForwardConfigsByNode(updateNode.getId());
+        syncCloudflareDnsByNode(updateNode.getId(), "node-update");
 
         return R.ok(SUCCESS_UPDATE_MSG);
     }
@@ -214,6 +228,68 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         return builder.toString();
     }
 
+    private String normalizeRuntimeIp(String clientIp) {
+        if (StrUtil.isBlank(clientIp)) {
+            return null;
+        }
+        String value = clientIp.trim();
+        int commaIndex = value.indexOf(',');
+        if (commaIndex >= 0) {
+            value = value.substring(0, commaIndex).trim();
+        }
+        if (value.startsWith("[") && value.endsWith("]")) {
+            value = value.substring(1, value.length() - 1);
+        }
+        int scopeIndex = value.indexOf('%');
+        if (scopeIndex >= 0) {
+            value = value.substring(0, scopeIndex);
+        }
+        return value;
+    }
+
+    private boolean isPublicIp(String ip) {
+        try {
+            InetAddress address = InetAddress.getByName(ip);
+            if (address.isAnyLocalAddress()
+                    || address.isLoopbackAddress()
+                    || address.isLinkLocalAddress()
+                    || address.isSiteLocalAddress()
+                    || address.isMulticastAddress()) {
+                return false;
+            }
+
+            byte[] bytes = address.getAddress();
+            if (address instanceof Inet4Address && bytes.length == 4) {
+                int first = bytes[0] & 0xff;
+                int second = bytes[1] & 0xff;
+                int third = bytes[2] & 0xff;
+                return !(first == 0
+                        || first == 10
+                        || first == 127
+                        || first == 169 && second == 254
+                        || first == 172 && second >= 16 && second <= 31
+                        || first == 192 && second == 168
+                        || first == 100 && second >= 64 && second <= 127
+                        || first == 192 && second == 0 && (third == 0 || third == 2)
+                        || first == 198 && (second == 18 || second == 19)
+                        || first == 198 && second == 51 && third == 100
+                        || first == 203 && second == 0 && third == 113
+                        || first >= 224);
+            }
+
+            if (address instanceof Inet6Address && bytes.length == 16) {
+                int first = bytes[0] & 0xff;
+                int second = bytes[1] & 0xff;
+                return !(first == 0xfc
+                        || first == 0xfd
+                        || first == 0x20 && second == 0x01 && (bytes[2] & 0xff) == 0x0d && (bytes[3] & 0xff) == 0xb8);
+            }
+            return true;
+        } catch (UnknownHostException e) {
+            return false;
+        }
+    }
+
     @Override
     public R deleteNode(Long id) {
         // 1. 验证节点是否存在
@@ -248,7 +324,59 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         return node;
     }
 
+    @Override
+    public boolean refreshRuntimeNodeServerIp(Long id, String reportedPublicIp, String clientIp) {
+        if (id == null || (StrUtil.isBlank(reportedPublicIp) && StrUtil.isBlank(clientIp))) {
+            return false;
+        }
+        if (cloudflareDnsSettingService.getCurrentSetting().getAutoUpdateNodeIp() == null
+                || cloudflareDnsSettingService.getCurrentSetting().getAutoUpdateNodeIp() != 1) {
+            return false;
+        }
+
+        String normalizedIp = resolveRuntimeNodeServerIp(reportedPublicIp, clientIp);
+        if (StrUtil.isBlank(normalizedIp) || !isPublicIp(normalizedIp)) {
+            return false;
+        }
+
+        Node node = this.getById(id);
+        if (node == null || normalizedIp.equals(node.getServerIp())) {
+            return false;
+        }
+
+        node.setServerIp(normalizedIp);
+        node.setUpdatedTime(System.currentTimeMillis());
+        boolean updated = this.updateById(node);
+        if (updated) {
+            refreshMultiNodeTunnelIps(id);
+            refreshForwardConfigsByNode(id);
+            syncCloudflareDnsByNode(id, "node-runtime-ip");
+        }
+        return updated;
+    }
+
     // ========== 私有辅助方法 ==========
+
+    private String resolveRuntimeNodeServerIp(String reportedPublicIp, String clientIp) {
+        String normalizedReportedIp = normalizeRuntimeIp(reportedPublicIp);
+        if (StrUtil.isNotBlank(normalizedReportedIp) && isPublicIp(normalizedReportedIp)) {
+            return normalizedReportedIp;
+        }
+
+        String normalizedClientIp = normalizeRuntimeIp(clientIp);
+        if (StrUtil.isNotBlank(normalizedClientIp) && isPublicIp(normalizedClientIp)) {
+            return normalizedClientIp;
+        }
+
+        return null;
+    }
+
+    private void syncCloudflareDnsByNode(Long nodeId, String trigger) {
+        try {
+            cloudflareDnsSyncService.syncBindingsByNode(nodeId, trigger);
+        } catch (Exception ignored) {
+        }
+    }
 
     /**
      * 构建新节点对象

@@ -53,6 +53,10 @@ public final class TunnelNodeUtil {
         return nodeId != null && getOutNodeIds(tunnel).contains(nodeId);
     }
 
+    public static List<Long> parseNodeIds(String raw) {
+        return parseNodeIds(raw, null);
+    }
+
     public static String toJsonArray(List<Long> nodeIds) {
         List<Long> ids = normalizeNodeIds(nodeIds, null);
         return ids.stream()

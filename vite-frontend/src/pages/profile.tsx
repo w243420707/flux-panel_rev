@@ -89,6 +89,18 @@ export default function ProfilePage() {
       ),
       color: 'bg-purple-100 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400',
       description: '配置网站设置'
+    },
+    {
+      path: '/cloudflare-dns',
+      label: 'DNS管理',
+      icon: (
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M5.5 11.5a3.5 3.5 0 016.75-1.28A2.75 2.75 0 1114 15.5H6a3 3 0 01-.5-6z" />
+          <path d="M6.5 4.5a5.5 5.5 0 017.8 4.02 3.75 3.75 0 00-1.38-.25A4.5 4.5 0 004.56 8.9 3.5 3.5 0 016.5 4.5z" />
+        </svg>
+      ),
+      color: 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400',
+      description: '管理 Cloudflare DNS'
     }
   ];
 

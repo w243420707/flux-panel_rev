@@ -11,6 +11,7 @@ import UserPage from "@/pages/user";
 import ProfilePage from "@/pages/profile";
 import LimitPage from "@/pages/limit";
 import ConfigPage from "@/pages/config";
+import CloudflareDnsPage from "@/pages/cloudflare-dns";
 import { SettingsPage } from "@/pages/settings";
 
 import AdminLayout from "@/layouts/admin";
@@ -220,6 +221,14 @@ function App() {
             <ConfigPage />
           </ProtectedRoute>
         } 
+      />
+      <Route
+        path="/cloudflare-dns"
+        element={
+          <ProtectedRoute useSimpleLayout={true}>
+            <CloudflareDnsPage />
+          </ProtectedRoute>
+        }
       />
       <Route 
         path="/settings" 

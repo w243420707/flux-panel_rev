@@ -15,6 +15,7 @@ import com.admin.entity.User;
 import com.admin.entity.UserTunnel;
 import com.admin.mapper.TunnelMapper;
 import com.admin.mapper.UserTunnelMapper;
+import com.admin.service.CloudflareDnsSyncService;
 import com.admin.service.ForwardService;
 import com.admin.service.NodeService;
 import com.admin.service.TunnelService;
@@ -24,6 +25,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.Data;
 import org.springframework.beans.BeanUtils;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -97,6 +99,10 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     
     @Resource
     UserTunnelService userTunnelService;
+
+    @Resource
+    @Lazy
+    CloudflareDnsSyncService cloudflareDnsSyncService;
 
     // ========== 公共接口实现 ==========
 
@@ -257,8 +263,13 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
             }
         }
 
+        R dnsSyncResult = syncCloudflareDnsByTunnel(tunnelUpdateDto.getId(), "tunnel-update");
+
         if (err != 0) {
             return R.err("隧道信息更新成功，但部分转发同步更新失败");
+        }
+        if (dnsSyncResult.getCode() != 0) {
+            return R.ok("隧道更新成功，但 Cloudflare DNS 同步失败: " + dnsSyncResult.getMsg());
         }
         return R.ok("隧道更新成功");
     }
@@ -281,6 +292,11 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         R usageCheckResult = checkTunnelUsage(id);
         if (usageCheckResult.getCode() != 0) {
             return usageCheckResult;
+        }
+
+        R dnsCleanupResult = cloudflareDnsSyncService.deleteBindingsByTunnel(id);
+        if (dnsCleanupResult.getCode() != 0) {
+            return R.err("隧道 Cloudflare DNS 绑定清理失败: " + dnsCleanupResult.getMsg());
         }
 
         // 3. 执行删除操作
@@ -596,6 +612,14 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         long currentTime = System.currentTimeMillis();
         tunnel.setCreatedTime(currentTime);
         tunnel.setUpdatedTime(currentTime);
+    }
+
+    private R syncCloudflareDnsByTunnel(Long tunnelId, String trigger) {
+        try {
+            return cloudflareDnsSyncService.syncBindingsByTunnel(tunnelId, trigger);
+        } catch (Exception e) {
+            return R.err(e.getMessage());
+        }
     }
 
     /**

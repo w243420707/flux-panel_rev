@@ -1,7 +1,6 @@
 package com.admin.config;
 
 
-import com.admin.common.utils.IpUtils;
 import com.admin.common.utils.JwtUtil;
 import com.admin.entity.Node;
 import com.admin.service.NodeService;
@@ -38,8 +37,10 @@ public class WebSocketInterceptor extends HttpSessionHandshakeInterceptor {
         String secret = serverHttpRequest.getServletRequest().getParameter("secret");
         String type = serverHttpRequest.getServletRequest().getParameter("type");
         String version = serverHttpRequest.getServletRequest().getParameter("version");
+        String publicIp = serverHttpRequest.getServletRequest().getParameter("publicIp");
+        String clientIp = getClientIp(request);
         if (Objects.equals(type, "1")) {
-            System.out.println("type: " + type + " - version: " + version + " - secret: " + secret + " - IP: " + getClientIp(request));
+            log.info("节点握手请求，type: {}, version: {}, ip: {}", type, version, clientIp);
             Node node = nodeService.getOne(new QueryWrapper<Node>().eq("secret", secret));
             if (node == null) {
                 log.info("节点验证失败：未找到匹配的secret");
@@ -48,6 +49,8 @@ public class WebSocketInterceptor extends HttpSessionHandshakeInterceptor {
             attributes.put("id", node.getId());
             attributes.put("nodeSecret", secret);
             attributes.put("nodeVersion", version);
+            attributes.put("clientIp", clientIp);
+            attributes.put("nodePublicIp", publicIp);
             log.info("节点 {} 通过验证，版本: {}", node.getId(), version);
             // 不在这里更新状态，等到连接建立后再统一更新
         }else {
@@ -60,6 +63,19 @@ public class WebSocketInterceptor extends HttpSessionHandshakeInterceptor {
     }
 
     public String getClientIp(ServerHttpRequest request) {
+        String forwardedFor = request.getHeaders().getFirst("X-Forwarded-For");
+        if (forwardedFor != null && !forwardedFor.isBlank()) {
+            String first = forwardedFor.split(",")[0].trim();
+            if (!first.isBlank()) {
+                return first;
+            }
+        }
+
+        String realIp = request.getHeaders().getFirst("X-Real-IP");
+        if (realIp != null && !realIp.isBlank()) {
+            return realIp.trim();
+        }
+
         InetSocketAddress remoteAddress = request.getRemoteAddress();
         if (remoteAddress != null) {
             return remoteAddress.getAddress().getHostAddress();

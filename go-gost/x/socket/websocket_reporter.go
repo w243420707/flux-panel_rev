@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync" // 新增：用于管理连接状态的互斥锁
@@ -84,6 +86,9 @@ type TcpPingResponse struct {
 
 type WebSocketReporter struct {
 	url            string
+	addr           string
+	secret         string
+	version        string
 	conn           *websocket.Conn
 	reconnectTime  time.Duration
 	pingInterval   time.Duration
@@ -120,6 +125,14 @@ func NewWebSocketReporter(serverURL string, secret string) *WebSocketReporter {
 		connecting:     false,
 		aesCrypto:      aesCrypto,
 	}
+}
+
+func NewWebSocketReporterWithConfig(addr string, secret string, version string) *WebSocketReporter {
+	reporter := NewWebSocketReporter(buildWebSocketURL(addr, secret, version, ""), secret)
+	reporter.addr = addr
+	reporter.secret = secret
+	reporter.version = version
+	return reporter
 }
 
 // Start 启动WebSocket报告器
@@ -192,7 +205,14 @@ func (w *WebSocketReporter) connect() error {
 		w.connecting = false
 	}()
 
-	u, err := url.Parse(w.url)
+	currentURL := w.url
+	if w.addr != "" {
+		publicIP := detectPublicIP()
+		currentURL = buildWebSocketURL(w.addr, w.secret, w.version, publicIP)
+		w.url = currentURL
+	}
+
+	u, err := url.Parse(currentURL)
 	if err != nil {
 		return fmt.Errorf("解析URL失败: %v", err)
 	}
@@ -933,18 +953,15 @@ func getMemoryInfo() MemoryInfo {
 
 // StartWebSocketReporterWithConfig 使用配置启动WebSocket报告器
 func StartWebSocketReporterWithConfig(Addr string, Secret string, Version string) *WebSocketReporter {
+	panelAddr := strings.TrimSpace(Addr)
+	fmt.Printf("WebSocket panel address: %s\n", panelAddr)
 
-	// 构建包含本机IP的WebSocket URL
-	fullURL := buildWebSocketURL(Addr, Secret, Version)
-
-	fmt.Printf("🔗 WebSocket连接URL: %s\n", fullURL)
-
-	reporter := NewWebSocketReporter(fullURL, Secret) // Pass Secret here
+	reporter := NewWebSocketReporterWithConfig(Addr, Secret, Version)
 	reporter.Start()
 	return reporter
 }
 
-func buildWebSocketURL(addr string, secret string, version string) string {
+func buildWebSocketURL(addr string, secret string, version string, publicIP string) string {
 	raw := strings.TrimSpace(addr)
 	if !strings.Contains(raw, "://") {
 		raw = "http://" + strings.Trim(raw, "/")
@@ -976,9 +993,97 @@ func buildWebSocketURL(addr string, secret string, version string) string {
 	q.Set("type", "1")
 	q.Set("secret", secret)
 	q.Set("version", version)
+	if publicIP != "" {
+		q.Set("publicIp", publicIP)
+	}
 	u.RawQuery = q.Encode()
 
 	return u.String()
+}
+
+func detectPublicIP() string {
+	endpoints := []string{
+		"https://api.ip.sb/ip",
+		"https://ifconfig.co/ip",
+		"https://icanhazip.com",
+		"https://cloudflare.com/cdn-cgi/trace",
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	for _, endpoint := range endpoints {
+		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("User-Agent", "flux-panel-node/1.2.1")
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		if readErr != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			continue
+		}
+
+		ip := parsePublicIPResponse(string(body))
+		if ip != "" && isPublicIPLiteral(ip) {
+			fmt.Printf("🌐 检测到公网IP: %s\n", ip)
+			return ip
+		}
+	}
+
+	fmt.Printf("⚠️ 未能通过外部接口检测公网IP，将回退到面板侧连接来源IP\n")
+	return ""
+}
+
+func parsePublicIPResponse(body string) string {
+	value := strings.TrimSpace(body)
+	for _, line := range strings.Split(value, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "ip=") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "ip="))
+		}
+		if ip := net.ParseIP(line); ip != nil {
+			return line
+		}
+	}
+	return ""
+}
+
+func isPublicIPLiteral(value string) bool {
+	ip := net.ParseIP(strings.TrimSpace(value))
+	if ip == nil || ip.IsUnspecified() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() {
+		return false
+	}
+
+	if ip4 := ip.To4(); ip4 != nil {
+		first := int(ip4[0])
+		second := int(ip4[1])
+		third := int(ip4[2])
+		return !(first == 0 ||
+			first == 10 ||
+			first == 127 ||
+			first == 169 && second == 254 ||
+			first == 172 && second >= 16 && second <= 31 ||
+			first == 192 && second == 168 ||
+			first == 100 && second >= 64 && second <= 127 ||
+			first == 192 && second == 0 && (third == 0 || third == 2) ||
+			first == 198 && (second == 18 || second == 19) ||
+			first == 198 && second == 51 && third == 100 ||
+			first == 203 && second == 0 && third == 113 ||
+			first >= 224)
+	}
+
+	ip16 := ip.To16()
+	if ip16 == nil {
+		return false
+	}
+	first := int(ip16[0])
+	second := int(ip16[1])
+	return !(first == 0xfc ||
+		first == 0xfd ||
+		first == 0x20 && second == 0x01 && int(ip16[2]) == 0x0d && int(ip16[3]) == 0xb8)
 }
 
 // handleTcpPing 处理TCP ping诊断命令
