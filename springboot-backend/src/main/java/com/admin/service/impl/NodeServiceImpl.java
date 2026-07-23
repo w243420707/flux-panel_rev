@@ -5,12 +5,14 @@ import cn.hutool.core.util.StrUtil;
 import com.admin.common.dto.NodeDto;
 import com.admin.common.dto.NodeUpdateDto;
 import com.admin.common.lang.R;
+import com.admin.entity.Forward;
 import com.admin.common.utils.TunnelNodeUtil;
 import com.admin.entity.Node;
 import com.admin.entity.Tunnel;
 import com.admin.entity.ViteConfig;
 import com.admin.mapper.NodeMapper;
 import com.admin.mapper.TunnelMapper;
+import com.admin.service.ForwardService;
 import com.admin.service.NodeService;
 import com.admin.service.TunnelService;
 import com.admin.service.ViteConfigService;
@@ -73,6 +75,10 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     private TunnelService tunnelService;
 
     @Resource
+    @Lazy
+    private ForwardService forwardService;
+
+    @Resource
     ViteConfigService viteConfigService;
 
 
@@ -122,6 +128,9 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         // 2. 构建更新对象并执行更新
         Node updateNode = buildUpdateNode(nodeUpdateDto);
         boolean result = this.updateById(updateNode);
+        if (!result) {
+            return R.err(ERROR_UPDATE_MSG);
+        }
 
         // 更新隧道入口ip
         List<Tunnel> inNodeId = tunnelService.list(new QueryWrapper<Tunnel>().eq("in_node_id", updateNode.getId()));
@@ -142,8 +151,9 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
 
         refreshMultiNodeTunnelIps(updateNode.getId());
+        refreshForwardConfigsByNode(updateNode.getId());
 
-        return result ? R.ok(SUCCESS_UPDATE_MSG) : R.err(ERROR_UPDATE_MSG);
+        return R.ok(SUCCESS_UPDATE_MSG);
     }
 
     /**
@@ -168,6 +178,20 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
             if (changed) {
                 tunnelService.updateById(tunnel);
             }
+        }
+    }
+
+    private void refreshForwardConfigsByNode(Long nodeId) {
+        List<Forward> forwards = forwardService.list();
+        for (Forward forward : forwards) {
+            Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
+            if (tunnel == null) {
+                continue;
+            }
+            if (!TunnelNodeUtil.containsInNode(tunnel, nodeId) && !TunnelNodeUtil.containsOutNode(tunnel, nodeId)) {
+                continue;
+            }
+            forwardService.refreshForwardConfig(forward, null);
         }
     }
 

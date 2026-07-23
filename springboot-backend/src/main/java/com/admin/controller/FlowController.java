@@ -322,16 +322,21 @@ public class FlowController extends BaseController {
         if (forward != null) {
             Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
             if (tunnel != null) {
-                BigDecimal trafficRatio = tunnel.getTrafficRatio();
+                BigDecimal trafficRatio = tunnel.getTrafficRatio() == null ? BigDecimal.ONE : tunnel.getTrafficRatio();
 
-                BigDecimal originalD = BigDecimal.valueOf(flowDto.getD());
-                BigDecimal originalU = BigDecimal.valueOf(flowDto.getU());
+                BigDecimal originalD = BigDecimal.valueOf(flowDto.getD() == null ? 0 : flowDto.getD());
+                BigDecimal originalU = BigDecimal.valueOf(flowDto.getU() == null ? 0 : flowDto.getU());
 
                 BigDecimal newD = originalD.multiply(trafficRatio);
                 BigDecimal newU = originalU.multiply(trafficRatio);
 
-                flowDto.setD(newD.longValue() * flowType);
-                flowDto.setU(newU.longValue() * flowType);
+                if (flowType == 1) {
+                    flowDto.setD(newD.longValue());
+                    flowDto.setU(0L);
+                } else {
+                    flowDto.setD(newD.longValue());
+                    flowDto.setU(newU.longValue());
+                }
             }
         }
         return flowDto;

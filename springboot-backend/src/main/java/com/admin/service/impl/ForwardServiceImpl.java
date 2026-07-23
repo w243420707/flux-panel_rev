@@ -1768,6 +1768,106 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
 
+    @Override
+    public R refreshForwardConfig(Forward forward, Tunnel oldTunnel) {
+        if (forward == null) {
+            return R.err("forward is null");
+        }
+
+        Tunnel tunnel = validateTunnel(forward.getTunnelId());
+        if (tunnel == null) {
+            forward.setStatus(FORWARD_STATUS_ERROR);
+            this.updateById(forward);
+            return R.err("tunnel not found");
+        }
+
+        UserTunnel userTunnel = getUserTunnel(forward.getUserId(), tunnel.getId().intValue());
+        NodeInfo nodeInfo = getRequiredNodes(tunnel);
+        if (nodeInfo.isHasError()) {
+            forward.setStatus(FORWARD_STATUS_ERROR);
+            this.updateById(forward);
+            return R.err(nodeInfo.getErrorMessage());
+        }
+
+        PortAllocation portAllocation = resolveForwardPortsForCurrentTunnel(forward, tunnel);
+        if (portAllocation.isHasError()) {
+            forward.setStatus(FORWARD_STATUS_ERROR);
+            this.updateById(forward);
+            return R.err(portAllocation.getErrorMessage());
+        }
+
+        forward.setInPort(portAllocation.getInPort());
+        forward.setOutPort(portAllocation.getOutPort());
+
+        Integer limiter = userTunnel == null ? null : userTunnel.getSpeedId();
+        String resolvedStrategy = resolveForwardStrategy(forward.getStrategy(), forward.getRemoteAddr(), tunnel);
+        if (!Objects.equals(forward.getStrategy(), resolvedStrategy)) {
+            forward.setStrategy(resolvedStrategy);
+        }
+
+        R result = updateGostServices(forward, tunnel, limiter, nodeInfo, userTunnel);
+        if (result.getCode() != 0) {
+            return result;
+        }
+
+        if (oldTunnel != null) {
+            cleanupDeprecatedGostServices(forward, oldTunnel, tunnel, userTunnel);
+        }
+
+        forward.setStatus(FORWARD_STATUS_ACTIVE);
+        forward.setUpdatedTime(System.currentTimeMillis());
+        this.updateById(forward);
+        return R.ok();
+    }
+
+    private void cleanupDeprecatedGostServices(Forward forward, Tunnel oldTunnel, Tunnel newTunnel, UserTunnel userTunnel) {
+        List<Long> removedInNodeIds = new ArrayList<>(TunnelNodeUtil.getInNodeIds(oldTunnel));
+        removedInNodeIds.removeAll(TunnelNodeUtil.getInNodeIds(newTunnel));
+
+        List<Long> removedOutNodeIds = new ArrayList<>(TunnelNodeUtil.getOutNodeIds(oldTunnel));
+        removedOutNodeIds.removeAll(TunnelNodeUtil.getOutNodeIds(newTunnel));
+
+        if (removedInNodeIds.isEmpty() && removedOutNodeIds.isEmpty()) {
+            return;
+        }
+
+        Tunnel cleanupTunnel = new Tunnel();
+        cleanupTunnel.setType(newTunnel.getType());
+        cleanupTunnel.setInNodeIds(TunnelNodeUtil.toJsonArray(removedInNodeIds));
+        cleanupTunnel.setOutNodeIds(TunnelNodeUtil.toJsonArray(removedOutNodeIds));
+
+        NodeInfo removedNodeInfo = NodeInfo.success(loadNodes(removedInNodeIds), loadNodes(removedOutNodeIds));
+        if (removedNodeInfo.isHasError()) {
+            return;
+        }
+
+        String serviceName = buildServiceName(forward.getId(), forward.getUserId(), userTunnel);
+        cleanupGostServices(removedNodeInfo, serviceName, cleanupTunnel.getType());
+    }
+
+    private PortAllocation resolveForwardPortsForCurrentTunnel(Forward forward, Tunnel tunnel) {
+        Integer inPort = forward.getInPort();
+        if (!isPortAvailableForNodes(TunnelNodeUtil.getInNodeIds(tunnel), inPort, forward.getId())) {
+            inPort = allocateInPort(tunnel, forward.getId());
+            if (inPort == null) {
+                return PortAllocation.error("tunnel in port is full");
+            }
+        }
+
+        Integer outPort = null;
+        if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
+            outPort = forward.getOutPort();
+            if (!isPortAvailableForNodes(TunnelNodeUtil.getOutNodeIds(tunnel), outPort, forward.getId())) {
+                outPort = allocateOutPort(tunnel, forward.getId());
+                if (outPort == null) {
+                    return PortAllocation.error("tunnel out port is full");
+                }
+            }
+        }
+
+        return PortAllocation.success(inPort, outPort);
+    }
+
     // ========== 内部数据类 ==========
 
     /**

@@ -158,64 +158,101 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     }
 
     /**
-     * 更新隧道（只允许修改名称、流量计费、端口范围）
-     * 
+     * 更新隧道
+     *
      * @param tunnelUpdateDto 更新数据传输对象
      * @return 更新结果响应
      */
     @Override
     public R updateTunnel(TunnelUpdateDto tunnelUpdateDto) {
-        // 1. 验证隧道是否存在
         Tunnel existingTunnel = this.getById(tunnelUpdateDto.getId());
         if (existingTunnel == null) {
             return R.err(ERROR_TUNNEL_NOT_FOUND);
         }
 
-        // 2. 验证隧道名称唯一性（排除自身）
         R nameValidationResult = validateTunnelNameUniquenessForUpdate(tunnelUpdateDto.getName(), tunnelUpdateDto.getId());
         if (nameValidationResult.getCode() != 0) {
             return nameValidationResult;
         }
+
+        Tunnel oldTunnel = new Tunnel();
+        BeanUtils.copyProperties(existingTunnel, oldTunnel);
+
         String resolvedProtocol = existingTunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD
                 ? resolveTunnelProtocol(tunnelUpdateDto.getProtocol())
                 : null;
-        int up = 0;
-        if (!Objects.equals(existingTunnel.getTcpListenAddr(), tunnelUpdateDto.getTcpListenAddr()) ||
-                !Objects.equals(existingTunnel.getUdpListenAddr(), tunnelUpdateDto.getUdpListenAddr()) ||
-                !Objects.equals(existingTunnel.getProtocol(), resolvedProtocol) ||
-                !Objects.equals(existingTunnel.getInterfaceName(), tunnelUpdateDto.getInterfaceName())) {
-            up++;
+
+        List<Long> inNodeIds = TunnelNodeUtil.normalizeNodeIds(tunnelUpdateDto.getInNodeIds(), tunnelUpdateDto.getInNodeId());
+        if (inNodeIds.isEmpty()) {
+            inNodeIds = TunnelNodeUtil.getInNodeIds(existingTunnel);
+        }
+        NodeValidationResult inNodeValidation = validateNodes(inNodeIds, ERROR_IN_NODE_NOT_FOUND, ERROR_IN_NODE_OFFLINE);
+        if (inNodeValidation.isHasError()) {
+            return R.err(inNodeValidation.getErrorMessage());
         }
 
+        List<Node> inNodes = inNodeValidation.getNodes();
+        List<Long> outNodeIds;
+        List<Node> outNodes;
+        if (existingTunnel.getType() == TUNNEL_TYPE_PORT_FORWARD) {
+            outNodeIds = inNodeIds;
+            outNodes = inNodes;
+        } else {
+            outNodeIds = TunnelNodeUtil.normalizeNodeIds(tunnelUpdateDto.getOutNodeIds(), tunnelUpdateDto.getOutNodeId());
+            if (outNodeIds.isEmpty()) {
+                outNodeIds = TunnelNodeUtil.getOutNodeIds(existingTunnel);
+            }
+            if (outNodeIds.isEmpty()) {
+                return R.err(ERROR_OUT_NODE_REQUIRED);
+            }
 
-        // 5. 更新允许修改的字段
+            Set<Long> inNodeIdSet = new HashSet<>(inNodeIds);
+            for (Long outNodeId : outNodeIds) {
+                if (inNodeIdSet.contains(outNodeId)) {
+                    return R.err(ERROR_SAME_NODE_NOT_ALLOWED);
+                }
+            }
+
+            NodeValidationResult outNodeValidation = validateNodes(outNodeIds, ERROR_OUT_NODE_NOT_FOUND, ERROR_OUT_NODE_OFFLINE);
+            if (outNodeValidation.isHasError()) {
+                return R.err(outNodeValidation.getErrorMessage());
+            }
+            outNodes = outNodeValidation.getNodes();
+        }
+
+        boolean topologyChanged = !Objects.equals(TunnelNodeUtil.getInNodeIds(oldTunnel), inNodeIds)
+                || !Objects.equals(TunnelNodeUtil.getOutNodeIds(oldTunnel), outNodeIds);
+        boolean configChanged = topologyChanged
+                || !Objects.equals(existingTunnel.getTcpListenAddr(), tunnelUpdateDto.getTcpListenAddr())
+                || !Objects.equals(existingTunnel.getUdpListenAddr(), tunnelUpdateDto.getUdpListenAddr())
+                || !Objects.equals(existingTunnel.getProtocol(), resolvedProtocol)
+                || !Objects.equals(existingTunnel.getInterfaceName(), tunnelUpdateDto.getInterfaceName());
+
         existingTunnel.setName(tunnelUpdateDto.getName());
         existingTunnel.setFlow(tunnelUpdateDto.getFlow());
         existingTunnel.setTcpListenAddr(tunnelUpdateDto.getTcpListenAddr());
         existingTunnel.setUdpListenAddr(tunnelUpdateDto.getUdpListenAddr());
-        existingTunnel.setTrafficRatio(tunnelUpdateDto.getTrafficRatio());
+        existingTunnel.setTrafficRatio(tunnelUpdateDto.getTrafficRatio() == null ? new BigDecimal("1.0") : tunnelUpdateDto.getTrafficRatio());
         existingTunnel.setProtocol(resolvedProtocol);
         existingTunnel.setInterfaceName(tunnelUpdateDto.getInterfaceName());
+
+        existingTunnel.setInNodeId(inNodes.get(0).getId());
+        existingTunnel.setInNodeIds(TunnelNodeUtil.toJsonArray(inNodes.stream().map(Node::getId).collect(Collectors.toList())));
+        existingTunnel.setInIp(joinNodeIps(inNodes, false));
+        existingTunnel.setOutNodeId(outNodes.get(0).getId());
+        existingTunnel.setOutNodeIds(TunnelNodeUtil.toJsonArray(outNodes.stream().map(Node::getId).collect(Collectors.toList())));
+        existingTunnel.setOutIp(joinNodeIps(outNodes, true));
+        existingTunnel.setUpdatedTime(System.currentTimeMillis());
+
         this.updateById(existingTunnel);
+
         int err = 0;
-        if (up != 0){
-            System.out.println("123123");
-            List<Forward> tunnel = forwardService.list(new QueryWrapper<Forward>().eq("tunnel_id", tunnelUpdateDto.getId()));
-            if (!tunnel.isEmpty()) {
-                for (Forward forward : tunnel) {
-                    ForwardUpdateDto forwardUpdateDto = new ForwardUpdateDto();
-                    forwardUpdateDto.setId(forward.getId());
-                    forwardUpdateDto.setUserId(forward.getUserId());
-                    forwardUpdateDto.setName(forward.getName());
-                    forwardUpdateDto.setTunnelId(forward.getTunnelId());
-                    forwardUpdateDto.setRemoteAddr(forward.getRemoteAddr());
-                    forwardUpdateDto.setStrategy(forward.getStrategy());
-                    forwardUpdateDto.setInPort(forward.getInPort());
-                    forwardUpdateDto.setInterfaceName(forward.getInterfaceName());
-                    R r = forwardService.updateForward(forwardUpdateDto);
-                    if (r.getCode() != 0){
-                        err++;
-                    }
+        if (configChanged) {
+            List<Forward> forwards = forwardService.list(new QueryWrapper<Forward>().eq("tunnel_id", tunnelUpdateDto.getId()));
+            for (Forward forward : forwards) {
+                R r = forwardService.refreshForwardConfig(forward, oldTunnel);
+                if (r.getCode() != 0) {
+                    err++;
                 }
             }
         }

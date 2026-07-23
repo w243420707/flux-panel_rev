@@ -10,6 +10,7 @@ import javax.validation.constraints.Max;
 import javax.validation.constraints.DecimalMin;
 import javax.validation.constraints.DecimalMax;
 import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 public class TunnelUpdateDto {
@@ -19,6 +20,14 @@ public class TunnelUpdateDto {
     
     @NotBlank(message = "隧道名称不能为空")
     private String name;
+
+    private Long inNodeId;
+
+    private List<Long> inNodeIds;
+
+    private Long outNodeId;
+
+    private List<Long> outNodeIds;
     
     @NotNull(message = "流量计算类型不能为空")
     private Integer flow;
@@ -41,4 +50,4 @@ public class TunnelUpdateDto {
 
     @TableField(updateStrategy = FieldStrategy.IGNORED)
     private String interfaceName;
-} 
+}

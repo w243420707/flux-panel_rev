@@ -4,6 +4,7 @@ import com.admin.common.dto.ForwardDto;
 import com.admin.common.dto.ForwardUpdateDto;
 import com.admin.common.lang.R;
 import com.admin.entity.Forward;
+import com.admin.entity.Tunnel;
 import com.baomidou.mybatisplus.extension.service.IService;
 import java.util.Map;
 
@@ -82,4 +83,6 @@ public interface ForwardService extends IService<Forward> {
 
 
     void updateForwardA(Forward forward);
+
+    R refreshForwardConfig(Forward forward, Tunnel oldTunnel);
 }
