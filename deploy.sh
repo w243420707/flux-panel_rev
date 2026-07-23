@@ -362,9 +362,19 @@ write_env_file() {
   FRONTEND_BUILD_MAX_OLD_SPACE_SIZE="${FRONTEND_BUILD_MAX_OLD_SPACE_SIZE:-1536}"
   VITE_LEGACY_BUILD="${VITE_LEGACY_BUILD:-false}"
   PNPM_VERSION="${PNPM_VERSION:-11.7.0}"
+  # Migrate old mirror defaults back to official/global sources for overseas VPS.
   NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmjs.org}"
-  NPM_FALLBACK_REGISTRY="${NPM_FALLBACK_REGISTRY:-https://registry.npmmirror.com}"
+  if [[ "${NPM_REGISTRY}" == "https://registry.npmmirror.com" ]]; then
+    NPM_REGISTRY="https://registry.npmjs.org"
+  fi
+  NPM_FALLBACK_REGISTRY="${NPM_FALLBACK_REGISTRY:-https://registry.yarnpkg.com}"
+  if [[ "${NPM_FALLBACK_REGISTRY}" == "https://registry.npmmirror.com" || "${NPM_FALLBACK_REGISTRY}" == "https://registry.npmjs.org" ]]; then
+    NPM_FALLBACK_REGISTRY="https://registry.yarnpkg.com"
+  fi
   MAVEN_MIRROR_URL="${MAVEN_MIRROR_URL:-}"
+  if [[ "${MAVEN_MIRROR_URL}" == "https://maven.aliyun.com/repository/public" ]]; then
+    MAVEN_MIRROR_URL=""
+  fi
   DOCKER_LOG_MAX_SIZE="${DOCKER_LOG_MAX_SIZE:-50m}"
   DOCKER_LOG_MAX_FILE="${DOCKER_LOG_MAX_FILE:-1}"
   DOCKER_BUILD_CACHE_KEEP="${DOCKER_BUILD_CACHE_KEEP:-512MB}"
@@ -500,7 +510,7 @@ checkout_deploy_ref() {
 }
 
 compose() {
-  docker compose --env-file "${ENV_FILE}" -f "${APP_DIR}/${COMPOSE_FILE}" "$@"
+  DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose --env-file "${ENV_FILE}" -f "${APP_DIR}/${COMPOSE_FILE}" "$@"
 }
 
 install_cli_wrapper() {
@@ -534,7 +544,7 @@ start_stack() {
   local recreate="${1:-0}"
   log "Building and starting containers in background..."
   if [[ "${recreate}" -eq 1 ]]; then
-    compose build --pull
+    compose build
     compose up -d --force-recreate
   else
     compose up -d --build

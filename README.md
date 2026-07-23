@@ -68,7 +68,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/main/deploy.sh -o deploy.sh && chmod +x deploy.sh && sudo ./deploy.sh install
 ```
 
-更新会通过 `git fetch --tags --prune --force` 拉取分支和标签，默认部署 `main`，也支持用 `DEPLOY_REF`/`--ref` 指定分支、标签或 commit。更新时会重新构建镜像、拉取基础镜像并强制重建容器，自动应用最新代码，同时保留数据库数据；更新完成后只执行轻量清理，避免低配 VPS 在清理 Docker build cache 时出现 SSH 卡顿或断连。
+更新会通过 `git fetch --tags --prune --force` 拉取分支和标签，默认部署 `main`，也支持用 `DEPLOY_REF`/`--ref` 指定分支、标签或 commit。更新时会重新构建镜像并强制重建容器，自动应用最新代码，同时保留数据库数据；默认使用官方/全球源，不再预设国内镜像；Maven 和 pnpm 依赖缓存会被复用，且默认不再额外拉取基础镜像，减少海外 VPS 上的重复下载耗时；更新完成后只执行轻量清理，避免低配 VPS 在清理 Docker build cache 时出现 SSH 卡顿或断连。
 
 ### 面板端卸载
 
@@ -102,6 +102,13 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - TCP 和 UDP 服务会同时创建，使用 UDP 场景时请确认 VPS 防火墙和安全组已放行对应 UDP 端口。
 
 ## 更新日志
+
+### 2026-07-24
+
+- 默认构建源恢复为官方/全球源，取消国内镜像默认值，适配海外 VPS。
+- 后端运行镜像不再把 apt 源切到国内镜像，避免海外环境下载变慢。
+- 前后端 Docker 构建启用 BuildKit 依赖缓存，Maven 和 pnpm 下载结果会在后续更新中复用。
+- 面板更新默认不再强制拉取基础镜像，减少海外 VPS 的重复网络下载。
 
 ### 2026-07-23
 

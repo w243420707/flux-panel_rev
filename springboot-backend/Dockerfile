@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # 构建阶段
 FROM maven:3.9.6-eclipse-temurin-21 AS build
 WORKDIR /app
@@ -16,8 +17,11 @@ RUN if [ -n "${MAVEN_MIRROR_URL}" ]; then \
         '</settings>' > /root/.m2/settings.xml; \
     fi
 COPY pom.xml .
+RUN --mount=type=cache,target=/root/.m2/repository \
+    mvn -B -ntp -DskipTests dependency:go-offline
 COPY src ./src
-RUN mvn clean package -DskipTests
+RUN --mount=type=cache,target=/root/.m2/repository \
+    mvn -B -ntp -DskipTests package
 
 # 运行阶段
 FROM eclipse-temurin:21-jre
@@ -27,9 +31,7 @@ ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 
-RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list \
-    && sed -i 's/security.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list \
-    && apt-get update \
+RUN apt-get update \
     && apt-get install -y --no-install-recommends fontconfig fonts-dejavu wget \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

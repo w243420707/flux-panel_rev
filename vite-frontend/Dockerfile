@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 ARG FRONTEND_NODE_VERSION=22.13.1
 FROM node:${FRONTEND_NODE_VERSION} AS builder
 
@@ -5,24 +6,27 @@ WORKDIR /app
 
 ARG PNPM_VERSION=11.7.0
 ARG NPM_REGISTRY=https://registry.npmjs.org
-ARG NPM_FALLBACK_REGISTRY=https://registry.npmmirror.com
+ARG NPM_FALLBACK_REGISTRY=https://registry.yarnpkg.com
 ARG FRONTEND_BUILD_MAX_OLD_SPACE_SIZE=1536
 ARG VITE_LEGACY_BUILD=false
 
 ENV NODE_OPTIONS=--max-old-space-size=${FRONTEND_BUILD_MAX_OLD_SPACE_SIZE}
 ENV VITE_LEGACY_BUILD=${VITE_LEGACY_BUILD}
 
-RUN set -eux; \
+RUN --mount=type=cache,target=/root/.npm \
+    set -eux; \
     npm install -g "pnpm@${PNPM_VERSION}" --registry="${NPM_REGISTRY}" \
       || npm install -g "pnpm@${PNPM_VERSION}" --registry="${NPM_FALLBACK_REGISTRY}"; \
     pnpm config set registry "${NPM_REGISTRY}"; \
+    pnpm config set store-dir /pnpm/store; \
     pnpm config set fetchRetries 5; \
     pnpm config set fetchRetryMintimeout 20000; \
     pnpm config set fetchRetryMaxtimeout 120000; \
     pnpm config set fetchTimeout 600000
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm ci \
+RUN --mount=type=cache,target=/pnpm/store \
+    pnpm ci \
     || (pnpm config set registry "${NPM_FALLBACK_REGISTRY}" \
       && pnpm ci)
 
