@@ -1774,6 +1774,8 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             return R.err("forward is null");
         }
 
+        Integer originalStatus = forward.getStatus();
+
         Tunnel tunnel = validateTunnel(forward.getTunnelId());
         if (tunnel == null) {
             forward.setStatus(FORWARD_STATUS_ERROR);
@@ -1814,7 +1816,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             cleanupDeprecatedGostServices(forward, oldTunnel, tunnel, userTunnel);
         }
 
-        forward.setStatus(FORWARD_STATUS_ACTIVE);
+        forward.setStatus(originalStatus == null ? FORWARD_STATUS_ACTIVE : originalStatus);
         forward.setUpdatedTime(System.currentTimeMillis());
         this.updateById(forward);
         return R.ok();
