@@ -544,13 +544,10 @@ start_stack() {
 }
 
 post_deploy_cleanup() {
-  log "Cleaning Docker build cache and dangling images..."
-  if ! docker builder prune -af --keep-storage "${DOCKER_BUILD_CACHE_KEEP:-512MB}" >/dev/null 2>&1; then
-    docker builder prune -af >/dev/null 2>&1 || true
-  fi
+  log "Running lightweight cleanup after deploy..."
   docker image prune -f >/dev/null 2>&1 || true
   cleanup_package_cache
-  docker system df || true
+  log "Skipping automatic Docker build-cache pruning to avoid SSH stalls on small VPS."
 }
 
 cleanup_package_cache() {
@@ -570,6 +567,20 @@ cleanup_package_cache() {
       rm -rf /var/cache/apk/* >/dev/null 2>&1 || true
       ;;
   esac
+}
+
+cleanup_builder_cache() {
+  local keep="${DOCKER_BUILD_CACHE_KEEP:-512MB}"
+  log "Cleaning Docker build cache, keeping up to ${keep}..."
+  if command -v timeout >/dev/null 2>&1; then
+    if command -v ionice >/dev/null 2>&1; then
+      timeout 300s ionice -c3 nice -n 19 docker builder prune -af --keep-storage "${keep}" >/dev/null 2>&1 || warn "Docker build-cache cleanup timed out or failed; skipped remaining cache cleanup."
+    else
+      timeout 300s nice -n 19 docker builder prune -af --keep-storage "${keep}" >/dev/null 2>&1 || warn "Docker build-cache cleanup timed out or failed; skipped remaining cache cleanup."
+    fi
+  else
+    nice -n 19 docker builder prune -af --keep-storage "${keep}" >/dev/null 2>&1 || warn "Docker build-cache cleanup failed; skipped remaining cache cleanup."
+  fi
 }
 
 nginx_conf_path() {
@@ -955,7 +966,7 @@ cleanup_flow() {
   log "Current Docker disk usage:"
   docker system df || true
 
-  if ! confirm "Clean unused containers, networks, images, package cache, and build cache?"; then
+  if ! confirm "Clean unused containers, networks, dangling images, and package cache?"; then
     log "Cancelled."
     return 0
   fi
@@ -963,10 +974,12 @@ cleanup_flow() {
   docker container prune -f || true
   docker network prune -f || true
   docker image prune -f || true
-  if ! docker builder prune -af --keep-storage "${DOCKER_BUILD_CACHE_KEEP:-512MB}" >/dev/null 2>&1; then
-    docker builder prune -af >/dev/null 2>&1 || true
-  fi
   cleanup_package_cache
+
+  warn "Docker build-cache cleanup can cause high disk I/O and may stall SSH on small VPS."
+  if confirm "Also clean Docker build cache now?"; then
+    cleanup_builder_cache
+  fi
 
   log "Docker disk usage after cleanup:"
   docker system df || true

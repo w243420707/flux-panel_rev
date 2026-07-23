@@ -68,7 +68,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/main/deploy.sh -o deploy.sh && chmod +x deploy.sh && sudo ./deploy.sh install
 ```
 
-更新会通过 `git fetch --tags --prune --force` 拉取分支和标签，默认部署 `main`，也支持用 `DEPLOY_REF`/`--ref` 指定分支、标签或 commit。更新时会重新构建镜像、拉取基础镜像并强制重建容器，自动应用最新代码，同时保留数据库数据；更新完成后会清理 Docker 构建缓存、悬空镜像和系统包缓存，默认将构建缓存控制在 `DOCKER_BUILD_CACHE_KEEP=512MB`。
+更新会通过 `git fetch --tags --prune --force` 拉取分支和标签，默认部署 `main`，也支持用 `DEPLOY_REF`/`--ref` 指定分支、标签或 commit。更新时会重新构建镜像、拉取基础镜像并强制重建容器，自动应用最新代码，同时保留数据库数据；更新完成后只执行轻量清理，避免低配 VPS 在清理 Docker build cache 时出现 SSH 卡顿或断连。
 
 ### 面板端卸载
 
@@ -122,8 +122,8 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 节点上线时可自动识别公网 IP 并更新节点服务器 IP，适配动态 IP 节点。
 - 节点端上线前会通过 ip.sb、ifconfig、icanhazip、Cloudflare trace 等公网 IP 接口辅助判断真实出口 IP，后端优先采用节点上报 IP，失败时回退 WebSocket 来源 IP。
 - 节点端启动日志不再输出带 `secret` 的 WebSocket 完整 URL，并重新构建 Linux `amd64`、`arm64`、`armv7`、`armv6` 二进制。
-- 面板更新后自动清理 Docker 构建缓存、悬空镜像和系统包缓存，减少 VPS 磁盘空间持续增长。
-- 新增 `DOCKER_BUILD_CACHE_KEEP` 部署变量，默认仅保留 `512MB` Docker build cache。
+- 面板更新后改为轻量清理悬空镜像和系统包缓存，不再默认清理 Docker build cache，避免低配 VPS SSH 断连。
+- 菜单 `7. 清理 Docker 缓存` 保留 Docker build cache 清理能力，执行前会二次确认，并使用低优先级和超时保护。
 - Cloudflare DNS 同步采用差异更新，只管理本项目写入的记录，失败时保留旧记录，避免误删用户已有解析。
 - Cloudflare DNS 定时同步默认 120 秒，最低 60 秒，同时支持手动全量同步和单个域名同步。
 - Cloudflare 配置强制 DNS-only，不开启代理；API Token 不会在接口返回值和请求日志中暴露。
@@ -142,7 +142,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 节点安装脚本改为自动识别 Linux 架构，并从本仓库 `go-gost/releases/` 拉取 `gost-linux-*` 二进制。
 - 节点安装脚本补充 `armv8l`、`armhf`、`armel` 等常见 ARM 别名识别。
 - 面板更新脚本支持识别 Git branch、tag、commit，并在更新时强制重建容器应用最新代码。
-- 面板更新后自动清理 Docker 构建缓存、悬空镜像和系统包缓存，默认将构建缓存控制在 `DOCKER_BUILD_CACHE_KEEP=512MB`。
+- 面板更新后只做轻量清理；Docker build cache 清理改为菜单手动触发，并增加低优先级与超时保护，避免低配 VPS SSH 断连。
 - 前端 Docker 构建移除 Corepack 下载链路，改为 npm 安装 pnpm，并支持 npm registry fallback。
 - 前端 Docker 构建镜像升级到 Node `22.13.1`，匹配 `pnpm@11.7.0` 的运行要求。
 - 前端 Docker 构建改用 `pnpm ci` 和 pnpm 配置项，移除无效的 `network-timeout` 命令行参数。
