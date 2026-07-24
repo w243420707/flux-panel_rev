@@ -68,7 +68,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/main/deploy.sh -o deploy.sh && chmod +x deploy.sh && sudo ./deploy.sh install
 ```
 
-更新会通过 `git fetch --tags --prune --force` 拉取分支和标签，默认部署 `main`，也支持用 `DEPLOY_REF`/`--ref` 指定分支、标签或 commit。更新时会重新构建镜像并强制重建容器，自动应用最新代码，同时保留数据库数据；默认使用官方/全球源，不再预设国内镜像；Maven 和 pnpm 依赖缓存会被复用，且默认不再额外拉取基础镜像，减少海外 VPS 上的重复下载耗时；更新完成后只执行轻量清理，避免低配 VPS 在清理 Docker build cache 时出现 SSH 卡顿或断连。
+更新会通过 `git fetch --tags --prune --force` 拉取分支和标签，默认部署 `main`，也支持用 `DEPLOY_REF`/`--ref` 指定分支、标签或 commit。更新时会比较上次成功部署的提交和当前提交，只重新构建发生变化的前端或后端镜像，并强制重建容器自动应用最新代码，同时保留数据库数据；默认使用官方/全球源，不再预设国内镜像；Maven 和 pnpm 依赖缓存会被复用，且默认不再额外拉取基础镜像，减少海外 VPS 上的重复下载耗时；更新完成后只执行轻量清理，避免低配 VPS 在清理 Docker build cache 时出现 SSH 卡顿或断连。
 
 ### 面板端卸载
 
@@ -102,6 +102,10 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - TCP 和 UDP 服务会同时创建，使用 UDP 场景时请确认 VPS 防火墙和安全组已放行对应 UDP 端口。
 
 ## 更新日志
+
+### 2026-07-25
+
+- 优化面板更新流程，记录上次成功部署提交，后续更新只构建变更过的前端或后端镜像，避免仅后端/脚本/节点端改动时仍重新执行前端 `pnpm ci`。
 
 ### 2026-07-24
 

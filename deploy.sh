@@ -30,6 +30,9 @@ ARCH_RAW="$(uname -m)"
 ARCH="unknown"
 COMPOSE_ARCH="unknown"
 MYSQL_IMAGE="mysql:5.7"
+PREVIOUS_COMMIT=""
+CURRENT_COMMIT=""
+BUILD_SERVICES=()
 
 log() { printf '\033[1;32m[INFO]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }
@@ -528,6 +531,7 @@ collect_install_config() {
 sync_repo() {
   if [[ -d "${APP_DIR}/.git" ]]; then
     log "Updating repository in ${APP_DIR}..."
+    PREVIOUS_COMMIT="$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)"
   else
     if [[ -d "${APP_DIR}" && -n "$(find "${APP_DIR}" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
       die "${APP_DIR} exists and is not a Git checkout. Move it away first."
@@ -559,13 +563,86 @@ checkout_deploy_ref() {
     die "Git ref not found: ${DEPLOY_REF}. Use a branch, tag, or commit from ${REPO_URL}."
   fi
 
-  local commit
-  commit="$(git -C "${APP_DIR}" rev-parse --short HEAD)"
-  log "Checked out commit: ${commit}"
+  CURRENT_COMMIT="$(git -C "${APP_DIR}" rev-parse HEAD)"
+  log "Checked out commit: ${CURRENT_COMMIT:0:7}"
 }
 
 compose() {
   DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose --env-file "${ENV_FILE}" -f "${APP_DIR}/${COMPOSE_FILE}" "$@"
+}
+
+append_build_service() {
+  local service="$1"
+  local existing
+  for existing in "${BUILD_SERVICES[@]}"; do
+    [[ "${existing}" == "${service}" ]] && return 0
+  done
+  BUILD_SERVICES+=("${service}")
+}
+
+image_exists() {
+  local service="$1"
+  docker image inspect "${APP_SLUG}-${service}:local" >/dev/null 2>&1
+}
+
+commit_exists() {
+  local commit="$1"
+  [[ -n "${commit}" ]] && git -C "${APP_DIR}" cat-file -e "${commit}^{commit}" >/dev/null 2>&1
+}
+
+determine_update_build_services() {
+  BUILD_SERVICES=()
+
+  if [[ "${FULL_REBUILD:-0}" == "1" || "${FORCE_REBUILD:-0}" == "1" ]]; then
+    append_build_service frontend
+    append_build_service backend
+    log "Full rebuild requested."
+    return 0
+  fi
+
+  image_exists frontend || append_build_service frontend
+  image_exists backend || append_build_service backend
+
+  local base_commit="${LAST_DEPLOYED_COMMIT:-}"
+  if ! commit_exists "${base_commit}"; then
+    base_commit="${PREVIOUS_COMMIT:-}"
+  fi
+
+  if ! commit_exists "${base_commit}" || ! commit_exists "${CURRENT_COMMIT}"; then
+    warn "No reliable deployed commit marker found; existing images will be reused unless they are missing."
+    return 0
+  fi
+
+  if [[ "${base_commit}" == "${CURRENT_COMMIT}" ]]; then
+    return 0
+  fi
+
+  if [[ -z "${LAST_DEPLOYED_COMMIT:-}" ]]; then
+    warn "No previous successful deploy marker found; using the previous checkout as the diff base for this update."
+  fi
+
+  log "Checking changed paths from ${base_commit:0:7} to ${CURRENT_COMMIT:0:7}..."
+  local path
+  while IFS= read -r path; do
+    case "${path}" in
+      vite-frontend/*)
+        append_build_service frontend
+        ;;
+      springboot-backend/*)
+        append_build_service backend
+        ;;
+      docker-compose.deploy.yml)
+        append_build_service frontend
+        append_build_service backend
+        ;;
+    esac
+  done < <(git -C "${APP_DIR}" diff --name-only "${base_commit}" "${CURRENT_COMMIT}")
+}
+
+mark_deployed_commit() {
+  if [[ -n "${CURRENT_COMMIT:-}" ]]; then
+    set_env_value LAST_DEPLOYED_COMMIT "${CURRENT_COMMIT}"
+  fi
 }
 
 stop_existing_stack_for_install() {
@@ -679,8 +756,29 @@ wait_for_health() {
 
 start_stack() {
   local recreate="${1:-0}"
-  log "Building and starting containers in background..."
-  compose build
+  [[ $# -gt 0 ]] && shift
+  local build_mode="${1:-all}"
+  [[ $# -gt 0 ]] && shift
+
+  case "${build_mode}" in
+    all)
+      log "Building panel images..."
+      compose build
+      ;;
+    changed)
+      if [[ "$#" -gt 0 ]]; then
+        log "Building changed panel image(s): $*"
+        compose build "$@"
+      else
+        log "No panel image rebuild needed for this update."
+      fi
+      ;;
+    *)
+      die "Unknown build mode: ${build_mode}"
+      ;;
+  esac
+
+  log "Starting containers in background..."
   compose_up_with_port_retry "${recreate}"
   wait_for_health "${APP_SLUG}-mysql" 180 || true
   wait_for_health "${APP_SLUG}-backend" 240 || true
@@ -1022,6 +1120,7 @@ install_flow() {
   install_cli_wrapper
   ensure_runtime_ports
   start_stack
+  mark_deployed_commit
   post_deploy_cleanup
   configure_nginx
   update_panel_address_in_db
@@ -1038,7 +1137,9 @@ update_flow() {
   set_env_value DEPLOY_REF "${DEPLOY_REF}"
   install_cli_wrapper
   ensure_runtime_ports
-  start_stack 1
+  determine_update_build_services
+  start_stack 1 changed "${BUILD_SERVICES[@]}"
+  mark_deployed_commit
   post_deploy_cleanup
   configure_nginx
   update_panel_address_in_db
