@@ -1100,26 +1100,30 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     private R updateGostServices(Forward forward, Tunnel tunnel, Integer limiter, NodeInfo nodeInfo, UserTunnel userTunnel) {
+        return updateGostServices(forward, tunnel, limiter, nodeInfo, userTunnel, true);
+    }
+
+    private R updateGostServices(Forward forward, Tunnel tunnel, Integer limiter, NodeInfo nodeInfo, UserTunnel userTunnel, boolean markForwardError) {
         String serviceName = buildServiceName(forward.getId(), forward.getUserId(), userTunnel);
         String interfaceName = tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD ? null : forward.getInterfaceName();
 
         if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
             R remoteResult = updateRemoteServices(nodeInfo.getOutNodes(), serviceName, forward, tunnel.getProtocol(), forward.getInterfaceName());
             if (remoteResult.getCode() != 0) {
-                updateForwardStatusToError(forward);
+                updateForwardStatusToError(forward, markForwardError);
                 return remoteResult;
             }
 
             R chainResult = updateChainServices(nodeInfo.getInNodes(), serviceName, buildOutNodeAddresses(nodeInfo.getOutNodes(), forward.getOutPort()), tunnel.getProtocol(), tunnel.getInterfaceName(), forward.getStrategy());
             if (chainResult.getCode() != 0) {
-                updateForwardStatusToError(forward);
+                updateForwardStatusToError(forward, markForwardError);
                 return chainResult;
             }
         }
 
         R serviceResult = updateMainServices(nodeInfo.getInNodes(), serviceName, forward, limiter, tunnel.getType(), tunnel, forward.getStrategy(), interfaceName);
         if (serviceResult.getCode() != 0) {
-            updateForwardStatusToError(forward);
+            updateForwardStatusToError(forward, markForwardError);
             return serviceResult;
         }
 
@@ -1538,6 +1542,13 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
      * 更新转发状态为错误
      */
     private void updateForwardStatusToError(Forward forward) {
+        updateForwardStatusToError(forward, true);
+    }
+
+    private void updateForwardStatusToError(Forward forward, boolean markForwardError) {
+        if (!markForwardError) {
+            return;
+        }
         forward.setStatus(FORWARD_STATUS_ERROR);
         this.updateById(forward);
     }
@@ -1808,23 +1819,17 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
         Tunnel tunnel = validateTunnel(forward.getTunnelId());
         if (tunnel == null) {
-            forward.setStatus(FORWARD_STATUS_ERROR);
-            this.updateById(forward);
             return R.err("tunnel not found");
         }
 
         UserTunnel userTunnel = getUserTunnel(forward.getUserId(), tunnel.getId().intValue());
         NodeInfo nodeInfo = getRequiredNodes(tunnel);
         if (nodeInfo.isHasError()) {
-            forward.setStatus(FORWARD_STATUS_ERROR);
-            this.updateById(forward);
             return R.err(nodeInfo.getErrorMessage());
         }
 
         PortAllocation portAllocation = resolveForwardPortsForCurrentTunnel(forward, tunnel);
         if (portAllocation.isHasError()) {
-            forward.setStatus(FORWARD_STATUS_ERROR);
-            this.updateById(forward);
             return R.err(portAllocation.getErrorMessage());
         }
 
@@ -1837,8 +1842,9 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             forward.setStrategy(resolvedStrategy);
         }
 
-        R result = updateGostServices(forward, tunnel, limiter, nodeInfo, userTunnel);
+        R result = updateGostServices(forward, tunnel, limiter, nodeInfo, userTunnel, false);
         if (result.getCode() != 0) {
+            log.info("刷新转发 {} 的节点配置失败，保留原状态 {}: {}", forward.getId(), originalStatus, result.getMsg());
             return result;
         }
 

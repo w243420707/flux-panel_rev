@@ -302,20 +302,34 @@ public class FlowController extends BaseController {
 
     public void pauseService(List<Forward> forwardList, String name) {
         for (Forward forward : forwardList) {
+            String serviceName = resolveForwardServiceName(forward, name);
             Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
             if (tunnel != null){
                 for (Long inNodeId : TunnelNodeUtil.getInNodeIds(tunnel)) {
-                    GostUtil.PauseService(inNodeId, name);
+                    GostUtil.PauseService(inNodeId, serviceName);
                 }
                 if (tunnel.getType() == 2){
                     for (Long outNodeId : TunnelNodeUtil.getOutNodeIds(tunnel)) {
-                        GostUtil.PauseRemoteService(outNodeId, name);
+                        GostUtil.PauseRemoteService(outNodeId, serviceName);
                     }
                 }
             }
             forward.setStatus(0);
             forwardService.updateById(forward);
         }
+    }
+
+    private String resolveForwardServiceName(Forward forward, String fallbackName) {
+        if (forward == null || forward.getId() == null || forward.getUserId() == null || forward.getTunnelId() == null) {
+            return fallbackName;
+        }
+        UserTunnel userTunnel = userTunnelService.getOne(
+                new QueryWrapper<UserTunnel>()
+                        .eq("user_id", forward.getUserId())
+                        .eq("tunnel_id", forward.getTunnelId())
+        );
+        String userTunnelId = userTunnel == null ? DEFAULT_USER_TUNNEL_ID : userTunnel.getId().toString();
+        return buildServiceName(forward.getId().toString(), forward.getUserId().toString(), userTunnelId);
     }
 
     private FlowDto filterFlowData(FlowDto flowDto, Forward forward, int flowType) {

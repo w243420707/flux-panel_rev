@@ -106,24 +106,29 @@ func updateServices(req updateServicesRequest) error {
 		name := strings.TrimSpace(serviceConfig.Name)
 		serviceConfig.Name = name
 
-		// 1. 获取旧服务
+		// 1. 获取旧服务和旧配置
 		old := registry.ServiceRegistry().Get(name)
+		oldConfig := findServiceConfig(name)
 
 		// 2. 关闭旧服务
 		old.Close()
+		releaseServicePorts(oldConfig, &serviceConfig)
 
 		// 3. 从注册表移除旧服务
 		registry.ServiceRegistry().Unregister(name)
+		time.Sleep(500 * time.Millisecond)
 
 		// 4. 解析新服务配置
 		svc, err := parser.ParseService(&serviceConfig)
 		if err != nil {
+			_ = restoreServiceConfig(name, oldConfig)
 			return errors.New("create service " + name + " failed: " + err.Error())
 		}
 
 		// 5. 注册新服务
 		if err := registry.ServiceRegistry().Register(name, svc); err != nil {
 			svc.Close()
+			_ = restoreServiceConfig(name, oldConfig)
 			return errors.New("service " + name + " already exists")
 		}
 
@@ -144,6 +149,53 @@ func updateServices(req updateServicesRequest) error {
 		return nil
 	})
 
+	return nil
+}
+
+func findServiceConfig(name string) *config.ServiceConfig {
+	cfg := config.Global()
+	for _, svc := range cfg.Services {
+		if svc != nil && svc.Name == name {
+			copied := *svc
+			return &copied
+		}
+	}
+	return nil
+}
+
+func releaseServicePorts(serviceConfigs ...*config.ServiceConfig) {
+	seen := make(map[string]struct{})
+	for _, serviceConfig := range serviceConfigs {
+		if serviceConfig == nil {
+			continue
+		}
+		addr := strings.TrimSpace(serviceConfig.Addr)
+		if addr == "" {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		_ = kill.ForceClosePortConnections(addr)
+	}
+}
+
+func restoreServiceConfig(name string, serviceConfig *config.ServiceConfig) error {
+	if serviceConfig == nil {
+		return nil
+	}
+	svc, err := parser.ParseService(serviceConfig)
+	if err != nil {
+		return err
+	}
+	if registry.ServiceRegistry().Get(name) == nil {
+		if err := registry.ServiceRegistry().Register(name, svc); err != nil {
+			svc.Close()
+			return err
+		}
+		go svc.Serve()
+	}
 	return nil
 }
 

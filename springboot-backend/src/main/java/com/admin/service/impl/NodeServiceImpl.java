@@ -49,6 +49,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     
     /** 节点默认状态：启用 */
     private static final int NODE_STATUS_ACTIVE = 0;
+    private static final int FORWARD_STATUS_ACTIVE = 1;
     
     /** 成功响应消息 */
     private static final String SUCCESS_CREATE_MSG = "节点创建成功";
@@ -199,11 +200,14 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     private void refreshForwardConfigsByNode(Long nodeId) {
         List<Forward> forwards = forwardService.list();
         for (Forward forward : forwards) {
+            if (forward.getStatus() == null || forward.getStatus() != FORWARD_STATUS_ACTIVE) {
+                continue;
+            }
             Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
             if (tunnel == null) {
                 continue;
             }
-            if (!TunnelNodeUtil.containsInNode(tunnel, nodeId) && !TunnelNodeUtil.containsOutNode(tunnel, nodeId)) {
+            if (!TunnelNodeUtil.containsOutNode(tunnel, nodeId)) {
                 continue;
             }
             forwardService.refreshForwardConfig(forward, null);
