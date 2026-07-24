@@ -895,6 +895,12 @@ export default function ForwardPage() {
 
     try {
       const lines = importData.trim().split('\n').filter(line => line.trim());
+      const usedImportPorts = new Set<number>();
+      const existingPorts = new Set(
+        forwards
+          .filter(forward => forward.tunnelId === selectedTunnelForImport && typeof forward.inPort === 'number')
+          .map(forward => forward.inPort)
+      );
       
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
@@ -947,7 +953,24 @@ export default function ForwardPage() {
               }, ...prev]);
               continue;
             }
+            if (usedImportPorts.has(port)) {
+              setImportResults(prev => [{
+                line,
+                success: false,
+                message: `入口端口 ${port} 在本次导入数据中重复`
+              }, ...prev]);
+              continue;
+            }
+            if (existingPorts.has(port)) {
+              setImportResults(prev => [{
+                line,
+                success: false,
+                message: `入口端口 ${port} 已在当前隧道中存在`
+              }, ...prev]);
+              continue;
+            }
             portNumber = port;
+            usedImportPorts.add(port);
           }
 
           // 调用创建转发接口

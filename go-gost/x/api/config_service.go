@@ -118,18 +118,21 @@ func createServices(ctx *gin.Context) {
 	for _, serviceConfig := range req.Data {
 		name := strings.TrimSpace(serviceConfig.Name)
 		if name == "" {
+			closeParsedServices(parsedServices)
 			writeError(ctx, NewError(http.StatusBadRequest, ErrCodeInvalid, "service name is required"))
 			return
 		}
 		serviceConfig.Name = name
 
 		if registry.ServiceRegistry().IsRegistered(name) {
+			closeParsedServices(parsedServices)
 			writeError(ctx, NewError(http.StatusBadRequest, ErrCodeDup, fmt.Sprintf("service %s already exists", name)))
 			return
 		}
 
 		svc, err := parser.ParseService(&serviceConfig)
 		if err != nil {
+			closeParsedServices(parsedServices)
 			writeError(ctx, NewError(http.StatusInternalServerError, ErrCodeFailed, fmt.Sprintf("create service %s failed: %s", name, err.Error())))
 			return
 		}
@@ -151,6 +154,7 @@ func createServices(ctx *gin.Context) {
 					svc.Close()
 				}
 			}
+			closeParsedServices(parsedServices)
 			writeError(ctx, NewError(http.StatusBadRequest, ErrCodeDup, fmt.Sprintf("service %s already exists", ps.config.Name)))
 			return
 		}
@@ -175,6 +179,17 @@ func createServices(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, Response{
 		Msg: "OK",
 	})
+}
+
+func closeParsedServices(parsedServices []struct {
+	config  config.ServiceConfig
+	service service.Service
+}) {
+	for _, ps := range parsedServices {
+		if ps.service != nil {
+			_ = ps.service.Close()
+		}
+	}
 }
 
 // swagger:parameters updateServiceRequest

@@ -28,16 +28,19 @@ func createServices(req createServicesRequest) error {
 	for _, serviceConfig := range req.Data {
 		name := strings.TrimSpace(serviceConfig.Name)
 		if name == "" {
+			closeParsedServices(parsedServices)
 			return errors.New("service name is required")
 		}
 		serviceConfig.Name = name
 
 		if registry.ServiceRegistry().IsRegistered(name) {
+			closeParsedServices(parsedServices)
 			return errors.New("service " + name + " already exists")
 		}
 
 		svc, err := parser.ParseService(&serviceConfig)
 		if err != nil {
+			closeParsedServices(parsedServices)
 			return errors.New("create service " + name + " failed: " + err.Error())
 		}
 
@@ -58,6 +61,7 @@ func createServices(req createServicesRequest) error {
 					svc.Close()
 				}
 			}
+			closeParsedServices(parsedServices)
 			return errors.New("service " + ps.config.Name + " already exists")
 		}
 		registeredServices = append(registeredServices, ps.config.Name)
@@ -79,6 +83,17 @@ func createServices(req createServicesRequest) error {
 	})
 
 	return nil
+}
+
+func closeParsedServices(parsedServices []struct {
+	config  config.ServiceConfig
+	service service.Service
+}) {
+	for _, ps := range parsedServices {
+		if ps.service != nil {
+			_ = ps.service.Close()
+		}
+	}
 }
 
 func updateServices(req updateServicesRequest) error {

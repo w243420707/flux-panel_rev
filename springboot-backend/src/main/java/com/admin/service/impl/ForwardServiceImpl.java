@@ -50,6 +50,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     private static final int TUNNEL_STATUS_ACTIVE = 1;
 
     private static final long BYTES_TO_GB = 1024L * 1024L * 1024L;
+    private final Object forwardConfigLock = new Object();
 
     @Resource
     @Lazy
@@ -67,6 +68,12 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Override
     public R createForward(ForwardDto forwardDto) {
+        synchronized (forwardConfigLock) {
+            return createForwardLocked(forwardDto);
+        }
+    }
+
+    private R createForwardLocked(ForwardDto forwardDto) {
         // 1. 获取当前用户信息
         UserInfo currentUser = getCurrentUserInfo();
 
@@ -109,7 +116,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
         if (gostResult.getCode() != 0) {
             this.removeById(forward.getId());
-            return gostResult;
+            return R.err(normalizeGostError(gostResult.getMsg(), forward));
         }
 
         return R.ok();
@@ -131,6 +138,12 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Override
     public R updateForward(ForwardUpdateDto forwardUpdateDto) {
+        synchronized (forwardConfigLock) {
+            return updateForwardLocked(forwardUpdateDto);
+        }
+    }
+
+    private R updateForwardLocked(ForwardUpdateDto forwardUpdateDto) {
         // 1. 获取当前用户信息
         UserInfo currentUser = getCurrentUserInfo();
         if (currentUser.getRoleId() != ADMIN_ROLE_ID) {
@@ -235,12 +248,30 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
 
         if (gostResult.getCode() != 0) {
-            return gostResult;
+            return R.err(normalizeGostError(gostResult.getMsg(), updatedForward));
         }
         updatedForward.setStatus(1);
         // 9. 保存更新
         boolean result = this.updateById(updatedForward);
         return result ? R.ok("端口转发更新成功") : R.err("端口转发更新失败");
+    }
+
+    private String normalizeGostError(String message, Forward forward) {
+        if (message == null) {
+            return "节点下发失败";
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        if (normalized.contains("address already in use") || normalized.contains("bind: address already in use")) {
+            Integer port = forward == null ? null : forward.getInPort();
+            if (port != null) {
+                return "入口端口 " + port + " 已被节点占用。请换一个入口端口，或到节点机检查是否有旧 gost 服务/其它进程占用该端口。";
+            }
+            return "入口端口已被节点占用。请换一个入口端口，或到节点机检查是否有旧 gost 服务/其它进程占用该端口。";
+        }
+        if (normalized.contains("already exists")) {
+            return "节点端已存在同名转发服务，可能是旧配置残留。请先删除或强制删除对应转发后再重试。";
+        }
+        return message;
     }
 
     @Override
