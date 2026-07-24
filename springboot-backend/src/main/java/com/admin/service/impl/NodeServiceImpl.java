@@ -464,8 +464,13 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     }
 
     private void normalizeNodeAddressFields(Node node) {
-        node.setIp(normalizeNodeAddress(node.getIp()));
-        node.setServerIp(normalizeNodeAddress(node.getServerIp()));
+        node.setIp(normalizeNodeAddressForStorage(node.getIp()));
+        node.setServerIp(normalizeNodeAddressForStorage(node.getServerIp()));
+    }
+
+    private String normalizeNodeAddressForStorage(String value) {
+        String normalized = normalizeNodeAddress(value);
+        return normalized == null ? "" : normalized;
     }
 
     /**

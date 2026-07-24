@@ -24,6 +24,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
         try (Connection connection = dataSource.getConnection()) {
             runStep("add tunnel.in_node_ids", () -> ensureColumn(connection, "tunnel", "in_node_ids", "ALTER TABLE tunnel ADD COLUMN in_node_ids LONGTEXT NULL AFTER in_node_id"));
             runStep("add tunnel.out_node_ids", () -> ensureColumn(connection, "tunnel", "out_node_ids", "ALTER TABLE tunnel ADD COLUMN out_node_ids LONGTEXT NULL AFTER out_node_id"));
+            runStep("relax node ip columns", () -> relaxNodeIpColumns(connection));
             runStep("widen tunnel ip columns", () -> widenIpColumns(connection));
             runStep("create cloudflare dns tables", () -> createCloudflareTables(connection));
             runStep("seed cloudflare dns setting", () -> seedCloudflareSetting(connection));
@@ -73,6 +74,14 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
         try (Statement statement = connection.createStatement()) {
             statement.execute("ALTER TABLE tunnel MODIFY COLUMN in_ip VARCHAR(1000) NOT NULL");
             statement.execute("ALTER TABLE tunnel MODIFY COLUMN out_ip VARCHAR(1000) NOT NULL");
+        }
+    }
+
+    private void relaxNodeIpColumns(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("UPDATE node SET server_ip = '' WHERE server_ip IS NULL");
+            statement.execute("ALTER TABLE node MODIFY COLUMN server_ip VARCHAR(100) NOT NULL DEFAULT ''");
+            statement.execute("ALTER TABLE node MODIFY COLUMN ip LONGTEXT NULL");
         }
     }
 
