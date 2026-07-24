@@ -105,6 +105,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 ### 2026-07-24
 
+- 仪表盘套餐、隧道、转发流量改为每 10 秒自动静默刷新，避免页面停留时一直显示首次加载的旧流量。
 - 默认构建源恢复为官方/全球源，取消国内镜像默认值，适配海外 VPS。
 - 后端运行镜像不再把 apt 源切到国内镜像，避免海外环境下载变慢。
 - 前后端 Docker 构建启用 BuildKit 依赖缓存，Maven 和 pnpm 下载结果会在后续更新中复用。

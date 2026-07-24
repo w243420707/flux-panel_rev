@@ -172,11 +172,23 @@ export default function DashboardPage() {
     setIsAdmin(adminStatus === 'true');
     
     loadPackageData();
+    const refreshTimer = window.setInterval(() => {
+      loadPackageData({ showLoading: false, showError: false });
+    }, 10000);
     localStorage.setItem('e', '/dashboard');
+
+    return () => {
+      window.clearInterval(refreshTimer);
+    };
   }, []);
 
-  const loadPackageData = async () => {
-    setLoading(true);
+  const loadPackageData = async (
+    options: { showLoading?: boolean; showError?: boolean } = {}
+  ) => {
+    const { showLoading = true, showError = true } = options;
+    if (showLoading) {
+      setLoading(true);
+    }
     try {
       const res = await getUserPackageInfo();
       if (res.code === 0) {
@@ -189,13 +201,19 @@ export default function DashboardPage() {
         // 检查有效期并显示通知
         checkExpirationNotifications(data.userInfo, data.tunnelPermissions || []);
       } else {
-        toast.error(res.msg || '获取套餐信息失败');
+        if (showError) {
+          toast.error(res.msg || '获取套餐信息失败');
+        }
       }
     } catch (error) {
       console.error('获取套餐信息失败:', error);
-      toast.error('获取套餐信息失败');
+      if (showError) {
+        toast.error('获取套餐信息失败');
+      }
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   };
 
