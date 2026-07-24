@@ -105,6 +105,9 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 ### 2026-07-25
 
+- 新增前端预构建部署路径，仓库携带 `vite-frontend/prebuilt-dist` 静态产物，VPS 更新时优先使用 `Dockerfile.prebuilt` 构建 nginx 静态镜像，避免重复执行前端 `pnpm ci`。
+- 优化更新流程，已有部署在更新后会自动刷新 `FRONTEND_DOCKERFILE` 等构建配置；`docker-compose.deploy.yml` 变更只重建真正变更的镜像，避免无意义触发后端 Maven 构建。
+
 - 优化面板更新构建流程，前端和后端镜像改为顺序构建，避免低配 VPS 上 Maven 与 pnpm 并行抢资源导致长时间无响应。
 - 优化前端 Docker 构建的 pnpm 下载策略，优先复用缓存并缩短单次 npm 请求超时，官方源异常时更快切换到备用全球源。
 - 新增转发端口占用交互处理：创建/导入遇到节点端口占用时可选择跳过，或确认后强制清理该端口并自动重试。

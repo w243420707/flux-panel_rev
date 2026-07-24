@@ -163,6 +163,8 @@ jspm_packages/
 
 # 构建输出
 dist/
+!vite-frontend/prebuilt-dist/
+!vite-frontend/prebuilt-dist/**
 build/
 
 # ==========================================

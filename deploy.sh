@@ -407,6 +407,31 @@ set_env_value() {
   chmod 600 "${ENV_FILE}"
 }
 
+sync_build_env_values() {
+  load_env
+
+  local frontend_dockerfile="Dockerfile"
+  if [[ -f "${APP_DIR}/vite-frontend/Dockerfile.prebuilt" && -f "${APP_DIR}/vite-frontend/prebuilt-dist/index.html" ]]; then
+    frontend_dockerfile="Dockerfile.prebuilt"
+  fi
+  FRONTEND_DOCKERFILE="${frontend_dockerfile}"
+  set_env_value FRONTEND_DOCKERFILE "${FRONTEND_DOCKERFILE}"
+
+  # Migrate old mirror defaults back to official/global sources for overseas VPS.
+  if [[ "${NPM_REGISTRY:-}" == "https://registry.npmmirror.com" ]]; then
+    NPM_REGISTRY="https://registry.npmjs.org"
+    set_env_value NPM_REGISTRY "${NPM_REGISTRY}"
+  fi
+  if [[ "${NPM_FALLBACK_REGISTRY:-}" == "https://registry.npmmirror.com" || "${NPM_FALLBACK_REGISTRY:-}" == "https://registry.npmjs.org" ]]; then
+    NPM_FALLBACK_REGISTRY="https://registry.yarnpkg.com"
+    set_env_value NPM_FALLBACK_REGISTRY "${NPM_FALLBACK_REGISTRY}"
+  fi
+  if [[ "${MAVEN_MIRROR_URL:-}" == "https://maven.aliyun.com/repository/public" ]]; then
+    MAVEN_MIRROR_URL=""
+    set_env_value MAVEN_MIRROR_URL "${MAVEN_MIRROR_URL}"
+  fi
+}
+
 write_env_file() {
   mkdir -p "${APP_DIR}"
   load_env
@@ -432,6 +457,10 @@ write_env_file() {
   MAVEN_MIRROR_URL="${MAVEN_MIRROR_URL:-}"
   if [[ "${MAVEN_MIRROR_URL}" == "https://maven.aliyun.com/repository/public" ]]; then
     MAVEN_MIRROR_URL=""
+  fi
+  FRONTEND_DOCKERFILE="Dockerfile"
+  if [[ -f "${APP_DIR}/vite-frontend/Dockerfile.prebuilt" && -f "${APP_DIR}/vite-frontend/prebuilt-dist/index.html" ]]; then
+    FRONTEND_DOCKERFILE="Dockerfile.prebuilt"
   fi
   DOCKER_LOG_MAX_SIZE="${DOCKER_LOG_MAX_SIZE:-50m}"
   DOCKER_LOG_MAX_FILE="${DOCKER_LOG_MAX_FILE:-1}"
@@ -474,6 +503,7 @@ DB_PASSWORD=${DB_PASSWORD}
 JWT_SECRET=${JWT_SECRET}
 FRONTEND_NODE_VERSION=${FRONTEND_NODE_VERSION}
 FRONTEND_BUILD_MAX_OLD_SPACE_SIZE=${FRONTEND_BUILD_MAX_OLD_SPACE_SIZE}
+FRONTEND_DOCKERFILE=${FRONTEND_DOCKERFILE}
 VITE_LEGACY_BUILD=${VITE_LEGACY_BUILD}
 PNPM_VERSION=${PNPM_VERSION}
 NPM_REGISTRY=${NPM_REGISTRY}
@@ -669,8 +699,7 @@ determine_update_build_services() {
         append_build_service backend
         ;;
       docker-compose.deploy.yml)
-        append_build_service frontend
-        append_build_service backend
+        log "Compose file changed; containers will be recreated with the latest runtime settings."
         ;;
     esac
   done < <(git -C "${APP_DIR}" diff --name-only "${base_commit}" "${CURRENT_COMMIT}")
@@ -1172,6 +1201,7 @@ update_flow() {
   [[ -n "${DEPLOY_REF_ARG}" ]] && DEPLOY_REF="${DEPLOY_REF_ARG}"
   sync_repo
   set_env_value DEPLOY_REF "${DEPLOY_REF}"
+  sync_build_env_values
   install_cli_wrapper
   ensure_runtime_ports
   determine_update_build_services

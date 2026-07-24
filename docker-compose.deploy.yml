@@ -84,6 +84,7 @@ services:
   frontend:
     build:
       context: ./vite-frontend
+      dockerfile: ${FRONTEND_DOCKERFILE:-Dockerfile}
       args:
         FRONTEND_NODE_VERSION: ${FRONTEND_NODE_VERSION:-22.13.1}
         FRONTEND_BUILD_MAX_OLD_SPACE_SIZE: ${FRONTEND_BUILD_MAX_OLD_SPACE_SIZE:-1536}

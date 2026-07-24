@@ -22,8 +22,8 @@ RUN --mount=type=cache,target=/root/.npm \
     pnpm config set prefer-offline true; \
     pnpm config set fetchRetries 2; \
     pnpm config set fetchRetryMintimeout 10000; \
-    pnpm config set fetchRetryMaxtimeout 60000; \
-    pnpm config set fetchTimeout 120000
+    pnpm config set fetchRetryMaxtimeout 30000; \
+    pnpm config set fetchTimeout 30000
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,target=/pnpm/store \

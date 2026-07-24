@@ -1,5 +1,7 @@
 node_modules
 dist
+!prebuilt-dist
+!prebuilt-dist/**
 .git
 .env
 .env.*
