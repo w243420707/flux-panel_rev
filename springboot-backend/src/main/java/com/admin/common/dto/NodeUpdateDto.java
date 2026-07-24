@@ -16,10 +16,8 @@ public class NodeUpdateDto {
     @NotBlank(message = "节点名称不能为空")
     private String name;
 
-    @NotBlank(message = "入口IP不能为空")
     private String ip;
 
-    @NotBlank(message = "服务器ip不能为空")
     private String serverIp;
 
     @NotNull(message = "起始端口不能为空")
@@ -31,4 +29,4 @@ public class NodeUpdateDto {
     @Min(value = 1, message = "结束端口必须大于0")
     @Max(value = 65535, message = "结束端口不能超过65535")
     private Integer portEnd;
-} 
+}

@@ -362,25 +362,17 @@ export default function NodePage() {
       newErrors.name = '节点名称长度不能超过50位';
     }
     
-    if (!form.ipString.trim()) {
-      newErrors.ipString = '请输入入口IP地址';
-    } else {
+    if (form.ipString.trim()) {
       const ips = form.ipString.split('\n').map(ip => ip.trim()).filter(ip => ip);
-      if (ips.length === 0) {
-        newErrors.ipString = '请输入至少一个有效IP地址';
-      } else {
-        for (let i = 0; i < ips.length; i++) {
-          if (!validateIp(ips[i])) {
-            newErrors.ipString = `第${i + 1}行IP地址格式错误: ${ips[i]}`;
-            break;
-          }
+      for (let i = 0; i < ips.length; i++) {
+        if (!validateIp(ips[i])) {
+          newErrors.ipString = `第${i + 1}行IP地址格式错误: ${ips[i]}`;
+          break;
         }
       }
     }
     
-    if (!form.serverIp.trim()) {
-      newErrors.serverIp = '请输入服务器IP地址';
-    } else if (!validateIp(form.serverIp.trim())) {
+    if (form.serverIp.trim() && !validateIp(form.serverIp.trim())) {
       newErrors.serverIp = '请输入有效的IPv4、IPv6地址或域名';
     }
     
@@ -559,6 +551,13 @@ export default function NodePage() {
     setErrors({});
   };
 
+  const getNodeEntryAddresses = (node: Node): string[] => {
+    return (node.ip || node.serverIp || '')
+      .split(',')
+      .map(ip => ip.trim())
+      .filter(ip => ip);
+  };
+
   return (
     
       <div className="px-3 lg:px-6 py-8">
@@ -614,7 +613,7 @@ export default function NodePage() {
                   <div className="flex justify-between items-start w-full">
                     <div className="flex-1 min-w-0">
                       <h3 className="font-semibold text-foreground truncate text-sm">{node.name}</h3>
-                      <p className="text-xs text-default-500 truncate">{node.serverIp}</p>
+                      <p className="text-xs text-default-500 truncate">{node.serverIp || node.ip || '待自动识别'}</p>
                     </div>
                     <div className="flex items-center gap-1.5 ml-2">
                       <Chip 
@@ -635,14 +634,14 @@ export default function NodePage() {
                     <div className="flex justify-between items-center text-sm min-w-0">
                       <span className="text-default-600 flex-shrink-0">入口IP</span>
                       <div className="text-right text-xs min-w-0 flex-1 ml-2">
-                        {node.ip ? (
-                          node.ip.split(',').length > 1 ? (
-                            <span className="font-mono truncate block" title={node.ip.split(',')[0].trim()}>
-                              {node.ip.split(',')[0].trim()} +{node.ip.split(',').length - 1}个
+                        {getNodeEntryAddresses(node).length > 0 ? (
+                          getNodeEntryAddresses(node).length > 1 ? (
+                            <span className="font-mono truncate block" title={getNodeEntryAddresses(node)[0]}>
+                              {getNodeEntryAddresses(node)[0]} +{getNodeEntryAddresses(node).length - 1}个
                             </span>
                           ) : (
-                            <span className="font-mono truncate block" title={node.ip.trim()}>
-                              {node.ip.trim()}
+                            <span className="font-mono truncate block" title={getNodeEntryAddresses(node)[0]}>
+                              {getNodeEntryAddresses(node)[0]}
                             </span>
                           )
                         ) : '-'}
@@ -819,18 +818,19 @@ export default function NodePage() {
                 />
 
                 <Input
-                  label="服务器IP"
-                  placeholder="请输入服务器IP地址，如: 192.168.1.100 或 example.com"
+                  label="服务器IP（可选）"
+                  placeholder="可留空，节点上线后自动识别公网 IP"
                   value={form.serverIp}
                   onChange={(e) => setForm(prev => ({ ...prev, serverIp: e.target.value }))}
                   isInvalid={!!errors.serverIp}
                   errorMessage={errors.serverIp}
                   variant="bordered"
+                  description="手动填写时会作为覆盖值；动态 IP 节点建议留空自动回填"
                 />
 
                 <Textarea
-                  label="入口IP"
-                  placeholder="一行一个IP地址或域名，例如:&#10;192.168.1.100&#10;example.com"
+                  label="入口IP（可选）"
+                  placeholder="可留空；需要展示多个入口地址时再填写，一行一个"
                   value={form.ipString}
                   onChange={(e) => setForm(prev => ({ ...prev, ipString: e.target.value }))}
                   isInvalid={!!errors.ipString}
@@ -838,7 +838,7 @@ export default function NodePage() {
                   variant="bordered"
                   minRows={3}
                   maxRows={5}
-                  description="支持多个IP，每行一个地址"
+                  description="留空时会默认跟随节点公网 IP；填写后用于转发页展示，不影响节点连接面板"
                 />
 
                 <div className="grid grid-cols-2 gap-4">
@@ -875,7 +875,7 @@ export default function NodePage() {
                 <Alert
                         color="primary"
                         variant="flat"
-                        description="服务器ip是你要添加的服务器的ip地址，不是面板的ip地址。入口ip是用于展示在转发页面，面向用户的访问地址。实在理解不到说明你没这个需求，都填节点的服务器ip就行！"
+                        description="新增节点时只需要填写节点名称和端口范围。服务器 IP 会在节点上线后自动识别并回填；入口 IP 只是面向用户展示的访问地址，留空时默认跟随服务器 IP，需要绑定域名或多入口地址时再手动填写。"
                         className="mt-4"
                       />
               </div>

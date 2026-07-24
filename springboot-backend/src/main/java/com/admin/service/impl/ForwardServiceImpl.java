@@ -499,7 +499,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             }
 
             // 入口TCP ping出口（使用转发的出口端口）
-            DiagnosisResult inToOutResult = performTcpPingDiagnosis(inNode, outNode.getServerIp(), forward.getOutPort(), "入口->出口");
+            DiagnosisResult inToOutResult = performTcpPingDiagnosis(inNode, resolveNodeServerAddress(outNode), forward.getOutPort(), "入口->出口");
             results.add(inToOutResult);
 
             // 出口TCP ping目标
@@ -1343,6 +1343,9 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     private R createChainServices(List<Node> inNodes, String serviceName, List<String> outAddresses, String protocol, String interfaceName, String strategy) {
+        if (outAddresses == null || outAddresses.isEmpty()) {
+            return R.err("出口节点没有可用服务器 IP，请等待节点上线自动识别，或手动填写服务器 IP");
+        }
         for (Node inNode : inNodes) {
             R result = createChainService(inNode, serviceName, outAddresses, protocol, interfaceName, strategy);
             if (result.getCode() != 0) {
@@ -1353,6 +1356,9 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     private R updateChainServices(List<Node> inNodes, String serviceName, List<String> outAddresses, String protocol, String interfaceName, String strategy) {
+        if (outAddresses == null || outAddresses.isEmpty()) {
+            return R.err("出口节点没有可用服务器 IP，请等待节点上线自动识别，或手动填写服务器 IP");
+        }
         for (Node inNode : inNodes) {
             R result = updateChainService(inNode, serviceName, outAddresses, protocol, interfaceName, strategy);
             if (result.getCode() != 0) {
@@ -1414,8 +1420,32 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     private List<String> buildOutNodeAddresses(List<Node> outNodes, Integer outPort) {
         return outNodes.stream()
-                .map(node -> formatAddress(node.getServerIp(), outPort))
+                .map(this::resolveNodeServerAddress)
+                .filter(this::hasText)
+                .map(host -> formatAddress(host, outPort))
                 .collect(Collectors.toList());
+    }
+
+    private String resolveNodeServerAddress(Node node) {
+        if (node == null) {
+            return null;
+        }
+        if (hasText(node.getServerIp())) {
+            return node.getServerIp().trim();
+        }
+        String ip = node.getIp();
+        if (!hasText(ip)) {
+            return null;
+        }
+        return Arrays.stream(ip.split(","))
+                .map(String::trim)
+                .filter(this::hasText)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     private String formatAddress(String host, Integer port) {

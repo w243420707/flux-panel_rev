@@ -533,8 +533,8 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         }
         // 设置出口参数
         tunnel.setOutNodeId(tunnelDto.getOutNodeId());
-        tunnel.setOutIp(outNode.getServerIp());
-        
+        tunnel.setOutIp(resolveNodeAddress(outNode, true));
+
         return R.ok();
     }
 
@@ -572,10 +572,21 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     private String joinNodeIps(List<Node> nodes, boolean serverIp) {
         return nodes.stream()
-                .map(node -> serverIp ? node.getServerIp() : node.getIp())
+                .map(node -> resolveNodeAddress(node, serverIp))
                 .filter(Objects::nonNull)
                 .filter(StrUtil::isNotBlank)
                 .collect(Collectors.joining(","));
+    }
+
+    private String resolveNodeAddress(Node node, boolean preferServerIp) {
+        if (node == null) {
+            return null;
+        }
+        String primary = preferServerIp ? node.getServerIp() : node.getIp();
+        if (StrUtil.isBlank(primary)) {
+            primary = preferServerIp ? node.getIp() : node.getServerIp();
+        }
+        return StrUtil.isBlank(primary) ? null : primary.trim();
     }
 
     private String resolveTunnelProtocol(String protocol) {
@@ -816,7 +827,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         } else {
             // 隧道转发：入口TCP ping出口，出口TCP ping谷歌443端口
             int outNodePort = getOutNodeTcpPort(tunnel.getId());
-            DiagnosisResult inToOutResult = performTcpPingDiagnosisWithConnectionCheck(inNode, outNode.getServerIp(), outNodePort, "入口->出口");
+            DiagnosisResult inToOutResult = performTcpPingDiagnosisWithConnectionCheck(inNode, resolveNodeAddress(outNode, true), outNodePort, "入口->出口");
             results.add(inToOutResult);
 
             // 先检查出口节点的真实连接状态，然后再进行诊断

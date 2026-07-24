@@ -31,6 +31,7 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * <p>
@@ -149,7 +150,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         List<Tunnel> inNodeId = tunnelService.list(new QueryWrapper<Tunnel>().eq("in_node_id", updateNode.getId()));
         if (!inNodeId.isEmpty()) {
             for (Tunnel tunnel : inNodeId) {
-                tunnel.setInIp(updateNode.getIp());
+                tunnel.setInIp(resolveNodeAddress(updateNode, false));
             }
             tunnelService.updateBatchById(inNodeId);
         }
@@ -158,7 +159,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         List<Tunnel> outNodeId = tunnelService.list(new QueryWrapper<Tunnel>().eq("out_node_id", updateNode.getId()));
         if (!outNodeId.isEmpty()) {
             for (Tunnel tunnel : outNodeId) {
-                tunnel.setOutIp(updateNode.getServerIp());
+                tunnel.setOutIp(resolveNodeAddress(updateNode, true));
             }
             tunnelService.updateBatchById(outNodeId);
         }
@@ -216,7 +217,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
             if (node == null) {
                 continue;
             }
-            String ip = serverIp ? node.getServerIp() : node.getIp();
+            String ip = resolveNodeAddress(node, serverIp);
             if (StrUtil.isBlank(ip)) {
                 continue;
             }
@@ -329,10 +330,8 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         if (id == null || (StrUtil.isBlank(reportedPublicIp) && StrUtil.isBlank(clientIp))) {
             return false;
         }
-        if (cloudflareDnsSettingService.getCurrentSetting().getAutoUpdateNodeIp() == null
-                || cloudflareDnsSettingService.getCurrentSetting().getAutoUpdateNodeIp() != 1) {
-            return false;
-        }
+        Integer autoUpdateNodeIp = cloudflareDnsSettingService.getCurrentSetting().getAutoUpdateNodeIp();
+        boolean autoUpdateEnabled = autoUpdateNodeIp != null && autoUpdateNodeIp == 1;
 
         String normalizedIp = resolveRuntimeNodeServerIp(reportedPublicIp, clientIp);
         if (StrUtil.isBlank(normalizedIp) || !isPublicIp(normalizedIp)) {
@@ -340,11 +339,30 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
 
         Node node = this.getById(id);
-        if (node == null || normalizedIp.equals(node.getServerIp())) {
+        if (node == null) {
             return false;
         }
 
-        node.setServerIp(normalizedIp);
+        String oldServerIp = normalizeNodeAddress(node.getServerIp());
+        String oldEntryIp = normalizeNodeAddress(node.getIp());
+        if (!autoUpdateEnabled && StrUtil.isNotBlank(oldServerIp)) {
+            return false;
+        }
+
+        boolean entryIpFollowsServer = StrUtil.isBlank(oldEntryIp) || Objects.equals(oldEntryIp, oldServerIp);
+        boolean changed = false;
+        if (!Objects.equals(normalizedIp, oldServerIp)) {
+            node.setServerIp(normalizedIp);
+            changed = true;
+        }
+        if (entryIpFollowsServer && !Objects.equals(normalizedIp, oldEntryIp)) {
+            node.setIp(normalizedIp);
+            changed = true;
+        }
+        if (!changed) {
+            return false;
+        }
+
         node.setUpdatedTime(System.currentTimeMillis());
         boolean updated = this.updateById(node);
         if (updated) {
@@ -378,6 +396,24 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
     }
 
+    private String resolveNodeAddress(Node node, boolean preferServerIp) {
+        if (node == null) {
+            return null;
+        }
+        String primary = preferServerIp ? node.getServerIp() : node.getIp();
+        if (StrUtil.isBlank(primary)) {
+            primary = preferServerIp ? node.getIp() : node.getServerIp();
+        }
+        return normalizeNodeAddress(primary);
+    }
+
+    private String normalizeNodeAddress(String value) {
+        if (StrUtil.isBlank(value)) {
+            return null;
+        }
+        return value.trim();
+    }
+
     /**
      * 构建新节点对象
      * 
@@ -387,7 +423,8 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     private Node buildNewNode(NodeDto nodeDto) {
         Node node = new Node();
         BeanUtils.copyProperties(nodeDto, node);
-        
+        normalizeNodeAddressFields(node);
+
         // 验证端口范围
         validatePortRange(node.getPortSta(), node.getPortEnd());
         
@@ -417,12 +454,18 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         node.setServerIp(nodeUpdateDto.getServerIp());
         node.setPortSta(nodeUpdateDto.getPortSta());
         node.setPortEnd(nodeUpdateDto.getPortEnd());
-        
+        normalizeNodeAddressFields(node);
+
         // 验证端口范围
         validatePortRange(node.getPortSta(), node.getPortEnd());
         
         node.setUpdatedTime(System.currentTimeMillis());
         return node;
+    }
+
+    private void normalizeNodeAddressFields(Node node) {
+        node.setIp(normalizeNodeAddress(node.getIp()));
+        node.setServerIp(normalizeNodeAddress(node.getServerIp()));
     }
 
     /**
