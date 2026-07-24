@@ -585,6 +585,43 @@ image_exists() {
   docker image inspect "${APP_SLUG}-${service}:local" >/dev/null 2>&1
 }
 
+build_service_requested() {
+  local wanted="$1"
+  shift || true
+  local service
+  for service in "$@"; do
+    [[ "${service}" == "${wanted}" ]] && return 0
+  done
+  return 1
+}
+
+build_panel_services() {
+  local services=("$@")
+  local ordered_services=()
+  local service
+
+  if [[ "${#services[@]}" -eq 0 ]]; then
+    ordered_services=(backend frontend)
+  else
+    build_service_requested backend "${services[@]}" && ordered_services+=(backend)
+    build_service_requested frontend "${services[@]}" && ordered_services+=(frontend)
+    for service in "${services[@]}"; do
+      case "${service}" in
+        backend|frontend)
+          ;;
+        *)
+          ordered_services+=("${service}")
+          ;;
+      esac
+    done
+  fi
+
+  for service in "${ordered_services[@]}"; do
+    log "Building panel image: ${service}"
+    compose build "${service}"
+  done
+}
+
 commit_exists() {
   local commit="$1"
   [[ -n "${commit}" ]] && git -C "${APP_DIR}" cat-file -e "${commit}^{commit}" >/dev/null 2>&1
@@ -763,12 +800,12 @@ start_stack() {
   case "${build_mode}" in
     all)
       log "Building panel images..."
-      compose build
+      build_panel_services
       ;;
     changed)
       if [[ "$#" -gt 0 ]]; then
-        log "Building changed panel image(s): $*"
-        compose build "$@"
+        log "Building changed panel image(s) sequentially: $*"
+        build_panel_services "$@"
       else
         log "No panel image rebuild needed for this update."
       fi

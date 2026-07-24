@@ -19,16 +19,17 @@ RUN --mount=type=cache,target=/root/.npm \
       || npm install -g "pnpm@${PNPM_VERSION}" --registry="${NPM_FALLBACK_REGISTRY}"; \
     pnpm config set registry "${NPM_REGISTRY}"; \
     pnpm config set store-dir /pnpm/store; \
-    pnpm config set fetchRetries 5; \
-    pnpm config set fetchRetryMintimeout 20000; \
-    pnpm config set fetchRetryMaxtimeout 120000; \
-    pnpm config set fetchTimeout 600000
+    pnpm config set prefer-offline true; \
+    pnpm config set fetchRetries 2; \
+    pnpm config set fetchRetryMintimeout 10000; \
+    pnpm config set fetchRetryMaxtimeout 60000; \
+    pnpm config set fetchTimeout 120000
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,target=/pnpm/store \
-    pnpm ci \
+    pnpm ci --prefer-offline \
     || (pnpm config set registry "${NPM_FALLBACK_REGISTRY}" \
-      && pnpm ci)
+      && pnpm ci --prefer-offline)
 
 COPY . .
 RUN pnpm run build
