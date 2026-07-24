@@ -508,6 +508,9 @@ func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
 	case "DeleteService":
 		err = w.handleDeleteService(cmd.Data)
 		response.Type = "DeleteServiceResponse"
+	case "ReleasePort":
+		err = w.handleReleasePort(cmd.Data)
+		response.Type = "ReleasePortResponse"
 	case "PauseService":
 		err = w.handlePauseService(cmd.Data)
 		response.Type = "PauseServiceResponse"
@@ -619,6 +622,20 @@ func (w *WebSocketReporter) handleDeleteService(data interface{}) error {
 	}
 
 	return deleteServices(req)
+}
+
+func (w *WebSocketReporter) handleReleasePort(data interface{}) error {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("serialize release port request failed: %v", err)
+	}
+
+	var req releasePortRequest
+	if err := json.Unmarshal(jsonData, &req); err != nil {
+		return fmt.Errorf("parse release port request failed: %v", err)
+	}
+
+	return releasePort(req)
 }
 
 func (w *WebSocketReporter) handlePauseService(data interface{}) error {

@@ -48,6 +48,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     private static final int FORWARD_STATUS_PAUSED = 0;
     private static final int FORWARD_STATUS_ERROR = -1;
     private static final int TUNNEL_STATUS_ACTIVE = 1;
+    private static final int PORT_CONFLICT_CODE = -409;
 
     private static final long BYTES_TO_GB = 1024L * 1024L * 1024L;
     private final Object forwardConfigLock = new Object();
@@ -112,11 +113,19 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
 
         // 7. 调用Gost服务创建转发
+        if (Boolean.TRUE.equals(forwardDto.getForceClearPort())) {
+            R releaseResult = forceReleaseForwardPorts(nodeInfo, forward, tunnel);
+            if (releaseResult.getCode() != 0) {
+                this.removeById(forward.getId());
+                return releaseResult;
+            }
+        }
+
         R gostResult = createGostServices(forward, tunnel, permissionResult.getLimiter(), nodeInfo, permissionResult.getUserTunnel());
 
         if (gostResult.getCode() != 0) {
             this.removeById(forward.getId());
-            return R.err(normalizeGostError(gostResult.getMsg(), forward));
+            return buildGostFailureResponse(gostResult.getMsg(), forward);
         }
 
         return R.ok();
@@ -238,6 +247,13 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
 
         // 8. 调用Gost服务更新转发
+        if (Boolean.TRUE.equals(forwardUpdateDto.getForceClearPort())) {
+            R releaseResult = forceReleaseForwardPorts(nodeInfo, updatedForward, tunnel);
+            if (releaseResult.getCode() != 0) {
+                return releaseResult;
+            }
+        }
+
         R gostResult;
         if (tunnelChanged) {
             // 隧道变化时：先删除原配置，再创建新配置
@@ -248,12 +264,62 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
 
         if (gostResult.getCode() != 0) {
-            return R.err(normalizeGostError(gostResult.getMsg(), updatedForward));
+            return buildGostFailureResponse(gostResult.getMsg(), updatedForward);
         }
         updatedForward.setStatus(1);
         // 9. 保存更新
         boolean result = this.updateById(updatedForward);
         return result ? R.ok("端口转发更新成功") : R.err("端口转发更新失败");
+    }
+
+    private R buildGostFailureResponse(String message, Forward forward) {
+        if (isPortConflictError(message)) {
+            return R.err(PORT_CONFLICT_CODE, buildPortConflictMessage(forward));
+        }
+        return R.err(normalizeGostError(message, forward));
+    }
+
+    private boolean isPortConflictError(String message) {
+        if (message == null) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("address already in use") || normalized.contains("bind: address already in use");
+    }
+
+    private String buildPortConflictMessage(Forward forward) {
+        Integer port = forward == null ? null : forward.getInPort();
+        if (port != null) {
+            return "入口端口 " + port + " 已被节点占用。可以跳过本次创建，或确认后强制清理该端口并重试。强制清理可能会中断节点机上占用该端口的旧 gost 服务或其它进程。";
+        }
+        return "入口端口已被节点占用。可以跳过本次创建，或确认后强制清理该端口并重试。强制清理可能会中断节点机上占用该端口的旧 gost 服务或其它进程。";
+    }
+
+    private R forceReleaseForwardPorts(NodeInfo nodeInfo, Forward forward, Tunnel tunnel) {
+        if (nodeInfo == null || forward == null || tunnel == null) {
+            return R.err("端口清理失败：转发或隧道信息不完整");
+        }
+
+        String lastError = null;
+        for (Node inNode : nodeInfo.getInNodes()) {
+            GostDto result = GostUtil.ReleasePort(inNode.getId(), forward.getInPort());
+            if (!isGostOperationSuccess(result)) {
+                lastError = result == null ? "节点无响应" : result.getMsg();
+                log.info("Release input port {} failed on node {}: {}", forward.getInPort(), inNode.getId(), lastError);
+            }
+        }
+
+        if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD && forward.getOutPort() != null) {
+            for (Node outNode : nodeInfo.getOutNodes()) {
+                GostDto result = GostUtil.ReleasePort(outNode.getId(), forward.getOutPort());
+                if (!isGostOperationSuccess(result)) {
+                    lastError = result == null ? "节点无响应" : result.getMsg();
+                    log.info("Release output port {} failed on node {}: {}", forward.getOutPort(), outNode.getId(), lastError);
+                }
+            }
+        }
+
+        return lastError == null ? R.ok() : R.err("端口清理失败：" + lastError);
     }
 
     private String normalizeGostError(String message, Forward forward) {
@@ -1604,7 +1670,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
      * 检查Gost操作是否成功
      */
     private boolean isGostOperationSuccess(GostDto gostResult) {
-        return Objects.equals(gostResult.getMsg(), GOST_SUCCESS_MSG);
+        return gostResult != null && Objects.equals(gostResult.getMsg(), GOST_SUCCESS_MSG);
     }
 
 

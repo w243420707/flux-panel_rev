@@ -37,4 +37,6 @@ public class ForwardUpdateDto {
 
     @TableField(updateStrategy = FieldStrategy.IGNORED)
     private String interfaceName;
-} 
+
+    private Boolean forceClearPort;
+}

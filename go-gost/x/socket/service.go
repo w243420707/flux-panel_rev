@@ -3,6 +3,8 @@ package socket
 import (
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -212,6 +214,71 @@ func restoreServiceConfig(name string, serviceConfig *config.ServiceConfig) erro
 		go svc.Serve()
 	}
 	return nil
+}
+
+func releasePort(req releasePortRequest) error {
+	if req.Port <= 0 || req.Port > 65535 {
+		return errors.New("invalid port")
+	}
+
+	cfg := config.Global()
+	var servicesToDelete []string
+	for _, svcCfg := range cfg.Services {
+		if svcCfg == nil || !serviceConfigUsesPort(svcCfg, req.Port) {
+			continue
+		}
+		servicesToDelete = append(servicesToDelete, svcCfg.Name)
+	}
+
+	if len(servicesToDelete) > 0 {
+		for _, name := range servicesToDelete {
+			if svc := registry.ServiceRegistry().Get(name); svc != nil {
+				registry.ServiceRegistry().Unregister(name)
+				svc.Close()
+			}
+		}
+
+		config.OnUpdate(func(c *config.Config) error {
+			services := c.Services
+			c.Services = nil
+			for _, svcCfg := range services {
+				if svcCfg == nil || containsString(servicesToDelete, svcCfg.Name) {
+					continue
+				}
+				c.Services = append(c.Services, svcCfg)
+			}
+			return nil
+		})
+	}
+
+	_ = kill.ForceClosePort(req.Port)
+	return nil
+}
+
+func serviceConfigUsesPort(svcCfg *config.ServiceConfig, port int) bool {
+	_, portStr, err := net.SplitHostPort(normalizeListenAddr(svcCfg.Addr))
+	if err != nil {
+		return false
+	}
+	servicePort, err := strconv.Atoi(portStr)
+	return err == nil && servicePort == port
+}
+
+func normalizeListenAddr(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if strings.HasPrefix(addr, ":") {
+		return "0.0.0.0" + addr
+	}
+	return addr
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func deleteServices(req deleteServicesRequest) error {
@@ -581,6 +648,10 @@ type pauseServicesRequest struct {
 
 type deleteServicesRequest struct {
 	Services []string `json:"services"`
+}
+
+type releasePortRequest struct {
+	Port int `json:"port"`
 }
 
 type updateServicesRequest struct {

@@ -72,6 +72,12 @@ public class GostUtil {
         return WebSocketServer.send_msg(node_id, data, "DeleteService");
     }
 
+    public static GostDto ReleasePort(Long node_id, Integer port) {
+        JSONObject data = new JSONObject();
+        data.put("port", port);
+        return WebSocketServer.send_msg(node_id, data, "ReleasePort");
+    }
+
     public static GostDto AddRemoteService(Long node_id, String name, Integer out_port, String remoteAddr,  String protocol, String strategy, String interfaceName) {
         JSONObject data = new JSONObject();
         data.put("name", name + "_tls");

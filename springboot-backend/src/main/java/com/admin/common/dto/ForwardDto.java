@@ -31,4 +31,6 @@ public class ForwardDto {
 
     private String interfaceName;
 
-} 
+    private Boolean forceClearPort;
+
+}

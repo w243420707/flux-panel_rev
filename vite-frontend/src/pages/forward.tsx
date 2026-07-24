@@ -86,6 +86,14 @@ interface ForwardForm {
   strategy: string;
 }
 
+interface ApiResult<T = any> {
+  code: number;
+  msg: string;
+  data?: T;
+}
+
+const PORT_CONFLICT_CODE = -409;
+
 interface AddressItem {
   id: number;
   address: string;
@@ -534,7 +542,31 @@ export default function ForwardPage() {
       const tunnelExitCount = getTunnelExitCount(selectedTunnel);
       const strategy = getRecommendedStrategy(addressCount, tunnelExitCount);
       
-      let res;
+      let res: ApiResult;
+      const retryWithForceClear = async (): Promise<ApiResult> => {
+        if (isEdit) {
+          return updateForward({
+            id: form.id,
+            userId: form.userId,
+            name: form.name,
+            tunnelId: form.tunnelId,
+            inPort: form.inPort,
+            remoteAddr: processedRemoteAddr,
+            interfaceName: form.interfaceName,
+            strategy,
+            forceClearPort: true
+          });
+        }
+        return createForward({
+          name: form.name,
+          tunnelId: form.tunnelId,
+          inPort: form.inPort,
+          remoteAddr: processedRemoteAddr,
+          interfaceName: form.interfaceName,
+          strategy,
+          forceClearPort: true
+        });
+      };
       if (isEdit) {
         // 更新时确保包含必要字段
         const updateData = {
@@ -559,6 +591,15 @@ export default function ForwardPage() {
           strategy
         };
         res = await createForward(createData);
+      }
+
+      if (res.code === PORT_CONFLICT_CODE) {
+        const confirmed = window.confirm(`${res.msg || '\u5165\u53e3\u7aef\u53e3\u5df2\u88ab\u8282\u70b9\u5360\u7528'}\n\n\u662f\u5426\u5f3a\u5236\u6e05\u7406\u8be5\u7aef\u53e3\u5e76\u91cd\u8bd5\uff1f\n\n\u53d6\u6d88 = \u8df3\u8fc7\u672c\u6b21\u64cd\u4f5c\u3002`);
+        if (!confirmed) {
+          toast.error('\u5df2\u8df3\u8fc7\uff0c\u672c\u6b21\u64cd\u4f5c\u672a\u521b\u5efa');
+          return;
+        }
+        res = await retryWithForceClear();
       }
       
       if (res.code === 0) {
@@ -974,13 +1015,30 @@ export default function ForwardPage() {
           }
 
           // 调用创建转发接口
-          const response = await createForward({
+          const createData = {
             name: name.trim(),
-            tunnelId: selectedTunnelForImport, // 使用用户选择的隧道
-            inPort: portNumber, // 使用指定端口或自动分配
+            tunnelId: selectedTunnelForImport,
+            inPort: portNumber,
             remoteAddr: remoteAddr.trim(),
             strategy: 'fifo'
-          });
+          };
+          let response: ApiResult = await createForward(createData);
+
+          if (response.code === PORT_CONFLICT_CODE) {
+            const confirmed = window.confirm(`${response.msg || '\u5165\u53e3\u7aef\u53e3\u5df2\u88ab\u8282\u70b9\u5360\u7528'}\n\n\u662f\u5426\u5f3a\u5236\u6e05\u7406\u8be5\u7aef\u53e3\u5e76\u91cd\u8bd5\uff1f\n\n\u53d6\u6d88 = \u8df3\u8fc7\u672c\u884c\u5bfc\u5165\u3002`);
+            if (!confirmed) {
+              setImportResults(prev => [{
+                line,
+                success: false,
+                message: '\u5df2\u8df3\u8fc7\uff1a\u5165\u53e3\u7aef\u53e3\u88ab\u5360\u7528'
+              }, ...prev]);
+              continue;
+            }
+            response = await createForward({
+              ...createData,
+              forceClearPort: true
+            });
+          }
 
           if (response.code === 0) {
             setImportResults(prev => [{
