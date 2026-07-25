@@ -248,7 +248,7 @@ export default function AdminLayout({
   };
 
   // 过滤菜单项（根据权限）
-  const filteredMenuItems = menuItems.filter(item => 
+  const filteredMenuItems = menuItems.filter(item =>
     !item.adminOnly || isAdmin
   );
 
@@ -256,7 +256,7 @@ export default function AdminLayout({
           <div className={`flex ${isMobile ? 'min-h-screen' : 'h-screen'} bg-gray-100 dark:bg-black`}>
       {/* 移动端遮罩层 */}
       {isMobile && mobileMenuVisible && (
-        <div 
+        <div
           className="fixed inset-0 backdrop-blur-sm bg-white/50 dark:bg-black/30 z-40"
           onClick={hideMobileMenu}
         />
@@ -264,13 +264,13 @@ export default function AdminLayout({
 
       {/* 左侧菜单栏 */}
       <aside className={`
-        ${isMobile ? 'fixed' : 'relative'} 
+        ${isMobile ? 'fixed' : 'relative'}
         ${isMobile && !mobileMenuVisible ? '-translate-x-full' : 'translate-x-0'}
-        ${isMobile ? 'w-64' : 'w-72'} 
-        bg-white dark:bg-black 
-        shadow-lg 
+        ${isMobile ? 'w-64' : 'w-72'}
+        bg-white dark:bg-black
+        shadow-lg
         border-r border-gray-200 dark:border-gray-600
-        z-50 
+        z-50
         transition-transform duration-300 ease-in-out
         flex flex-col
         ${isMobile ? 'h-screen' : 'h-full'}

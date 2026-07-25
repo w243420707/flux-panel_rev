@@ -42,6 +42,10 @@ interface ApiResponse<T = any> {
   data: T;
 }
 
+function tokenExpiredResponse<T>(msg: string = '未登录或token已过期'): ApiResponse<T> {
+  return { code: 401, msg, data: null as T };
+}
+
 // 处理token失效的逻辑
 function handleTokenExpired() {
   // 清除localStorage中的token
@@ -82,7 +86,9 @@ const Network = {
         .then(function(response: AxiosResponse<ApiResponse<T>>) {
           // 检查是否token失效
           if (isTokenExpired(response.data)) {
+            const expiredResponse = tokenExpiredResponse<T>(response.data.msg);
             handleTokenExpired();
+            resolve(expiredResponse);
             return;
           }
           resolve(response.data);
@@ -90,11 +96,13 @@ const Network = {
                  .catch(function(error: any) {
            console.error('GET请求错误:', error);
            
-           // 检查是否是401错误（token失效）
-           if (error.response && error.response.status === 401) {
-             handleTokenExpired();
-             return;
-           }
+            // 检查是否是401错误（token失效）
+            if (error.response && error.response.status === 401) {
+              const msg = error.response.data?.msg || error.response.data?.message || '未登录或token已过期';
+              handleTokenExpired();
+              resolve(tokenExpiredResponse<T>(msg));
+              return;
+            }
            
            resolve({"code": -1, "msg": error.message || "网络请求失败", "data": null as T});
          });
@@ -119,7 +127,9 @@ const Network = {
         .then(function(response: AxiosResponse<ApiResponse<T>>) {
           // 检查是否token失效
           if (isTokenExpired(response.data)) {
+            const expiredResponse = tokenExpiredResponse<T>(response.data.msg);
             handleTokenExpired();
+            resolve(expiredResponse);
             return;
           }
           resolve(response.data);
@@ -127,11 +137,13 @@ const Network = {
                  .catch(function(error: any) {
            console.error('POST请求错误:', error);
            
-           // 检查是否是401错误（token失效）
-           if (error.response && error.response.status === 401) {
-             handleTokenExpired();
-             return;
-           }
+            // 检查是否是401错误（token失效）
+            if (error.response && error.response.status === 401) {
+              const msg = error.response.data?.msg || error.response.data?.message || '未登录或token已过期';
+              handleTokenExpired();
+              resolve(tokenExpiredResponse<T>(msg));
+              return;
+            }
            
            resolve({"code": -1, "msg": error.message || "网络请求失败", "data": null as T});
          });
@@ -139,4 +151,4 @@ const Network = {
   }
 };
 
-export default Network; 
+export default Network;

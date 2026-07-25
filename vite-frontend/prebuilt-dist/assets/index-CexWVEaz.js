@@ -31408,7 +31408,7 @@ function useAriaButton$1(props, ref) {
     })
   };
 }
-var domAnimation$8 = () => __vitePreload(() => import("./index-Si1mCvZq.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$8 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple$1 = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -35760,7 +35760,7 @@ function useAriaButton(props, ref) {
     })
   };
 }
-var domAnimation$7 = () => __vitePreload(() => import("./index-Si1mCvZq.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$7 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -39699,6 +39699,9 @@ const reinitializeBaseURL = () => {
   }
 };
 reinitializeBaseURL();
+function tokenExpiredResponse(msg = "未登录或token已过期") {
+  return { code: 401, msg, data: null };
+}
 function handleTokenExpired() {
   window.localStorage.removeItem("token");
   window.localStorage.removeItem("role_id");
@@ -39725,14 +39728,19 @@ const Network = {
         }
       }).then(function(response) {
         if (isTokenExpired(response.data)) {
+          const expiredResponse = tokenExpiredResponse(response.data.msg);
           handleTokenExpired();
+          resolve(expiredResponse);
           return;
         }
         resolve(response.data);
       }).catch(function(error) {
+        var _a, _b;
         console.error("GET请求错误:", error);
         if (error.response && error.response.status === 401) {
+          const msg = ((_a = error.response.data) == null ? void 0 : _a.msg) || ((_b = error.response.data) == null ? void 0 : _b.message) || "未登录或token已过期";
           handleTokenExpired();
+          resolve(tokenExpiredResponse(msg));
           return;
         }
         resolve({ "code": -1, "msg": error.message || "网络请求失败", "data": null });
@@ -39753,14 +39761,19 @@ const Network = {
         }
       }).then(function(response) {
         if (isTokenExpired(response.data)) {
+          const expiredResponse = tokenExpiredResponse(response.data.msg);
           handleTokenExpired();
+          resolve(expiredResponse);
           return;
         }
         resolve(response.data);
       }).catch(function(error) {
+        var _a, _b;
         console.error("POST请求错误:", error);
         if (error.response && error.response.status === 401) {
+          const msg = ((_a = error.response.data) == null ? void 0 : _a.msg) || ((_b = error.response.data) == null ? void 0 : _b.message) || "未登录或token已过期";
           handleTokenExpired();
+          resolve(tokenExpiredResponse(msg));
           return;
         }
         resolve({ "code": -1, "msg": error.message || "网络请求失败", "data": null });
@@ -40127,7 +40140,7 @@ var menuVariants = {
     }
   }
 };
-var domAnimation$6 = () => __vitePreload(() => import("./index-Si1mCvZq.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$6 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var NavbarMenu = forwardRef$1((props, ref) => {
   var _a, _b;
   const { className, children, portalContainer, motionProps, style, ...otherProps } = props;
@@ -40461,7 +40474,7 @@ function useNavbar(originalProps) {
     getWrapperProps
   };
 }
-var domAnimation$5 = () => __vitePreload(() => import("./index-Si1mCvZq.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$5 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Navbar$1 = forwardRef$1((props, ref) => {
   const { children, ...otherProps } = props;
   const context = useNavbar({ ...otherProps, ref });
@@ -43508,7 +43521,7 @@ function getViewportSize() {
     height: visualViewport && (visualViewport == null ? void 0 : visualViewport.height) || window.innerHeight
   };
 }
-var domAnimation$4 = () => __vitePreload(() => import("./index-Si1mCvZq.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$4 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var ModalContent = (props) => {
   const { as, children, role = "dialog", ...otherProps } = props;
   const {
@@ -66155,6 +66168,7 @@ var LineChart = /* @__PURE__ */ reactExports.forwardRef((props, ref) => {
 });
 function DashboardPage() {
   const [loading, setLoading] = reactExports.useState(true);
+  const [loadError, setLoadError] = reactExports.useState("");
   const [userInfo, setUserInfo] = reactExports.useState({});
   const [userTunnels, setUserTunnels] = reactExports.useState([]);
   const [forwardList, setForwardList] = reactExports.useState([]);
@@ -66259,23 +66273,32 @@ function DashboardPage() {
     const { showLoading = true, showError = true } = options;
     if (showLoading) {
       setLoading(true);
+      setLoadError("");
     }
     try {
       const res2 = await getUserPackageInfo();
       if (res2.code === 0) {
         const data = res2.data;
+        setLoadError("");
         setUserInfo(data.userInfo || {});
         setUserTunnels(data.tunnelPermissions || []);
         setForwardList(data.forwards || []);
         setStatisticsFlows(data.statisticsFlows || []);
         checkExpirationNotifications(data.userInfo, data.tunnelPermissions || []);
       } else {
+        const message = res2.msg || "获取套餐信息失败";
+        if (showLoading) {
+          setLoadError(message);
+        }
         if (showError) {
-          zt.error(res2.msg || "获取套餐信息失败");
+          zt.error(message);
         }
       }
     } catch (error) {
       console.error("获取套餐信息失败:", error);
+      if (showLoading) {
+        setLoadError("获取套餐信息失败");
+      }
       if (showError) {
         zt.error("获取套餐信息失败");
       }
@@ -66583,6 +66606,15 @@ function DashboardPage() {
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "animate-spin h-5 w-5 border-2 border-gray-200 dark:border-gray-700 border-t-gray-600 dark:border-t-gray-300 rounded-full" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-default-600", children: "正在加载数据..." })
     ] }) }) });
+  }
+  if (loadError) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-3 lg:px-6 flex-grow pt-2 lg:pt-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col items-center justify-center h-64 gap-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-center", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-base font-medium text-foreground", children: "数据加载失败" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-default-500 mt-1", children: loadError })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(button_default$1, { size: "sm", color: "primary", variant: "flat", onPress: () => loadPackageData(), children: "重新加载" })
+    ] }) });
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-3 lg:px-6 py-2 lg:py-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-6 lg:mb-8", children: [
@@ -73443,7 +73475,7 @@ function usePopover$1(originalProps) {
     getContentProps
   };
 }
-var domAnimation$3 = () => __vitePreload(() => import("./index-Si1mCvZq.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$3 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var FreeSoloPopoverWrapper = forwardRef$1(
   ({
     children,
@@ -75151,7 +75183,7 @@ function useAccordionItem(props) {
     getSubtitleProps
   };
 }
-var domAnimation$2 = () => __vitePreload(() => import("./index-Si1mCvZq.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$2 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var AccordionItem = forwardRef$1((props, ref) => {
   const {
     Component,
@@ -96231,7 +96263,7 @@ function CalendarPicker(props) {
     }
   );
 }
-var domAnimation$1 = () => __vitePreload(() => import("./index-Si1mCvZq.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$1 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopLayoutWrapper = reactExports.forwardRef(
   (props, ref) => {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref, ...props });
@@ -100063,7 +100095,7 @@ var [PopoverProvider, usePopoverContext] = createContext2$1({
   name: "PopoverContext",
   errorMessage: "usePopoverContext: `context` is undefined. Seems you forgot to wrap all popover components within `<Popover />`"
 });
-var domAnimation = () => __vitePreload(() => import("./index-Si1mCvZq.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopoverContent = (props) => {
   const { as, children, className, ...otherProps } = props;
   const {

@@ -59,6 +59,7 @@ interface StatisticsFlow {
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [userInfo, setUserInfo] = useState<UserInfo>({} as UserInfo);
   const [userTunnels, setUserTunnels] = useState<UserTunnel[]>([]);
   const [forwardList, setForwardList] = useState<Forward[]>([]);
@@ -188,11 +189,13 @@ export default function DashboardPage() {
     const { showLoading = true, showError = true } = options;
     if (showLoading) {
       setLoading(true);
+      setLoadError('');
     }
     try {
       const res = await getUserPackageInfo();
       if (res.code === 0) {
         const data = res.data;
+        setLoadError('');
         setUserInfo(data.userInfo || {});
         setUserTunnels(data.tunnelPermissions || []);
         setForwardList(data.forwards || []);
@@ -201,12 +204,19 @@ export default function DashboardPage() {
         // 检查有效期并显示通知
         checkExpirationNotifications(data.userInfo, data.tunnelPermissions || []);
       } else {
+        const message = res.msg || '获取套餐信息失败';
+        if (showLoading) {
+          setLoadError(message);
+        }
         if (showError) {
-          toast.error(res.msg || '获取套餐信息失败');
+          toast.error(message);
         }
       }
     } catch (error) {
       console.error('获取套餐信息失败:', error);
+      if (showLoading) {
+        setLoadError('获取套餐信息失败');
+      }
       if (showError) {
         toast.error('获取套餐信息失败');
       }
@@ -602,6 +612,22 @@ export default function DashboardPage() {
             </div>
           </div>
         
+      );
+    }
+
+    if (loadError) {
+      return (
+        <div className="px-3 lg:px-6 flex-grow pt-2 lg:pt-4">
+          <div className="flex flex-col items-center justify-center h-64 gap-4">
+            <div className="text-center">
+              <p className="text-base font-medium text-foreground">数据加载失败</p>
+              <p className="text-sm text-default-500 mt-1">{loadError}</p>
+            </div>
+            <Button size="sm" color="primary" variant="flat" onPress={() => loadPackageData()}>
+              重新加载
+            </Button>
+          </div>
+        </div>
       );
     }
 
