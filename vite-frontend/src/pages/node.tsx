@@ -25,6 +25,8 @@ interface Node {
   name: string;
   ip: string;
   serverIp: string;
+  serverIpv4?: string;
+  serverIpv6?: string;
   portSta: number;
   portEnd: number;
   version?: string;
@@ -552,10 +554,14 @@ export default function NodePage() {
   };
 
   const getNodeEntryAddresses = (node: Node): string[] => {
-    return (node.ip || node.serverIp || '')
+    return (node.ip || node.serverIp || node.serverIpv4 || node.serverIpv6 || '')
       .split(',')
       .map(ip => ip.trim())
       .filter(ip => ip);
+  };
+
+  const getNodePrimaryAddress = (node: Node): string => {
+    return node.serverIp || node.serverIpv4 || node.serverIpv6 || node.ip || '待自动识别';
   };
 
   return (
@@ -613,7 +619,7 @@ export default function NodePage() {
                   <div className="flex justify-between items-start w-full">
                     <div className="flex-1 min-w-0">
                       <h3 className="font-semibold text-foreground truncate text-sm">{node.name}</h3>
-                      <p className="text-xs text-default-500 truncate">{node.serverIp || node.ip || '待自动识别'}</p>
+                      <p className="text-xs text-default-500 truncate">{getNodePrimaryAddress(node)}</p>
                     </div>
                     <div className="flex items-center gap-1.5 ml-2">
                       <Chip 
@@ -646,6 +652,18 @@ export default function NodePage() {
                           )
                         ) : '-'}
                       </div>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-default-600">公网IPv4</span>
+                      <span className="text-xs font-mono truncate ml-2 text-right max-w-[65%]" title={node.serverIpv4 || '-'}>
+                        {node.serverIpv4 || '-'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-default-600">公网IPv6</span>
+                      <span className="text-xs font-mono truncate ml-2 text-right max-w-[65%]" title={node.serverIpv6 || '-'}>
+                        {node.serverIpv6 || '-'}
+                      </span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-default-600">端口</span>

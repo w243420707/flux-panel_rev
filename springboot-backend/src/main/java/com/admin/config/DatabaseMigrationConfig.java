@@ -24,6 +24,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
         try (Connection connection = dataSource.getConnection()) {
             runStep("add tunnel.in_node_ids", () -> ensureColumn(connection, "tunnel", "in_node_ids", "ALTER TABLE tunnel ADD COLUMN in_node_ids LONGTEXT NULL AFTER in_node_id"));
             runStep("add tunnel.out_node_ids", () -> ensureColumn(connection, "tunnel", "out_node_ids", "ALTER TABLE tunnel ADD COLUMN out_node_ids LONGTEXT NULL AFTER out_node_id"));
+            runStep("add node dual-stack runtime ip columns", () -> addNodeRuntimeIpColumns(connection));
             runStep("relax node ip columns", () -> relaxNodeIpColumns(connection));
             runStep("widen tunnel ip columns", () -> widenIpColumns(connection));
             runStep("create cloudflare dns tables", () -> createCloudflareTables(connection));
@@ -80,8 +81,21 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
     private void relaxNodeIpColumns(Connection connection) throws Exception {
         try (Statement statement = connection.createStatement()) {
             statement.executeUpdate("UPDATE node SET server_ip = '' WHERE server_ip IS NULL");
+            statement.executeUpdate("UPDATE node SET server_ipv4 = '' WHERE server_ipv4 IS NULL");
+            statement.executeUpdate("UPDATE node SET server_ipv6 = '' WHERE server_ipv6 IS NULL");
             statement.execute("ALTER TABLE node MODIFY COLUMN server_ip VARCHAR(100) NOT NULL DEFAULT ''");
+            statement.execute("ALTER TABLE node MODIFY COLUMN server_ipv4 VARCHAR(100) NOT NULL DEFAULT ''");
+            statement.execute("ALTER TABLE node MODIFY COLUMN server_ipv6 VARCHAR(100) NOT NULL DEFAULT ''");
             statement.execute("ALTER TABLE node MODIFY COLUMN ip LONGTEXT NULL");
+        }
+    }
+
+    private void addNodeRuntimeIpColumns(Connection connection) throws Exception {
+        ensureColumn(connection, "node", "server_ipv4", "ALTER TABLE node ADD COLUMN server_ipv4 VARCHAR(100) NOT NULL DEFAULT '' AFTER server_ip");
+        ensureColumn(connection, "node", "server_ipv6", "ALTER TABLE node ADD COLUMN server_ipv6 VARCHAR(100) NOT NULL DEFAULT '' AFTER server_ipv4");
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("UPDATE node SET server_ipv4 = server_ip WHERE server_ipv4 = '' AND server_ip REGEXP '^[0-9]{1,3}(\\\\.[0-9]{1,3}){3}$'");
+            statement.executeUpdate("UPDATE node SET server_ipv6 = server_ip WHERE server_ipv6 = '' AND server_ip LIKE '%:%'");
         }
     }
 

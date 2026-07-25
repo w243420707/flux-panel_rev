@@ -58,6 +58,8 @@ CREATE TABLE `node` (
   `secret` varchar(100) NOT NULL,
   `ip` longtext,
   `server_ip` varchar(100) NOT NULL DEFAULT '',
+  `server_ipv4` varchar(100) NOT NULL DEFAULT '',
+  `server_ipv6` varchar(100) NOT NULL DEFAULT '',
   `port_sta` int(10) NOT NULL,
   `port_end` int(10) NOT NULL,
   `version` varchar(100) DEFAULT NULL,

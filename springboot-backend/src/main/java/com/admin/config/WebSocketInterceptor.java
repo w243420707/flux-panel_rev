@@ -38,6 +38,8 @@ public class WebSocketInterceptor extends HttpSessionHandshakeInterceptor {
         String type = serverHttpRequest.getServletRequest().getParameter("type");
         String version = serverHttpRequest.getServletRequest().getParameter("version");
         String publicIp = serverHttpRequest.getServletRequest().getParameter("publicIp");
+        String publicIpv4 = serverHttpRequest.getServletRequest().getParameter("publicIpv4");
+        String publicIpv6 = serverHttpRequest.getServletRequest().getParameter("publicIpv6");
         String clientIp = getClientIp(request);
         if (Objects.equals(type, "1")) {
             log.info("节点握手请求，type: {}, version: {}, ip: {}", type, version, clientIp);
@@ -51,6 +53,8 @@ public class WebSocketInterceptor extends HttpSessionHandshakeInterceptor {
             attributes.put("nodeVersion", version);
             attributes.put("clientIp", clientIp);
             attributes.put("nodePublicIp", publicIp);
+            attributes.put("nodePublicIpv4", publicIpv4);
+            attributes.put("nodePublicIpv6", publicIpv6);
             log.info("节点 {} 通过验证，版本: {}", node.getId(), version);
             // 不在这里更新状态，等到连接建立后再统一更新
         }else {

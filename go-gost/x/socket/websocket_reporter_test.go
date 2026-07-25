@@ -4,10 +4,12 @@ import "testing"
 
 func TestBuildWebSocketURL(t *testing.T) {
 	tests := []struct {
-		name     string
-		addr     string
-		publicIp string
-		wantURL  string
+		name       string
+		addr       string
+		publicIp   string
+		publicIpv4 string
+		publicIpv6 string
+		wantURL    string
 	}{
 		{
 			name:    "https panel uses wss",
@@ -25,16 +27,18 @@ func TestBuildWebSocketURL(t *testing.T) {
 			wantURL: "ws://127.0.0.1:6366/system-info?secret=secret&type=1&version=1.2.0",
 		},
 		{
-			name:     "public ip is appended",
-			addr:     "https://zf.114431.xyz",
-			publicIp: "1.2.3.4",
-			wantURL:  "wss://zf.114431.xyz/system-info?publicIp=1.2.3.4&secret=secret&type=1&version=1.2.0",
+			name:       "public ip is appended",
+			addr:       "https://zf.114431.xyz",
+			publicIp:   "1.2.3.4",
+			publicIpv4: "1.2.3.4",
+			publicIpv6: "2001:db8::1",
+			wantURL:    "wss://zf.114431.xyz/system-info?publicIp=1.2.3.4&publicIpv4=1.2.3.4&publicIpv6=2001%3Adb8%3A%3A1&secret=secret&type=1&version=1.2.0",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildWebSocketURL(tt.addr, "secret", "1.2.0", tt.publicIp)
+			got := buildWebSocketURL(tt.addr, "secret", "1.2.0", tt.publicIp, tt.publicIpv4, tt.publicIpv6)
 			if got != tt.wantURL {
 				t.Fatalf("buildWebSocketURL() = %q, want %q", got, tt.wantURL)
 			}

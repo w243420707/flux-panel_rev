@@ -330,15 +330,25 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     }
 
     @Override
-    public boolean refreshRuntimeNodeServerIp(Long id, String reportedPublicIp, String clientIp) {
-        if (id == null || (StrUtil.isBlank(reportedPublicIp) && StrUtil.isBlank(clientIp))) {
+    public boolean refreshRuntimeNodeServerIp(Long id,
+                                              String reportedPublicIp,
+                                              String reportedPublicIpv4,
+                                              String reportedPublicIpv6,
+                                              String clientIp) {
+        if (id == null
+                || (StrUtil.isBlank(reportedPublicIp)
+                && StrUtil.isBlank(reportedPublicIpv4)
+                && StrUtil.isBlank(reportedPublicIpv6)
+                && StrUtil.isBlank(clientIp))) {
             return false;
         }
         Integer autoUpdateNodeIp = cloudflareDnsSettingService.getCurrentSetting().getAutoUpdateNodeIp();
         boolean autoUpdateEnabled = autoUpdateNodeIp != null && autoUpdateNodeIp == 1;
 
-        String normalizedIp = resolveRuntimeNodeServerIp(reportedPublicIp, clientIp);
-        if (StrUtil.isBlank(normalizedIp) || !isPublicIp(normalizedIp)) {
+        String normalizedIpv4 = resolveRuntimeIpByFamily(true, reportedPublicIpv4, reportedPublicIp, clientIp);
+        String normalizedIpv6 = resolveRuntimeIpByFamily(false, reportedPublicIpv6, reportedPublicIp, clientIp);
+        String normalizedIp = resolvePrimaryRuntimeNodeServerIp(reportedPublicIp, normalizedIpv4, normalizedIpv6, clientIp);
+        if (StrUtil.isBlank(normalizedIp)) {
             return false;
         }
 
@@ -348,13 +358,26 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
 
         String oldServerIp = normalizeNodeAddress(node.getServerIp());
+        String oldServerIpv4 = normalizeNodeAddress(node.getServerIpv4());
+        String oldServerIpv6 = normalizeNodeAddress(node.getServerIpv6());
         String oldEntryIp = normalizeNodeAddress(node.getIp());
         if (!autoUpdateEnabled && StrUtil.isNotBlank(oldServerIp)) {
             return false;
         }
 
-        boolean entryIpFollowsServer = StrUtil.isBlank(oldEntryIp) || Objects.equals(oldEntryIp, oldServerIp);
+        boolean entryIpFollowsServer = StrUtil.isBlank(oldEntryIp)
+                || Objects.equals(oldEntryIp, oldServerIp)
+                || Objects.equals(oldEntryIp, oldServerIpv4)
+                || Objects.equals(oldEntryIp, oldServerIpv6);
         boolean changed = false;
+        if (StrUtil.isNotBlank(normalizedIpv4) && !Objects.equals(normalizedIpv4, oldServerIpv4)) {
+            node.setServerIpv4(normalizedIpv4);
+            changed = true;
+        }
+        if (StrUtil.isNotBlank(normalizedIpv6) && !Objects.equals(normalizedIpv6, oldServerIpv6)) {
+            node.setServerIpv6(normalizedIpv6);
+            changed = true;
+        }
         if (!Objects.equals(normalizedIp, oldServerIp)) {
             node.setServerIp(normalizedIp);
             changed = true;
@@ -379,10 +402,20 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
     // ========== 私有辅助方法 ==========
 
-    private String resolveRuntimeNodeServerIp(String reportedPublicIp, String clientIp) {
+    private String resolvePrimaryRuntimeNodeServerIp(String reportedPublicIp,
+                                                    String normalizedIpv4,
+                                                    String normalizedIpv6,
+                                                    String clientIp) {
         String normalizedReportedIp = normalizeRuntimeIp(reportedPublicIp);
         if (StrUtil.isNotBlank(normalizedReportedIp) && isPublicIp(normalizedReportedIp)) {
             return normalizedReportedIp;
+        }
+
+        if (StrUtil.isNotBlank(normalizedIpv4)) {
+            return normalizedIpv4;
+        }
+        if (StrUtil.isNotBlank(normalizedIpv6)) {
+            return normalizedIpv6;
         }
 
         String normalizedClientIp = normalizeRuntimeIp(clientIp);
@@ -391,6 +424,32 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
 
         return null;
+    }
+
+    private String resolveRuntimeIpByFamily(boolean ipv4, String... candidates) {
+        for (String candidate : candidates) {
+            String normalizedIp = normalizeRuntimeIp(candidate);
+            if (StrUtil.isBlank(normalizedIp) || !isPublicIpVersion(normalizedIp, ipv4)) {
+                continue;
+            }
+            return normalizedIp;
+        }
+        return null;
+    }
+
+    private boolean isPublicIpVersion(String ip, boolean ipv4) {
+        try {
+            InetAddress address = InetAddress.getByName(ip);
+            if (ipv4 && !(address instanceof Inet4Address)) {
+                return false;
+            }
+            if (!ipv4 && !(address instanceof Inet6Address)) {
+                return false;
+            }
+            return isPublicIp(ip);
+        } catch (UnknownHostException e) {
+            return false;
+        }
     }
 
     private void syncCloudflareDnsByNode(Long nodeId, String trigger) {
@@ -470,11 +529,38 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     private void normalizeNodeAddressFields(Node node) {
         node.setIp(normalizeNodeAddressForStorage(node.getIp()));
         node.setServerIp(normalizeNodeAddressForStorage(node.getServerIp()));
+        syncLiteralServerIpFamilyFields(node);
     }
 
     private String normalizeNodeAddressForStorage(String value) {
         String normalized = normalizeNodeAddress(value);
         return normalized == null ? "" : normalized;
+    }
+
+    private void syncLiteralServerIpFamilyFields(Node node) {
+        String serverIp = normalizeNodeAddress(node.getServerIp());
+        if (StrUtil.isBlank(serverIp)) {
+            return;
+        }
+        if (isIpLiteralOfFamily(serverIp, true) && isPublicIpVersion(serverIp, true)) {
+            node.setServerIpv4(serverIp);
+        } else if (isIpLiteralOfFamily(serverIp, false) && isPublicIpVersion(serverIp, false)) {
+            node.setServerIpv6(serverIp);
+        }
+    }
+
+    private boolean isIpLiteralOfFamily(String value, boolean ipv4) {
+        if (StrUtil.isBlank(value)) {
+            return false;
+        }
+        String normalized = normalizeRuntimeIp(value);
+        if (StrUtil.isBlank(normalized)) {
+            return false;
+        }
+        if (ipv4) {
+            return normalized.matches("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$");
+        }
+        return normalized.contains(":");
     }
 
     /**

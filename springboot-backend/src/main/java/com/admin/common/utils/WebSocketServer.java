@@ -226,6 +226,8 @@ public class WebSocketServer extends TextWebSocketHandler {
                 String version = (String) session.getAttributes().get("nodeVersion");
                 String clientIp = (String) session.getAttributes().get("clientIp");
                 String nodePublicIp = (String) session.getAttributes().get("nodePublicIp");
+                String nodePublicIpv4 = (String) session.getAttributes().get("nodePublicIpv4");
+                String nodePublicIpv6 = (String) session.getAttributes().get("nodePublicIpv6");
                 
                 log.info("节点 {} 尝试连接，开始处理连接逻辑", nodeId);
                 
@@ -254,8 +256,8 @@ public class WebSocketServer extends TextWebSocketHandler {
                 Node node = nodeService.getById(nodeId);
                 if (node != null) {
                     // 更新状态和版本信息
-                    if (nodePublicIp != null || clientIp != null) {
-                        nodeService.refreshRuntimeNodeServerIp(nodeId, nodePublicIp, clientIp);
+                    if (nodePublicIp != null || nodePublicIpv4 != null || nodePublicIpv6 != null || clientIp != null) {
+                        nodeService.refreshRuntimeNodeServerIp(nodeId, nodePublicIp, nodePublicIpv4, nodePublicIpv6, clientIp);
                         node = nodeService.getById(nodeId);
                     }
                     node.setStatus(1);

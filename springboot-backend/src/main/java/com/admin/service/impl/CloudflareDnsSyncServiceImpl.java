@@ -229,7 +229,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             desiredTargets = deduplicateTargets(desiredTargets);
 
             if (desiredTargets.isEmpty()) {
-                String message = "未解析到任何可用公网 IP，已保留旧 DNS 记录";
+                String message = "未解析到任何可用公网 " + recordTypeLabel(recordType) + "，已保留旧 DNS 记录";
                 markBinding(binding, SYNC_FAILED, message, null);
                 return R.err(message);
             }
@@ -333,24 +333,39 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     }
 
     private List<CloudflareDnsTarget> resolveNodeTargets(Node node, String recordType) {
-        if (node == null || !StringUtils.hasText(node.getServerIp())) {
+        if (node == null) {
             return new ArrayList<>();
         }
 
-        String host = normalizeHost(node.getServerIp());
         LinkedHashSet<String> targets = new LinkedHashSet<>();
+        if (RECORD_TYPE_AUTO.equals(recordType) || RECORD_TYPE_A.equals(recordType)) {
+            collectAddressTargets(node, targets, node.getServerIpv4(), RECORD_TYPE_A);
+        }
+        if (RECORD_TYPE_AUTO.equals(recordType) || RECORD_TYPE_AAAA.equals(recordType)) {
+            collectAddressTargets(node, targets, node.getServerIpv6(), RECORD_TYPE_AAAA);
+        }
+        collectAddressTargets(node, targets, node.getServerIp(), recordType);
+        return toTargets(node.getId(), targets);
+    }
+
+    private void collectAddressTargets(Node node, LinkedHashSet<String> targets, String value, String recordType) {
+        if (!StringUtils.hasText(value)) {
+            return;
+        }
+
+        String host = normalizeHost(value);
         try {
             if (isIpv4Literal(host)) {
                 if (RECORD_TYPE_AUTO.equals(recordType) || RECORD_TYPE_A.equals(recordType)) {
                     addPublicTarget(targets, RECORD_TYPE_A, InetAddress.getByName(host));
                 }
-                return toTargets(node.getId(), targets);
+                return;
             }
             if (isIpv6Literal(host)) {
                 if (RECORD_TYPE_AUTO.equals(recordType) || RECORD_TYPE_AAAA.equals(recordType)) {
                     addPublicTarget(targets, RECORD_TYPE_AAAA, InetAddress.getByName(host));
                 }
-                return toTargets(node.getId(), targets);
+                return;
             }
 
             InetAddress[] addresses = InetAddress.getAllByName(host);
@@ -361,10 +376,8 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                     addPublicTarget(targets, RECORD_TYPE_AAAA, address);
                 }
             }
-            return toTargets(node.getId(), targets);
         } catch (Exception e) {
             log.warn("Resolve node target failed, nodeId={}, host={}, error={}", node.getId(), host, e.getMessage());
-            return new ArrayList<>();
         }
     }
 
@@ -495,6 +508,16 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         }
         String normalized = recordType.trim().toUpperCase();
         return RECORD_TYPE_AUTO.equals(normalized) || RECORD_TYPE_A.equals(normalized) || RECORD_TYPE_AAAA.equals(normalized);
+    }
+
+    private String recordTypeLabel(String recordType) {
+        if (RECORD_TYPE_A.equals(recordType)) {
+            return "IPv4";
+        }
+        if (RECORD_TYPE_AAAA.equals(recordType)) {
+            return "IPv6";
+        }
+        return "IPv4/IPv6";
     }
 
     private int resolveTtl(Integer ttl) {

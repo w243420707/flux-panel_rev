@@ -128,7 +128,7 @@ func NewWebSocketReporter(serverURL string, secret string) *WebSocketReporter {
 }
 
 func NewWebSocketReporterWithConfig(addr string, secret string, version string) *WebSocketReporter {
-	reporter := NewWebSocketReporter(buildWebSocketURL(addr, secret, version, ""), secret)
+	reporter := NewWebSocketReporter(buildWebSocketURL(addr, secret, version, "", "", ""), secret)
 	reporter.addr = addr
 	reporter.secret = secret
 	reporter.version = version
@@ -207,8 +207,12 @@ func (w *WebSocketReporter) connect() error {
 
 	currentURL := w.url
 	if w.addr != "" {
-		publicIP := detectPublicIP()
-		currentURL = buildWebSocketURL(w.addr, w.secret, w.version, publicIP)
+		publicIPv4, publicIPv6 := detectPublicIPs()
+		publicIP := publicIPv4
+		if publicIP == "" {
+			publicIP = publicIPv6
+		}
+		currentURL = buildWebSocketURL(w.addr, w.secret, w.version, publicIP, publicIPv4, publicIPv6)
 		w.url = currentURL
 	}
 
@@ -978,7 +982,7 @@ func StartWebSocketReporterWithConfig(Addr string, Secret string, Version string
 	return reporter
 }
 
-func buildWebSocketURL(addr string, secret string, version string, publicIP string) string {
+func buildWebSocketURL(addr string, secret string, version string, publicIP string, publicIPv4 string, publicIPv6 string) string {
 	raw := strings.TrimSpace(addr)
 	if !strings.Contains(raw, "://") {
 		raw = "http://" + strings.Trim(raw, "/")
@@ -1013,12 +1017,26 @@ func buildWebSocketURL(addr string, secret string, version string, publicIP stri
 	if publicIP != "" {
 		q.Set("publicIp", publicIP)
 	}
+	if publicIPv4 != "" {
+		q.Set("publicIpv4", publicIPv4)
+	}
+	if publicIPv6 != "" {
+		q.Set("publicIpv6", publicIPv6)
+	}
 	u.RawQuery = q.Encode()
 
 	return u.String()
 }
 
 func detectPublicIP() string {
+	publicIPv4, publicIPv6 := detectPublicIPs()
+	if publicIPv4 != "" {
+		return publicIPv4
+	}
+	return publicIPv6
+}
+
+func detectPublicIPs() (string, string) {
 	endpoints := []string{
 		"https://api.ip.sb/ip",
 		"https://ifconfig.co/ip",
@@ -1026,7 +1044,31 @@ func detectPublicIP() string {
 		"https://cloudflare.com/cdn-cgi/trace",
 	}
 
-	client := &http.Client{Timeout: 3 * time.Second}
+	publicIPv4 := detectPublicIPWithNetwork("tcp4", endpoints)
+	publicIPv6 := detectPublicIPWithNetwork("tcp6", endpoints)
+	if publicIPv4 != "" {
+		fmt.Printf("🌐 检测到公网IPv4: %s\n", publicIPv4)
+	}
+	if publicIPv6 != "" {
+		fmt.Printf("🌐 检测到公网IPv6: %s\n", publicIPv6)
+	}
+	if publicIPv4 == "" && publicIPv6 == "" {
+		fmt.Printf("⚠️ 未能通过外部接口检测公网IP，将回退到面板侧连接来源IP\n")
+	}
+	return publicIPv4, publicIPv6
+}
+
+func detectPublicIPWithNetwork(network string, endpoints []string) string {
+	dialer := &net.Dialer{Timeout: 3 * time.Second}
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, address)
+		},
+	}
+	defer transport.CloseIdleConnections()
+
+	client := &http.Client{Timeout: 3 * time.Second, Transport: transport}
 	for _, endpoint := range endpoints {
 		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 		if err != nil {
@@ -1045,12 +1087,10 @@ func detectPublicIP() string {
 
 		ip := parsePublicIPResponse(string(body))
 		if ip != "" && isPublicIPLiteral(ip) {
-			fmt.Printf("🌐 检测到公网IP: %s\n", ip)
 			return ip
 		}
 	}
 
-	fmt.Printf("⚠️ 未能通过外部接口检测公网IP，将回退到面板侧连接来源IP\n")
 	return ""
 }
 

@@ -63,6 +63,8 @@ interface Node {
   id: number;
   name: string;
   serverIp?: string;
+  serverIpv4?: string;
+  serverIpv6?: string;
   status?: number;
 }
 
@@ -190,6 +192,17 @@ export default function CloudflareDnsPage() {
   const getTunnelName = (id?: number) => getTunnel(id)?.name || `隧道 ${id || "-"}`;
 
   const getNodeName = (id?: number) => nodes.find((node) => node.id === id)?.name || `节点 ${id || "-"}`;
+
+  const getNodeAddressSummary = (node: Node) => {
+    const parts = [];
+    if (node.serverIpv4) {
+      parts.push(`v4 ${node.serverIpv4}`);
+    }
+    if (node.serverIpv6) {
+      parts.push(`v6 ${node.serverIpv6}`);
+    }
+    return parts.join(" / ") || node.serverIp || "-";
+  };
 
   const getBindingNodeIds = (binding: CloudflareDnsBinding) => {
     if (binding.useTunnelNodes === undefined || binding.useTunnelNodes === 1) {
@@ -710,8 +723,8 @@ export default function CloudflareDnsPage() {
                       {nodes.map((node) => (
                         <SelectItem key={node.id} textValue={node.name}>
                           <div className="flex items-center justify-between gap-2">
-                            <span>{node.name}</span>
-                            <span className="text-xs text-default-500 truncate">{node.serverIp || "-"}</span>
+                            <span className="shrink-0">{node.name}</span>
+                            <span className="text-xs text-default-500 truncate text-right min-w-0">{getNodeAddressSummary(node)}</span>
                           </div>
                         </SelectItem>
                       ))}
