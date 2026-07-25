@@ -1,7 +1,7 @@
 import { Card, CardBody, CardHeader } from "@heroui/card";
 import { Button } from "@heroui/button";
 import { Modal, ModalContent, ModalHeader, ModalBody } from "@heroui/modal";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import toast from 'react-hot-toast';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -60,6 +60,7 @@ interface StatisticsFlow {
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const packageLoadingRef = useRef(false);
   const [userInfo, setUserInfo] = useState<UserInfo>({} as UserInfo);
   const [userTunnels, setUserTunnels] = useState<UserTunnel[]>([]);
   const [forwardList, setForwardList] = useState<Forward[]>([]);
@@ -187,6 +188,10 @@ export default function DashboardPage() {
     options: { showLoading?: boolean; showError?: boolean } = {}
   ) => {
     const { showLoading = true, showError = true } = options;
+    if (packageLoadingRef.current) {
+      return;
+    }
+    packageLoadingRef.current = true;
     if (showLoading) {
       setLoading(true);
       setLoadError('');
@@ -221,6 +226,7 @@ export default function DashboardPage() {
         toast.error('获取套餐信息失败');
       }
     } finally {
+      packageLoadingRef.current = false;
       if (showLoading) {
         setLoading(false);
       }

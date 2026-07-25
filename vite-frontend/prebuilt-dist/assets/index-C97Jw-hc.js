@@ -31408,7 +31408,7 @@ function useAriaButton$1(props, ref) {
     })
   };
 }
-var domAnimation$8 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$8 = () => __vitePreload(() => import("./index-DMnd0mrg.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple$1 = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -35760,7 +35760,7 @@ function useAriaButton(props, ref) {
     })
   };
 }
-var domAnimation$7 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$7 = () => __vitePreload(() => import("./index-DMnd0mrg.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -40140,7 +40140,7 @@ var menuVariants = {
     }
   }
 };
-var domAnimation$6 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$6 = () => __vitePreload(() => import("./index-DMnd0mrg.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var NavbarMenu = forwardRef$1((props, ref) => {
   var _a, _b;
   const { className, children, portalContainer, motionProps, style, ...otherProps } = props;
@@ -40474,7 +40474,7 @@ function useNavbar(originalProps) {
     getWrapperProps
   };
 }
-var domAnimation$5 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$5 = () => __vitePreload(() => import("./index-DMnd0mrg.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Navbar$1 = forwardRef$1((props, ref) => {
   const { children, ...otherProps } = props;
   const context = useNavbar({ ...otherProps, ref });
@@ -43521,7 +43521,7 @@ function getViewportSize() {
     height: visualViewport && (visualViewport == null ? void 0 : visualViewport.height) || window.innerHeight
   };
 }
-var domAnimation$4 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$4 = () => __vitePreload(() => import("./index-DMnd0mrg.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var ModalContent = (props) => {
   const { as, children, role = "dialog", ...otherProps } = props;
   const {
@@ -66169,6 +66169,7 @@ var LineChart = /* @__PURE__ */ reactExports.forwardRef((props, ref) => {
 function DashboardPage() {
   const [loading, setLoading] = reactExports.useState(true);
   const [loadError, setLoadError] = reactExports.useState("");
+  const packageLoadingRef = reactExports.useRef(false);
   const [userInfo, setUserInfo] = reactExports.useState({});
   const [userTunnels, setUserTunnels] = reactExports.useState([]);
   const [forwardList, setForwardList] = reactExports.useState([]);
@@ -66271,6 +66272,10 @@ function DashboardPage() {
   }, []);
   const loadPackageData = async (options = {}) => {
     const { showLoading = true, showError = true } = options;
+    if (packageLoadingRef.current) {
+      return;
+    }
+    packageLoadingRef.current = true;
     if (showLoading) {
       setLoading(true);
       setLoadError("");
@@ -66303,6 +66308,7 @@ function DashboardPage() {
         zt.error("获取套餐信息失败");
       }
     } finally {
+      packageLoadingRef.current = false;
       if (showLoading) {
         setLoading(false);
       }
@@ -73475,7 +73481,7 @@ function usePopover$1(originalProps) {
     getContentProps
   };
 }
-var domAnimation$3 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$3 = () => __vitePreload(() => import("./index-DMnd0mrg.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var FreeSoloPopoverWrapper = forwardRef$1(
   ({
     children,
@@ -75183,7 +75189,7 @@ function useAccordionItem(props) {
     getSubtitleProps
   };
 }
-var domAnimation$2 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$2 = () => __vitePreload(() => import("./index-DMnd0mrg.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var AccordionItem = forwardRef$1((props, ref) => {
   const {
     Component,
@@ -96263,7 +96269,7 @@ function CalendarPicker(props) {
     }
   );
 }
-var domAnimation$1 = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$1 = () => __vitePreload(() => import("./index-DMnd0mrg.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopLayoutWrapper = reactExports.forwardRef(
   (props, ref) => {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref, ...props });
@@ -100095,7 +100101,7 @@ var [PopoverProvider, usePopoverContext] = createContext2$1({
   name: "PopoverContext",
   errorMessage: "usePopoverContext: `context` is undefined. Seems you forgot to wrap all popover components within `<Popover />`"
 });
-var domAnimation = () => __vitePreload(() => import("./index-CUgKzZN4.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation = () => __vitePreload(() => import("./index-DMnd0mrg.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopoverContent = (props) => {
   const { as, children, className, ...otherProps } = props;
   const {

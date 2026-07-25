@@ -204,43 +204,61 @@ INSERT INTO `vite_config` (`id`, `name`, `value`, `time`) VALUES
 -- 表的索引 `forward`
 --
 ALTER TABLE `forward`
-  ADD PRIMARY KEY (`id`);
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_forward_user_created` (`user_id`,`created_time`),
+  ADD KEY `idx_forward_user_tunnel_status` (`user_id`,`tunnel_id`,`status`),
+  ADD KEY `idx_forward_tunnel` (`tunnel_id`),
+  ADD KEY `idx_forward_status` (`status`);
 
 --
 -- 表的索引 `node`
 --
 ALTER TABLE `node`
-  ADD PRIMARY KEY (`id`);
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_node_secret` (`secret`),
+  ADD KEY `idx_node_status` (`status`);
 
 --
 -- 表的索引 `speed_limit`
 --
 ALTER TABLE `speed_limit`
-  ADD PRIMARY KEY (`id`);
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_speed_limit_tunnel_id` (`tunnel_id`);
 
 --
 -- 表的索引 `statistics_flow`
 --
 ALTER TABLE `statistics_flow`
-  ADD PRIMARY KEY (`id`);
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_statistics_flow_user_id_id` (`user_id`,`id`),
+  ADD KEY `idx_statistics_flow_created_time` (`created_time`);
 
 --
 -- 表的索引 `tunnel`
 --
 ALTER TABLE `tunnel`
-  ADD PRIMARY KEY (`id`);
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_tunnel_in_node_id` (`in_node_id`),
+  ADD KEY `idx_tunnel_out_node_id` (`out_node_id`),
+  ADD KEY `idx_tunnel_status` (`status`);
 
 --
 -- 表的索引 `user`
 --
 ALTER TABLE `user`
-  ADD PRIMARY KEY (`id`);
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_user_status_exp` (`status`,`exp_time`),
+  ADD KEY `idx_user_flow_reset` (`flow_reset_time`),
+  ADD KEY `idx_user_role_status` (`role_id`,`status`);
 
 --
 -- 表的索引 `user_tunnel`
 --
 ALTER TABLE `user_tunnel`
-  ADD PRIMARY KEY (`id`);
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_user_tunnel_user_tunnel` (`user_id`,`tunnel_id`),
+  ADD KEY `idx_user_tunnel_status_exp` (`status`,`exp_time`),
+  ADD KEY `idx_user_tunnel_flow_reset` (`flow_reset_time`);
 
 --
 -- 表的索引 `vite_config`

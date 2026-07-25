@@ -29,6 +29,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("widen tunnel ip columns", () -> widenIpColumns(connection));
             runStep("create cloudflare dns tables", () -> createCloudflareTables(connection));
             runStep("seed cloudflare dns setting", () -> seedCloudflareSetting(connection));
+            runStep("add query indexes", () -> addQueryIndexes(connection));
             runStep("backfill tunnel node arrays", () -> backfillNodeArrays(connection));
         } catch (Exception e) {
             log.warn("Database migration check failed: {}", e.getMessage());
@@ -58,6 +59,73 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, table);
             statement.setString(2, column);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt(1) > 0;
+            }
+        }
+    }
+
+    private void addQueryIndexes(Connection connection) throws Exception {
+        ensureIndex(connection, "forward", "idx_forward_user_created",
+                "ALTER TABLE `forward` ADD INDEX `idx_forward_user_created` (`user_id`, `created_time`)");
+        ensureIndex(connection, "forward", "idx_forward_user_tunnel_status",
+                "ALTER TABLE `forward` ADD INDEX `idx_forward_user_tunnel_status` (`user_id`, `tunnel_id`, `status`)");
+        ensureIndex(connection, "forward", "idx_forward_tunnel",
+                "ALTER TABLE `forward` ADD INDEX `idx_forward_tunnel` (`tunnel_id`)");
+        ensureIndex(connection, "forward", "idx_forward_status",
+                "ALTER TABLE `forward` ADD INDEX `idx_forward_status` (`status`)");
+
+        ensureIndex(connection, "statistics_flow", "idx_statistics_flow_user_id_id",
+                "ALTER TABLE `statistics_flow` ADD INDEX `idx_statistics_flow_user_id_id` (`user_id`, `id`)");
+        ensureIndex(connection, "statistics_flow", "idx_statistics_flow_created_time",
+                "ALTER TABLE `statistics_flow` ADD INDEX `idx_statistics_flow_created_time` (`created_time`)");
+
+        ensureIndex(connection, "user_tunnel", "idx_user_tunnel_user_tunnel",
+                "ALTER TABLE `user_tunnel` ADD INDEX `idx_user_tunnel_user_tunnel` (`user_id`, `tunnel_id`)");
+        ensureIndex(connection, "user_tunnel", "idx_user_tunnel_status_exp",
+                "ALTER TABLE `user_tunnel` ADD INDEX `idx_user_tunnel_status_exp` (`status`, `exp_time`)");
+        ensureIndex(connection, "user_tunnel", "idx_user_tunnel_flow_reset",
+                "ALTER TABLE `user_tunnel` ADD INDEX `idx_user_tunnel_flow_reset` (`flow_reset_time`)");
+
+        ensureIndex(connection, "user", "idx_user_status_exp",
+                "ALTER TABLE `user` ADD INDEX `idx_user_status_exp` (`status`, `exp_time`)");
+        ensureIndex(connection, "user", "idx_user_flow_reset",
+                "ALTER TABLE `user` ADD INDEX `idx_user_flow_reset` (`flow_reset_time`)");
+        ensureIndex(connection, "user", "idx_user_role_status",
+                "ALTER TABLE `user` ADD INDEX `idx_user_role_status` (`role_id`, `status`)");
+
+        ensureIndex(connection, "tunnel", "idx_tunnel_in_node_id",
+                "ALTER TABLE `tunnel` ADD INDEX `idx_tunnel_in_node_id` (`in_node_id`)");
+        ensureIndex(connection, "tunnel", "idx_tunnel_out_node_id",
+                "ALTER TABLE `tunnel` ADD INDEX `idx_tunnel_out_node_id` (`out_node_id`)");
+        ensureIndex(connection, "tunnel", "idx_tunnel_status",
+                "ALTER TABLE `tunnel` ADD INDEX `idx_tunnel_status` (`status`)");
+
+        ensureIndex(connection, "speed_limit", "idx_speed_limit_tunnel_id",
+                "ALTER TABLE `speed_limit` ADD INDEX `idx_speed_limit_tunnel_id` (`tunnel_id`)");
+        ensureIndex(connection, "node", "idx_node_secret",
+                "ALTER TABLE `node` ADD INDEX `idx_node_secret` (`secret`)");
+        ensureIndex(connection, "node", "idx_node_status",
+                "ALTER TABLE `node` ADD INDEX `idx_node_status` (`status`)");
+        ensureIndex(connection, "cloudflare_dns_binding", "idx_cloudflare_dns_binding_status",
+                "ALTER TABLE `cloudflare_dns_binding` ADD INDEX `idx_cloudflare_dns_binding_status` (`status`)");
+    }
+
+    private void ensureIndex(Connection connection, String table, String index, String ddl) throws Exception {
+        if (hasIndex(connection, table, index)) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(ddl);
+            log.info("Database index added: {}.{}", table, index);
+        }
+    }
+
+    private boolean hasIndex(Connection connection, String table, String index) throws Exception {
+        String sql = "SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, table);
+            statement.setString(2, index);
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next() && resultSet.getInt(1) > 0;
             }

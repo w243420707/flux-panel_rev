@@ -105,6 +105,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 ### 2026-07-25
 
+- 优化低配 VPS 运行占用：仪表盘自动刷新不再堆叠并发请求，后端默认 Tomcat/Hikari/MySQL/JVM 参数降为更保守配置，并为转发、流量统计、用户隧道等高频查询自动补充数据库索引，降低 CPU 打满和接口 30 秒超时概率。
 - 修复前端请求封装在 token 失效或 HTTP 401 时 Promise 不结束的问题，避免登录后仪表盘一直停在“正在加载数据”；仪表盘首屏加载失败时会显示错误原因和重新加载按钮。
 - 修复前端容器 Nginx 反代后端使用静态 Docker DNS 解析的问题，后端容器重启或重建后前端会动态重新解析 `backend:6365`，避免页面接口偶发 `502 Bad Gateway`。
 - 修复双栈节点 Cloudflare DDNS 场景，节点端支持分别上报公网 IPv4/IPv6，后端新增 `server_ipv4`/`server_ipv6` 运行时字段，A 记录优先使用 IPv4、AAAA 记录优先使用 IPv6，避免双栈节点只保存一个 IP 导致 A 记录同步失败。

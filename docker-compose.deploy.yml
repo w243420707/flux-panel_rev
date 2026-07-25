@@ -22,8 +22,8 @@ services:
       --default-authentication-plugin=mysql_native_password
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
-      --max_connections=1000
-      --innodb_buffer_pool_size=256M
+      --max_connections=${MYSQL_MAX_CONNECTIONS:-200}
+      --innodb_buffer_pool_size=${MYSQL_INNODB_BUFFER_POOL_SIZE:-128M}
     networks:
       - app-network
     logging: *default-logging
@@ -63,7 +63,13 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       LOG_DIR: /app/logs
-      JAVA_OPTS: "-Xms256m -Xmx512m -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai"
+      JAVA_OPTS: "${BACKEND_JAVA_OPTS:--Xms64m -Xmx256m -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai}"
+      DB_MAX_POOL_SIZE: ${DB_MAX_POOL_SIZE:-8}
+      DB_MIN_IDLE: ${DB_MIN_IDLE:-1}
+      TOMCAT_MAX_THREADS: ${TOMCAT_MAX_THREADS:-64}
+      TOMCAT_MIN_SPARE_THREADS: ${TOMCAT_MIN_SPARE_THREADS:-4}
+      TOMCAT_MAX_CONNECTIONS: ${TOMCAT_MAX_CONNECTIONS:-512}
+      TOMCAT_ACCEPT_COUNT: ${TOMCAT_ACCEPT_COUNT:-100}
     ports:
       - "127.0.0.1:${BACKEND_PORT:-6365}:6365"
     volumes:
