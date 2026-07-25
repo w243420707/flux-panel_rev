@@ -105,6 +105,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 ### 2026-07-25
 
+- 修复前端容器 Nginx 反代后端使用静态 Docker DNS 解析的问题，后端容器重启或重建后前端会动态重新解析 `backend:6365`，避免页面接口偶发 `502 Bad Gateway`。
 - 修复双栈节点 Cloudflare DDNS 场景，节点端支持分别上报公网 IPv4/IPv6，后端新增 `server_ipv4`/`server_ipv6` 运行时字段，A 记录优先使用 IPv4、AAAA 记录优先使用 IPv6，避免双栈节点只保存一个 IP 导致 A 记录同步失败。
 - 新增前端预构建部署路径，仓库携带 `vite-frontend/prebuilt-dist` 静态产物，VPS 更新时优先使用 `Dockerfile.prebuilt` 构建 nginx 静态镜像，避免重复执行前端 `pnpm ci`。
 - 优化更新流程，已有部署在更新后会自动刷新 `FRONTEND_DOCKERFILE` 等构建配置；`docker-compose.deploy.yml` 变更只重建真正变更的镜像，避免无意义触发后端 Maven 构建。
