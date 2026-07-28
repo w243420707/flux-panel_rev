@@ -24,6 +24,8 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 /**
@@ -65,6 +67,9 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Resource
     NodeService nodeService;
+
+    @Resource(name = "diagnosisExecutor")
+    private Executor diagnosisExecutor;
 
 
     @Override
@@ -565,53 +570,55 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             return R.err("隧道不存在");
         }
 
-        // 4. 获取入口节点信息
-        Node inNode = nodeService.getNodeById(tunnel.getInNodeId());
-        if (inNode == null) {
-            return R.err("入口节点不存在");
+        // 4. 获取入口/出口节点信息
+        NodeInfo nodeInfo = getRequiredNodes(tunnel);
+        if (nodeInfo.isHasError()) {
+            return R.err(nodeInfo.getErrorMessage());
         }
 
-
-        List<DiagnosisResult> results = new ArrayList<>();
+        List<CompletableFuture<DiagnosisResult>> diagnosisTasks = new ArrayList<>();
         String[] remoteAddresses = forward.getRemoteAddr().split(",");
         // 6. 根据隧道类型执行不同的诊断策略
         if (tunnel.getType() == TUNNEL_TYPE_PORT_FORWARD) {
             // 端口转发：入口节点直接TCP ping目标地址
-            for (String remoteAddress : remoteAddresses) {
-                // 提取IP和端口
-                String targetIp = extractIpFromAddress(remoteAddress);
-                int targetPort = extractPortFromAddress(remoteAddress);
-                if (targetIp == null || targetPort == -1) {
-                    return R.err("无法解析目标地址: " + remoteAddress);
-                }
+            for (Node inNode : nodeInfo.getInNodes()) {
+                for (String remoteAddress : remoteAddresses) {
+                    // 提取IP和端口
+                    String targetIp = extractIpFromAddress(remoteAddress);
+                    int targetPort = extractPortFromAddress(remoteAddress);
+                    if (targetIp == null || targetPort == -1) {
+                        return R.err("无法解析目标地址: " + remoteAddress);
+                    }
 
-                DiagnosisResult result = performTcpPingDiagnosis(inNode, targetIp, targetPort, "转发->目标");
-                results.add(result);
+                    diagnosisTasks.add(runDiagnosisAsync(inNode, targetIp, targetPort, "转发->目标"));
+                }
             }
         } else {
             // 隧道转发：入口TCP ping出口，出口TCP ping目标
-            Node outNode = nodeService.getNodeById(tunnel.getOutNodeId());
-            if (outNode == null) {
-                return R.err("出口节点不存在");
-            }
-
             // 入口TCP ping出口（使用转发的出口端口）
-            DiagnosisResult inToOutResult = performTcpPingDiagnosis(inNode, resolveNodeServerAddress(outNode), forward.getOutPort(), "入口->出口");
-            results.add(inToOutResult);
+            for (Node inNode : nodeInfo.getInNodes()) {
+                for (Node outNode : nodeInfo.getOutNodes()) {
+                    diagnosisTasks.add(runDiagnosisAsync(inNode, resolveNodeServerAddress(outNode), forward.getOutPort(), "入口->出口: " + outNode.getName()));
+                }
+            }
 
             // 出口TCP ping目标
-            for (String remoteAddress : remoteAddresses) {
-                // 提取IP和端口
-                String targetIp = extractIpFromAddress(remoteAddress);
-                int targetPort = extractPortFromAddress(remoteAddress);
-                if (targetIp == null || targetPort == -1) {
-                    return R.err("无法解析目标地址: " + remoteAddress);
+            for (Node outNode : nodeInfo.getOutNodes()) {
+                for (String remoteAddress : remoteAddresses) {
+                    // 提取IP和端口
+                    String targetIp = extractIpFromAddress(remoteAddress);
+                    int targetPort = extractPortFromAddress(remoteAddress);
+                    if (targetIp == null || targetPort == -1) {
+                        return R.err("无法解析目标地址: " + remoteAddress);
+                    }
+                    diagnosisTasks.add(runDiagnosisAsync(outNode, targetIp, targetPort, "出口->目标"));
                 }
-                DiagnosisResult outToTargetResult = performTcpPingDiagnosis(outNode, targetIp, targetPort, "出口->目标");
-                results.add(outToTargetResult);
             }
-
         }
+
+        List<DiagnosisResult> results = diagnosisTasks.stream()
+                .map(CompletableFuture::join)
+                .collect(Collectors.toList());
 
         // 7. 构建诊断报告
         Map<String, Object> diagnosisReport = new HashMap<>();
@@ -622,6 +629,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         diagnosisReport.put("timestamp", System.currentTimeMillis());
 
         return R.ok(diagnosisReport);
+    }
+
+    private CompletableFuture<DiagnosisResult> runDiagnosisAsync(Node node, String targetIp, int targetPort, String description) {
+        return CompletableFuture.supplyAsync(() -> performTcpPingDiagnosis(node, targetIp, targetPort, description), diagnosisExecutor);
     }
 
     @Override

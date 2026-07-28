@@ -21,4 +21,16 @@ public class AsyncExecutorConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean(name = "diagnosisExecutor")
+    public Executor diagnosisExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(16);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("diagnosis-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
 }
