@@ -260,9 +260,10 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
             return R.err("隧道更新失败");
         }
 
-        tunnelConfigSyncTask.syncTunnelUpdate(tunnelUpdateDto.getId(), oldTunnel, configChanged, true, "tunnel-update");
+        Long syncVersion = existingTunnel.getUpdatedTime();
+        tunnelConfigSyncTask.syncTunnelUpdate(tunnelUpdateDto.getId(), oldTunnel, syncVersion, configChanged, true, "tunnel-update");
         if (configChanged) {
-            return R.ok("隧道更新成功，转发配置正在后台同步");
+            return R.ok("隧道更新成功，转发配置正在后台同步，失败项会自动重试");
         }
         return R.ok("隧道更新成功，Cloudflare DNS 正在后台同步");
     }
