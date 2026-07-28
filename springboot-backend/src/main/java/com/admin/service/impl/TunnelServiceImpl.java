@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.admin.common.dto.*;
 
 import com.admin.common.lang.R;
+import com.admin.common.task.TunnelConfigSyncTask;
 import com.admin.common.utils.GostUtil;
 import com.admin.common.utils.JwtUtil;
 import com.admin.common.utils.TunnelNodeUtil;
@@ -103,6 +104,10 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     @Resource
     @Lazy
     CloudflareDnsSyncService cloudflareDnsSyncService;
+
+    @Resource
+    @Lazy
+    TunnelConfigSyncTask tunnelConfigSyncTask;
 
     // ========== 公共接口实现 ==========
 
@@ -250,28 +255,16 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         existingTunnel.setOutIp(joinNodeIps(outNodes, true));
         existingTunnel.setUpdatedTime(System.currentTimeMillis());
 
-        this.updateById(existingTunnel);
+        boolean result = this.updateById(existingTunnel);
+        if (!result) {
+            return R.err("隧道更新失败");
+        }
 
-        int err = 0;
+        tunnelConfigSyncTask.syncTunnelUpdate(tunnelUpdateDto.getId(), oldTunnel, configChanged, true, "tunnel-update");
         if (configChanged) {
-            List<Forward> forwards = forwardService.list(new QueryWrapper<Forward>().eq("tunnel_id", tunnelUpdateDto.getId()));
-            for (Forward forward : forwards) {
-                R r = forwardService.refreshForwardConfig(forward, oldTunnel);
-                if (r.getCode() != 0) {
-                    err++;
-                }
-            }
+            return R.ok("隧道更新成功，转发配置正在后台同步");
         }
-
-        R dnsSyncResult = syncCloudflareDnsByTunnel(tunnelUpdateDto.getId(), "tunnel-update");
-
-        if (err != 0) {
-            return R.err("隧道信息更新成功，但部分转发同步更新失败");
-        }
-        if (dnsSyncResult.getCode() != 0) {
-            return R.ok("隧道更新成功，但 Cloudflare DNS 同步失败: " + dnsSyncResult.getMsg());
-        }
-        return R.ok("隧道更新成功");
+        return R.ok("隧道更新成功，Cloudflare DNS 正在后台同步");
     }
 
     /**

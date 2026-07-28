@@ -333,7 +333,10 @@ export default function TunnelPage() {
         : await createTunnel(data);
         
       if (response.code === 0) {
-        toast.success(isEdit ? '更新成功' : '创建成功');
+        const successMessage = typeof response.data === 'string'
+          ? response.data
+          : (response.msg || (isEdit ? '更新成功' : '创建成功'));
+        toast.success(successMessage);
         setModalOpen(false);
         loadData();
       } else {
