@@ -12,4 +12,5 @@ public class CloudflareDnsBindingDto {
     private List<Long> nodeIds;
     private Integer useTunnelNodes;
     private String recordType;
+    private Integer smartPoolEnabled;
 }

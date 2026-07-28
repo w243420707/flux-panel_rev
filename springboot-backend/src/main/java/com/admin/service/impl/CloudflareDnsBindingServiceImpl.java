@@ -62,6 +62,13 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
         binding.setUseTunnelNodes(useTunnelNodes);
         binding.setNodeIds(useTunnelNodes == 1 ? null : TunnelNodeUtil.toJsonArray(nodeIds));
         binding.setRecordType(resolveRecordType(dto.getRecordType()));
+        binding.setSmartPoolEnabled(dto.getSmartPoolEnabled() != null && dto.getSmartPoolEnabled() == 1 ? 1 : 0);
+        if (binding.getSmartPoolEnabled() == 0) {
+            binding.setSmartPoolActiveNodeIds(null);
+            binding.setSmartPoolBackupNodeIds(null);
+            binding.setSmartPoolLastSwitchAt(null);
+            binding.setSmartPoolNextRotateAt(null);
+        }
         binding.setStatus(1);
         binding.setUpdatedTime(System.currentTimeMillis());
         if (binding.getCreatedTime() == null) {

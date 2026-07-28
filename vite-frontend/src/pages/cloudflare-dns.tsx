@@ -46,6 +46,11 @@ interface CloudflareDnsBinding {
   useTunnelNodes?: number;
   recordType?: string;
   status?: number;
+  smartPoolEnabled?: number;
+  smartPoolActiveNodeIds?: string | number[];
+  smartPoolBackupNodeIds?: string | number[];
+  smartPoolLastSwitchAt?: number;
+  smartPoolNextRotateAt?: number;
   lastSyncAt?: number;
   lastSyncStatus?: string;
   lastSyncMessage?: string;
@@ -75,6 +80,7 @@ interface BindingForm {
   useTunnelNodes: boolean;
   nodeIds: number[];
   recordType: string;
+  smartPoolEnabled: boolean;
 }
 
 const defaultSetting: CloudflareDnsSetting = {
@@ -91,6 +97,7 @@ const defaultBindingForm: BindingForm = {
   useTunnelNodes: true,
   nodeIds: [],
   recordType: "AUTO",
+  smartPoolEnabled: true,
 };
 
 export default function CloudflareDnsPage() {
@@ -212,6 +219,8 @@ export default function CloudflareDnsPage() {
     return normalizeNodeIds(binding.nodeIds);
   };
 
+  const getPoolNodeIds = (value?: string | number[]) => normalizeNodeIds(value);
+
   const formatTime = (timestamp?: number) => {
     if (!timestamp) {
       return "-";
@@ -329,6 +338,7 @@ export default function CloudflareDnsPage() {
       useTunnelNodes: binding.useTunnelNodes === undefined || binding.useTunnelNodes === 1,
       nodeIds: normalizeNodeIds(binding.nodeIds),
       recordType: binding.recordType || "AUTO",
+      smartPoolEnabled: binding.smartPoolEnabled === 1,
     });
     setBindingModalOpen(true);
   };
@@ -356,6 +366,7 @@ export default function CloudflareDnsPage() {
         useTunnelNodes: bindingForm.useTunnelNodes ? 1 : 0,
         nodeIds: bindingForm.nodeIds,
         recordType: bindingForm.recordType,
+        smartPoolEnabled: bindingForm.smartPoolEnabled ? 1 : 0,
       });
       if (res.code === 0) {
         toast.success(res.msg || "DNS 绑定已保存");
@@ -568,6 +579,8 @@ export default function CloudflareDnsPage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {bindings.map((binding) => {
                 const nodeIds = getBindingNodeIds(binding);
+                const activePoolNodeIds = getPoolNodeIds(binding.smartPoolActiveNodeIds);
+                const backupPoolNodeIds = getPoolNodeIds(binding.smartPoolBackupNodeIds);
                 return (
                   <Card key={binding.id} className="shadow-sm border border-divider">
                     <CardHeader className="pb-2">
@@ -607,6 +620,39 @@ export default function CloudflareDnsPage() {
                           )}
                         </div>
                       </div>
+
+                      {binding.smartPoolEnabled === 1 && (
+                        <div className="text-xs space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-default-500">智能池</span>
+                            <Chip size="sm" variant="flat" color="primary">已启用</Chip>
+                          </div>
+                          <div>
+                            <div className="text-default-500 mb-1">活跃解析</div>
+                            <div className="flex flex-wrap gap-1">
+                              {activePoolNodeIds.length > 0 ? activePoolNodeIds.map((nodeId) => (
+                                <Chip key={nodeId} size="sm" variant="flat" color="success">
+                                  {getNodeName(nodeId)}
+                                </Chip>
+                              )) : (
+                                <Chip size="sm" variant="flat" color="warning">等待同步</Chip>
+                              )}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-default-500 mb-1">备用池</div>
+                            <div className="flex flex-wrap gap-1">
+                              {backupPoolNodeIds.length > 0 ? backupPoolNodeIds.map((nodeId) => (
+                                <Chip key={nodeId} size="sm" variant="flat">
+                                  {getNodeName(nodeId)}
+                                </Chip>
+                              )) : (
+                                <Chip size="sm" variant="flat" color="default">无备用</Chip>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       <div className="text-xs text-default-500">
                         <div>{formatTime(binding.lastSyncAt)}</div>
@@ -707,6 +753,14 @@ export default function CloudflareDnsPage() {
                     color="primary"
                   >
                     <span className="text-sm">跟随隧道入口节点</span>
+                  </Switch>
+
+                  <Switch
+                    isSelected={bindingForm.smartPoolEnabled}
+                    onValueChange={(checked) => setBindingForm((prev) => ({ ...prev, smartPoolEnabled: checked }))}
+                    color="primary"
+                  >
+                    <span className="text-sm">智能备用池保护</span>
                   </Switch>
 
                   {!bindingForm.useTunnelNodes && (

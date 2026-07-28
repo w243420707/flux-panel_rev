@@ -4,16 +4,19 @@ import com.admin.common.dto.GostDto;
 import com.admin.common.lang.R;
 import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.Node;
+import com.admin.service.CloudflareDnsSyncService;
 import com.admin.service.NodeService;
 import com.admin.service.NodeWallMonitorService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -56,6 +59,10 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
 
     @Resource
     private NodeService nodeService;
+
+    @Resource
+    @Lazy
+    private CloudflareDnsSyncService cloudflareDnsSyncService;
 
     @Resource(name = "wallMonitorExecutor")
     private Executor wallMonitorExecutor;
@@ -121,6 +128,7 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         if (node == null || !isMonitorEnabled(node)) {
             return;
         }
+        String previousStatus = node.getWallMonitorStatus();
 
         MonitorDecision decision;
         if (node.getStatus() == null || node.getStatus() != NODE_ONLINE) {
@@ -144,6 +152,7 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
 
         nodeService.updateById(update);
         broadcastMonitorUpdate(update);
+        syncCloudflareDnsIfStatusChanged(node.getId(), previousStatus, decision.status);
     }
 
     private MonitorDecision runConnectivityCheck(Node node) {
@@ -336,6 +345,23 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         } catch (Exception e) {
             log.warn("Broadcast node wall monitor update failed, nodeId={}, error={}", node.getId(), e.getMessage());
         }
+    }
+
+    private void syncCloudflareDnsIfStatusChanged(Long nodeId, String previousStatus, String nextStatus) {
+        if (Objects.equals(normalizeStatus(previousStatus), normalizeStatus(nextStatus))) {
+            return;
+        }
+        CompletableFuture.runAsync(() -> {
+            try {
+                cloudflareDnsSyncService.syncBindingsByNode(nodeId, "wall-monitor");
+            } catch (Exception e) {
+                log.warn("Cloudflare DNS sync by wall monitor failed, nodeId={}, error={}", nodeId, e.getMessage());
+            }
+        });
+    }
+
+    private String normalizeStatus(String status) {
+        return status == null ? "" : status.trim().toUpperCase();
     }
 
     private static class TcpTarget {

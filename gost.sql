@@ -206,6 +206,65 @@ CREATE TABLE `vite_config` (
 INSERT INTO `vite_config` (`id`, `name`, `value`, `time`) VALUES
 (1, 'app_name', 'flux', 1755147963000);
 
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `cloudflare_dns_setting`
+--
+
+CREATE TABLE `cloudflare_dns_setting` (
+  `id` int(10) NOT NULL,
+  `created_time` bigint(20) DEFAULT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(10) DEFAULT NULL,
+  `enabled` int(10) DEFAULT NULL,
+  `api_token` varchar(1000) DEFAULT NULL,
+  `zone_id` varchar(255) DEFAULT NULL,
+  `zone_name` varchar(255) DEFAULT NULL,
+  `ttl` int(10) DEFAULT NULL,
+  `proxied` int(10) DEFAULT NULL,
+  `record_type` varchar(20) DEFAULT NULL,
+  `sync_interval_seconds` int(10) DEFAULT NULL,
+  `auto_update_node_ip` int(10) DEFAULT NULL,
+  `last_sync_at` bigint(20) DEFAULT NULL,
+  `last_sync_status` varchar(32) DEFAULT NULL,
+  `last_sync_message` varchar(1000) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+--
+-- 转存表中的数据 `cloudflare_dns_setting`
+--
+
+INSERT INTO `cloudflare_dns_setting` (`id`, `created_time`, `updated_time`, `status`, `enabled`, `ttl`, `proxied`, `record_type`, `sync_interval_seconds`, `auto_update_node_ip`) VALUES
+(1, UNIX_TIMESTAMP() * 1000, UNIX_TIMESTAMP() * 1000, 1, 0, 1, 0, 'AUTO', 120, 1);
+
+-- --------------------------------------------------------
+
+--
+-- 表的结构 `cloudflare_dns_binding`
+--
+
+CREATE TABLE `cloudflare_dns_binding` (
+  `id` int(10) NOT NULL,
+  `created_time` bigint(20) DEFAULT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(10) DEFAULT NULL,
+  `tunnel_id` int(10) DEFAULT NULL,
+  `domain` varchar(255) DEFAULT NULL,
+  `node_ids` longtext DEFAULT NULL,
+  `use_tunnel_nodes` int(10) DEFAULT NULL,
+  `record_type` varchar(20) DEFAULT NULL,
+  `smart_pool_enabled` tinyint(1) NOT NULL DEFAULT '0',
+  `smart_pool_active_node_ids` longtext DEFAULT NULL,
+  `smart_pool_backup_node_ids` longtext DEFAULT NULL,
+  `smart_pool_last_switch_at` bigint(20) DEFAULT NULL,
+  `smart_pool_next_rotate_at` bigint(20) DEFAULT NULL,
+  `last_sync_at` bigint(20) DEFAULT NULL,
+  `last_sync_status` varchar(32) DEFAULT NULL,
+  `last_sync_message` varchar(1000) DEFAULT NULL,
+  `last_resolved_ips` longtext DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 --
 -- 转储表的索引
 --
@@ -279,6 +338,20 @@ ALTER TABLE `vite_config`
   ADD UNIQUE KEY `name` (`name`);
 
 --
+-- 表的索引 `cloudflare_dns_setting`
+--
+ALTER TABLE `cloudflare_dns_setting`
+  ADD PRIMARY KEY (`id`);
+
+--
+-- 表的索引 `cloudflare_dns_binding`
+--
+ALTER TABLE `cloudflare_dns_binding`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_cloudflare_dns_binding_tunnel_id` (`tunnel_id`),
+  ADD KEY `idx_cloudflare_dns_binding_status` (`status`);
+
+--
 -- 在导出的表使用AUTO_INCREMENT
 --
 
@@ -328,6 +401,18 @@ ALTER TABLE `user_tunnel`
 -- 使用表AUTO_INCREMENT `vite_config`
 --
 ALTER TABLE `vite_config`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- 使用表AUTO_INCREMENT `cloudflare_dns_setting`
+--
+ALTER TABLE `cloudflare_dns_setting`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+
+--
+-- 使用表AUTO_INCREMENT `cloudflare_dns_binding`
+--
+ALTER TABLE `cloudflare_dns_binding`
   MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
 COMMIT;
 

@@ -29,6 +29,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("relax node ip columns", () -> relaxNodeIpColumns(connection));
             runStep("widen tunnel ip columns", () -> widenIpColumns(connection));
             runStep("create cloudflare dns tables", () -> createCloudflareTables(connection));
+            runStep("add cloudflare dns smart pool columns", () -> addCloudflareSmartPoolColumns(connection));
             runStep("seed cloudflare dns setting", () -> seedCloudflareSetting(connection));
             runStep("add query indexes", () -> addQueryIndexes(connection));
             runStep("backfill tunnel node arrays", () -> backfillNodeArrays(connection));
@@ -224,6 +225,11 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                     "node_ids LONGTEXT NULL," +
                     "use_tunnel_nodes INT NULL," +
                     "record_type VARCHAR(20) NULL," +
+                    "smart_pool_enabled TINYINT NOT NULL DEFAULT 0," +
+                    "smart_pool_active_node_ids LONGTEXT NULL," +
+                    "smart_pool_backup_node_ids LONGTEXT NULL," +
+                    "smart_pool_last_switch_at BIGINT NULL," +
+                    "smart_pool_next_rotate_at BIGINT NULL," +
                     "last_sync_at BIGINT NULL," +
                     "last_sync_status VARCHAR(32) NULL," +
                     "last_sync_message VARCHAR(1000) NULL," +
@@ -231,6 +237,19 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                     "KEY idx_cloudflare_dns_binding_tunnel_id (tunnel_id)" +
                     ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
         }
+    }
+
+    private void addCloudflareSmartPoolColumns(Connection connection) throws Exception {
+        ensureColumn(connection, "cloudflare_dns_binding", "smart_pool_enabled",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_enabled TINYINT NOT NULL DEFAULT 0 AFTER record_type");
+        ensureColumn(connection, "cloudflare_dns_binding", "smart_pool_active_node_ids",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_active_node_ids LONGTEXT NULL AFTER smart_pool_enabled");
+        ensureColumn(connection, "cloudflare_dns_binding", "smart_pool_backup_node_ids",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_backup_node_ids LONGTEXT NULL AFTER smart_pool_active_node_ids");
+        ensureColumn(connection, "cloudflare_dns_binding", "smart_pool_last_switch_at",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_last_switch_at BIGINT NULL AFTER smart_pool_backup_node_ids");
+        ensureColumn(connection, "cloudflare_dns_binding", "smart_pool_next_rotate_at",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_next_rotate_at BIGINT NULL AFTER smart_pool_last_switch_at");
     }
 
     private void seedCloudflareSetting(Connection connection) throws Exception {
