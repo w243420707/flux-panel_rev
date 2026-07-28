@@ -32,6 +32,26 @@ public class Node extends BaseEntity {
 
     private String version;
 
+    private Integer wallMonitorEnabled;
+
+    private String wallMonitorStatus;
+
+    private Long wallMonitorLastCheckAt;
+
+    private Integer wallMonitorConsecutiveFailures;
+
+    private Integer wallMonitorChinaSuccessCount;
+
+    private Integer wallMonitorChinaTotalCount;
+
+    private Integer wallMonitorGlobalSuccessCount;
+
+    private Integer wallMonitorGlobalTotalCount;
+
+    private Double wallMonitorLatencyMs;
+
+    private String wallMonitorMessage;
+
     private Integer portSta;
 
     private Integer portEnd;

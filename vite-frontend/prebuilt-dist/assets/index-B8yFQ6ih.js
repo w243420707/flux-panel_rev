@@ -31408,7 +31408,7 @@ function useAriaButton$1(props, ref) {
     })
   };
 }
-var domAnimation$8 = () => __vitePreload(() => import("./index-K9AQ4tYO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$8 = () => __vitePreload(() => import("./index-BiSokl8y.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple$1 = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -35760,7 +35760,7 @@ function useAriaButton(props, ref) {
     })
   };
 }
-var domAnimation$7 = () => __vitePreload(() => import("./index-K9AQ4tYO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$7 = () => __vitePreload(() => import("./index-BiSokl8y.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -39792,6 +39792,7 @@ const getNodeList = () => Network.post("/node/list");
 const updateNode = (data) => Network.post("/node/update", data);
 const deleteNode = (id2) => Network.post("/node/delete", { id: id2 });
 const getNodeInstallCommand = (id2) => Network.post("/node/install", { id: id2 });
+const checkNodeWallMonitor = (id2) => Network.post("/node/wall-check", { id: id2 });
 const createTunnel = (data) => Network.post("/tunnel/create", data);
 const getTunnelList = () => Network.post("/tunnel/list");
 const updateTunnel = (data) => Network.post("/tunnel/update", data);
@@ -40140,7 +40141,7 @@ var menuVariants = {
     }
   }
 };
-var domAnimation$6 = () => __vitePreload(() => import("./index-K9AQ4tYO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$6 = () => __vitePreload(() => import("./index-BiSokl8y.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var NavbarMenu = forwardRef$1((props, ref) => {
   var _a, _b;
   const { className, children, portalContainer, motionProps, style, ...otherProps } = props;
@@ -40474,7 +40475,7 @@ function useNavbar(originalProps) {
     getWrapperProps
   };
 }
-var domAnimation$5 = () => __vitePreload(() => import("./index-K9AQ4tYO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$5 = () => __vitePreload(() => import("./index-BiSokl8y.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Navbar$1 = forwardRef$1((props, ref) => {
   const { children, ...otherProps } = props;
   const context = useNavbar({ ...otherProps, ref });
@@ -43521,7 +43522,7 @@ function getViewportSize() {
     height: visualViewport && (visualViewport == null ? void 0 : visualViewport.height) || window.innerHeight
   };
 }
-var domAnimation$4 = () => __vitePreload(() => import("./index-K9AQ4tYO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$4 = () => __vitePreload(() => import("./index-BiSokl8y.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var ModalContent = (props) => {
   const { as, children, role = "dialog", ...otherProps } = props;
   const {
@@ -73481,7 +73482,7 @@ function usePopover$1(originalProps) {
     getContentProps
   };
 }
-var domAnimation$3 = () => __vitePreload(() => import("./index-K9AQ4tYO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$3 = () => __vitePreload(() => import("./index-BiSokl8y.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var FreeSoloPopoverWrapper = forwardRef$1(
   ({
     children,
@@ -75189,7 +75190,7 @@ function useAccordionItem(props) {
     getSubtitleProps
   };
 }
-var domAnimation$2 = () => __vitePreload(() => import("./index-K9AQ4tYO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$2 = () => __vitePreload(() => import("./index-BiSokl8y.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var AccordionItem = forwardRef$1((props, ref) => {
   const {
     Component,
@@ -82279,7 +82280,8 @@ function NodePage() {
           ...node,
           connectionStatus: node.status === 1 ? "online" : "offline",
           systemInfo: null,
-          copyLoading: false
+          copyLoading: false,
+          wallMonitorChecking: false
         })));
       } else {
         zt.error(res2.msg || "加载节点列表失败");
@@ -82330,6 +82332,17 @@ function NodePage() {
             ...node,
             connectionStatus: messageData === 1 ? "online" : "offline",
             systemInfo: messageData === 0 ? null : node.systemInfo
+          };
+        }
+        return node;
+      }));
+    } else if (type === "wallMonitor") {
+      setNodeList((prev) => prev.map((node) => {
+        if (node.id == id2) {
+          return {
+            ...node,
+            ...messageData,
+            wallMonitorChecking: false
           };
         }
         return node;
@@ -82449,6 +82462,44 @@ function NodePage() {
     if (value <= 50) return "success";
     if (value <= 80) return "warning";
     return "danger";
+  };
+  const getWallMonitorColor = (node) => {
+    if (node.wallMonitorEnabled === 0) return "default";
+    switch (node.wallMonitorStatus) {
+      case "OK":
+        return "success";
+      case "OBSERVING":
+        return "warning";
+      case "SUSPECTED_BLOCKED":
+        return "danger";
+      case "CHECK_FAILED":
+        return "warning";
+      case "NODE_OFFLINE":
+        return "default";
+      default:
+        return "secondary";
+    }
+  };
+  const getWallMonitorLabel = (node) => {
+    if (node.wallMonitorEnabled === 0) return "未开启";
+    switch (node.wallMonitorStatus) {
+      case "OK":
+        return "正常";
+      case "OBSERVING":
+        return "观察中";
+      case "SUSPECTED_BLOCKED":
+        return "疑似被墙";
+      case "CHECK_FAILED":
+        return "检测异常";
+      case "NODE_OFFLINE":
+        return "节点离线";
+      default:
+        return "待检测";
+    }
+  };
+  const formatMonitorTime = (timestamp) => {
+    if (!timestamp) return "-";
+    return new Date(timestamp).toLocaleString();
   };
   const validateIp = (ip) => {
     if (!ip || !ip.trim()) return false;
@@ -82570,6 +82621,28 @@ function NodePage() {
       setInstallCommandModal(false);
     } catch (error) {
       zt.error("复制失败，请手动选择文本复制。原因：请使用https访问面板（例如nginx反代），http无法复制。");
+    }
+  };
+  const handleWallMonitorCheck = async (node) => {
+    setNodeList((prev) => prev.map(
+      (n2) => n2.id === node.id ? { ...n2, wallMonitorChecking: true } : n2
+    ));
+    try {
+      const res2 = await checkNodeWallMonitor(node.id);
+      if (res2.code === 0 && res2.data) {
+        setNodeList((prev) => prev.map(
+          (n2) => n2.id === node.id ? { ...n2, ...res2.data, wallMonitorChecking: false } : n2
+        ));
+        zt.success("检测完成");
+      } else {
+        zt.error(res2.msg || "检测失败");
+      }
+    } catch (error) {
+      zt.error("检测失败，请稍后重试");
+    } finally {
+      setNodeList((prev) => prev.map(
+        (n2) => n2.id === node.id ? { ...n2, wallMonitorChecking: false } : n2
+      ));
     }
   };
   const handleSubmit = async () => {
@@ -82712,6 +82785,43 @@ function NodePage() {
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between text-sm", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-default-600", children: "开机时间" }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs", children: node.connectionStatus === "online" && node.systemInfo ? formatUptime(node.systemInfo.uptime) : "-" })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rounded border border-default-200 bg-default-50 dark:bg-default-100/20 p-2 text-xs", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-2", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-default-600", children: "被墙监测" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    chip_default,
+                    {
+                      color: getWallMonitorColor(node),
+                      variant: "flat",
+                      size: "sm",
+                      className: "text-xs",
+                      children: getWallMonitorLabel(node)
+                    }
+                  )
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-1 truncate text-default-500", title: node.wallMonitorMessage || "", children: node.wallMonitorMessage || "等待定时检测" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1 flex items-center justify-between gap-2 text-default-400", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+                    "国内 ",
+                    node.wallMonitorChinaSuccessCount || 0,
+                    "/",
+                    node.wallMonitorChinaTotalCount || 0
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+                    "国际 ",
+                    node.wallMonitorGlobalSuccessCount || 0,
+                    "/",
+                    node.wallMonitorGlobalTotalCount || 0
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1 flex items-center justify-between gap-2 text-default-400", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+                    "延迟 ",
+                    node.wallMonitorLatencyMs ? `${node.wallMonitorLatencyMs.toFixed(0)}ms` : "-"
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: formatMonitorTime(node.wallMonitorLastCheckAt) })
+                ] })
               ] })
             ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3 mb-4", children: [
@@ -82774,42 +82884,57 @@ function NodePage() {
                 ] })
               ] })
             ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-1.5", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-1.5", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-1.5", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-1.5", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  button_default$1,
+                  {
+                    size: "sm",
+                    variant: "flat",
+                    color: "success",
+                    onPress: () => handleCopyInstallCommand(node),
+                    isLoading: node.copyLoading,
+                    className: "flex-1 min-h-8",
+                    children: "安装"
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  button_default$1,
+                  {
+                    size: "sm",
+                    variant: "flat",
+                    color: "primary",
+                    onPress: () => handleEdit(node),
+                    className: "flex-1 min-h-8",
+                    children: "编辑"
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  button_default$1,
+                  {
+                    size: "sm",
+                    variant: "flat",
+                    color: "danger",
+                    onPress: () => handleDelete(node),
+                    className: "flex-1 min-h-8",
+                    children: "删除"
+                  }
+                )
+              ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsx(
                 button_default$1,
                 {
                   size: "sm",
                   variant: "flat",
-                  color: "success",
-                  onPress: () => handleCopyInstallCommand(node),
-                  isLoading: node.copyLoading,
-                  className: "flex-1 min-h-8",
-                  children: "安装"
-                }
-              ),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                button_default$1,
-                {
-                  size: "sm",
-                  variant: "flat",
-                  color: "primary",
-                  onPress: () => handleEdit(node),
-                  className: "flex-1 min-h-8",
-                  children: "编辑"
-                }
-              ),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                button_default$1,
-                {
-                  size: "sm",
-                  variant: "flat",
-                  color: "danger",
-                  onPress: () => handleDelete(node),
-                  className: "flex-1 min-h-8",
-                  children: "删除"
+                  color: "warning",
+                  onPress: () => handleWallMonitorCheck(node),
+                  isLoading: node.wallMonitorChecking,
+                  isDisabled: node.connectionStatus !== "online",
+                  className: "w-full min-h-8",
+                  children: "立即检测"
                 }
               )
-            ] }) })
+            ] })
           ] })
         ]
       },
@@ -96270,7 +96395,7 @@ function CalendarPicker(props) {
     }
   );
 }
-var domAnimation$1 = () => __vitePreload(() => import("./index-K9AQ4tYO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$1 = () => __vitePreload(() => import("./index-BiSokl8y.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopLayoutWrapper = reactExports.forwardRef(
   (props, ref) => {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref, ...props });
@@ -100102,7 +100227,7 @@ var [PopoverProvider, usePopoverContext] = createContext2$1({
   name: "PopoverContext",
   errorMessage: "usePopoverContext: `context` is undefined. Seems you forgot to wrap all popover components within `<Popover />`"
 });
-var domAnimation = () => __vitePreload(() => import("./index-K9AQ4tYO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation = () => __vitePreload(() => import("./index-BiSokl8y.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopoverContent = (props) => {
   const { as, children, className, ...otherProps } = props;
   const {

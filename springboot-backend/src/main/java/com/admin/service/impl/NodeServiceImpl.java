@@ -494,6 +494,13 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         // 设置默认属性
         node.setSecret(IdUtil.simpleUUID());
         node.setStatus(NODE_STATUS_ACTIVE);
+        node.setWallMonitorEnabled(1);
+        node.setWallMonitorStatus("PENDING");
+        node.setWallMonitorConsecutiveFailures(0);
+        node.setWallMonitorChinaSuccessCount(0);
+        node.setWallMonitorChinaTotalCount(0);
+        node.setWallMonitorGlobalSuccessCount(0);
+        node.setWallMonitorGlobalTotalCount(0);
         
         // 设置时间戳
         long currentTime = System.currentTimeMillis();

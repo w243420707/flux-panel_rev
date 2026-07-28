@@ -1,0 +1,403 @@
+package com.admin.service.impl;
+
+import com.admin.common.dto.GostDto;
+import com.admin.common.lang.R;
+import com.admin.common.utils.WebSocketServer;
+import com.admin.entity.Node;
+import com.admin.service.NodeService;
+import com.admin.service.NodeWallMonitorService;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import javax.annotation.Resource;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+@Slf4j
+@Service
+public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
+
+    private static final String STATUS_PENDING = "PENDING";
+    private static final String STATUS_OK = "OK";
+    private static final String STATUS_OBSERVING = "OBSERVING";
+    private static final String STATUS_SUSPECTED_BLOCKED = "SUSPECTED_BLOCKED";
+    private static final String STATUS_NODE_OFFLINE = "NODE_OFFLINE";
+    private static final String STATUS_CHECK_FAILED = "CHECK_FAILED";
+
+    private static final int NODE_ONLINE = 1;
+    private static final int MONITOR_DISABLED = 0;
+    private static final int TCP_COUNT = 1;
+    private static final int TCP_TIMEOUT_MS = 2000;
+    private static final int CONSECUTIVE_FAILURE_THRESHOLD = 2;
+    private static final int CHINA_FAILURE_COUNT_THRESHOLD = 4;
+    private static final int CHINA_FAILURE_PERCENT_THRESHOLD = 60;
+
+    private static final List<TcpTarget> GLOBAL_TARGETS = Arrays.asList(
+            new TcpTarget("www.cloudflare.com", 443),
+            new TcpTarget("one.one.one.one", 443),
+            new TcpTarget("github.com", 443)
+    );
+
+    private static final List<TcpTarget> CHINA_TARGETS = Arrays.asList(
+            new TcpTarget("www.baidu.com", 443),
+            new TcpTarget("www.qq.com", 443),
+            new TcpTarget("www.aliyun.com", 443),
+            new TcpTarget("www.163.com", 443),
+            new TcpTarget("sh-cm-v4.ip.zstaticcdn.com", 80),
+            new TcpTarget("bj-cu-v4.ip.zstaticcdn.com", 80)
+    );
+
+    private final AtomicBoolean scheduledRunning = new AtomicBoolean(false);
+
+    @Resource
+    private NodeService nodeService;
+
+    @Resource(name = "wallMonitorExecutor")
+    private Executor wallMonitorExecutor;
+
+    @Override
+    public void checkScheduledNodes() {
+        if (!scheduledRunning.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            List<Node> nodes = nodeService.list();
+            if (nodes == null || nodes.isEmpty()) {
+                return;
+            }
+
+            CompletableFuture<?>[] futures = nodes.stream()
+                    .filter(this::isMonitorEnabled)
+                    .map(node -> CompletableFuture.runAsync(() -> {
+                        try {
+                            checkAndStore(node.getId());
+                        } catch (Exception e) {
+                            log.warn("Node wall monitor check failed, nodeId={}, error={}", node.getId(), e.getMessage());
+                        }
+                    }, wallMonitorExecutor))
+                    .toArray(CompletableFuture[]::new);
+            if (futures.length > 0) {
+                CompletableFuture.allOf(futures).join();
+            }
+        } catch (Exception e) {
+            log.warn("Node wall monitor scheduled check failed: {}", e.getMessage());
+        } finally {
+            scheduledRunning.set(false);
+        }
+    }
+
+    @Override
+    public R checkNodeNow(Long nodeId) {
+        if (nodeId == null) {
+            return R.err("节点ID不能为空");
+        }
+        Node node = nodeService.getById(nodeId);
+        if (node == null) {
+            return R.err("节点不存在");
+        }
+        if (!isMonitorEnabled(node)) {
+            return R.err("节点被墙监测未开启");
+        }
+
+        try {
+            checkAndStore(nodeId);
+        } catch (Exception e) {
+            return R.err("检测失败：" + e.getMessage());
+        }
+        Node updated = nodeService.getById(nodeId);
+        if (updated != null) {
+            updated.setSecret(null);
+        }
+        return R.ok(updated);
+    }
+
+    private void checkAndStore(Long nodeId) {
+        Node node = nodeService.getById(nodeId);
+        if (node == null || !isMonitorEnabled(node)) {
+            return;
+        }
+
+        MonitorDecision decision;
+        if (node.getStatus() == null || node.getStatus() != NODE_ONLINE) {
+            decision = offlineDecision();
+        } else {
+            decision = runConnectivityCheck(node);
+        }
+
+        Node update = new Node();
+        update.setId(node.getId());
+        update.setWallMonitorEnabled(1);
+        update.setWallMonitorStatus(decision.status);
+        update.setWallMonitorLastCheckAt(System.currentTimeMillis());
+        update.setWallMonitorConsecutiveFailures(decision.consecutiveFailures);
+        update.setWallMonitorChinaSuccessCount(decision.chinaSuccessCount);
+        update.setWallMonitorChinaTotalCount(decision.chinaTotalCount);
+        update.setWallMonitorGlobalSuccessCount(decision.globalSuccessCount);
+        update.setWallMonitorGlobalTotalCount(decision.globalTotalCount);
+        update.setWallMonitorLatencyMs(decision.latencyMs);
+        update.setWallMonitorMessage(trimMessage(decision.message));
+
+        nodeService.updateById(update);
+        broadcastMonitorUpdate(update);
+    }
+
+    private MonitorDecision runConnectivityCheck(Node node) {
+        ProbeSummary global = probeTargets(node.getId(), GLOBAL_TARGETS);
+        if (global.successCount <= 0) {
+            return decision(
+                    STATUS_CHECK_FAILED,
+                    0,
+                    0,
+                    0,
+                    global.successCount,
+                    global.totalCount,
+                    global.averageLatencyMs(),
+                    "国际连通性异常，跳过被墙判断：" + global.firstErrorOrDefault()
+            );
+        }
+
+        ProbeSummary china = probeTargets(node.getId(), CHINA_TARGETS);
+        if (china.totalCount <= 0) {
+            return decision(
+                    STATUS_CHECK_FAILED,
+                    0,
+                    0,
+                    0,
+                    global.successCount,
+                    global.totalCount,
+                    global.averageLatencyMs(),
+                    "国内探测点不可用，暂不判断"
+            );
+        }
+
+        int chinaFailureCount = china.totalCount - china.successCount;
+        int failPercent = chinaFailureCount * 100 / china.totalCount;
+        boolean suspected = chinaFailureCount >= CHINA_FAILURE_COUNT_THRESHOLD
+                || failPercent >= CHINA_FAILURE_PERCENT_THRESHOLD;
+        double latency = china.successCount > 0 ? china.averageLatencyMs() : global.averageLatencyMs();
+
+        if (!suspected) {
+            return decision(
+                    STATUS_OK,
+                    0,
+                    china.successCount,
+                    china.totalCount,
+                    global.successCount,
+                    global.totalCount,
+                    latency,
+                    String.format("正常：国内TCP成功 %d/%d，国际TCP成功 %d/%d",
+                            china.successCount, china.totalCount, global.successCount, global.totalCount)
+            );
+        }
+
+        int consecutiveFailures = safeInt(node.getWallMonitorConsecutiveFailures()) + 1;
+        boolean confirmed = consecutiveFailures >= CONSECUTIVE_FAILURE_THRESHOLD;
+        String status = confirmed ? STATUS_SUSPECTED_BLOCKED : STATUS_OBSERVING;
+        String prefix = confirmed ? "疑似被墙" : "国内连通异常，继续观察";
+        return decision(
+                status,
+                consecutiveFailures,
+                china.successCount,
+                china.totalCount,
+                global.successCount,
+                global.totalCount,
+                latency,
+                String.format("%s：国内TCP成功 %d/%d，失败率 %d%%，连续 %d/%d 次",
+                        prefix, china.successCount, china.totalCount, failPercent,
+                        consecutiveFailures, CONSECUTIVE_FAILURE_THRESHOLD)
+        );
+    }
+
+    private ProbeSummary probeTargets(Long nodeId, List<TcpTarget> targets) {
+        ProbeSummary summary = new ProbeSummary();
+        for (TcpTarget target : targets) {
+            summary.totalCount++;
+            ProbeResult result = tcpPing(nodeId, target);
+            if (result.success) {
+                summary.successCount++;
+                summary.totalLatencyMs += Math.max(0, result.latencyMs);
+            } else if (summary.firstError == null) {
+                summary.firstError = target + " " + result.message;
+            }
+        }
+        return summary;
+    }
+
+    private ProbeResult tcpPing(Long nodeId, TcpTarget target) {
+        try {
+            JSONObject tcpPingData = new JSONObject();
+            tcpPingData.put("ip", target.host);
+            tcpPingData.put("port", target.port);
+            tcpPingData.put("count", TCP_COUNT);
+            tcpPingData.put("timeout", TCP_TIMEOUT_MS);
+
+            GostDto gostResult = WebSocketServer.send_msg(nodeId, tcpPingData, "TcpPing");
+            if (gostResult == null) {
+                return ProbeResult.fail("节点无响应");
+            }
+            if (!"OK".equals(gostResult.getMsg())) {
+                return ProbeResult.fail(gostResult.getMsg());
+            }
+            if (gostResult.getData() == null) {
+                return ProbeResult.ok(0);
+            }
+
+            JSONObject response = toJsonObject(gostResult.getData());
+            boolean success = response.getBooleanValue("success");
+            if (success) {
+                return ProbeResult.ok(response.getDoubleValue("averageTime"));
+            }
+            String errorMessage = response.getString("errorMessage");
+            return ProbeResult.fail(errorMessage == null ? "TCP连接失败" : errorMessage);
+        } catch (Exception e) {
+            return ProbeResult.fail(e.getMessage());
+        }
+    }
+
+    private JSONObject toJsonObject(Object data) {
+        if (data instanceof JSONObject) {
+            return (JSONObject) data;
+        }
+        return JSON.parseObject(JSON.toJSONString(data));
+    }
+
+    private MonitorDecision offlineDecision() {
+        return decision(
+                STATUS_NODE_OFFLINE,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                "节点离线，跳过检测"
+        );
+    }
+
+    private MonitorDecision decision(String status,
+                                     int consecutiveFailures,
+                                     int chinaSuccessCount,
+                                     int chinaTotalCount,
+                                     int globalSuccessCount,
+                                     int globalTotalCount,
+                                     double latencyMs,
+                                     String message) {
+        MonitorDecision decision = new MonitorDecision();
+        decision.status = status == null ? STATUS_PENDING : status;
+        decision.consecutiveFailures = Math.max(0, consecutiveFailures);
+        decision.chinaSuccessCount = Math.max(0, chinaSuccessCount);
+        decision.chinaTotalCount = Math.max(0, chinaTotalCount);
+        decision.globalSuccessCount = Math.max(0, globalSuccessCount);
+        decision.globalTotalCount = Math.max(0, globalTotalCount);
+        decision.latencyMs = Math.round(Math.max(0, latencyMs) * 100.0) / 100.0;
+        decision.message = message == null ? "" : message;
+        return decision;
+    }
+
+    private boolean isMonitorEnabled(Node node) {
+        return node != null && (node.getWallMonitorEnabled() == null || node.getWallMonitorEnabled() != MONITOR_DISABLED);
+    }
+
+    private int safeInt(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private String trimMessage(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= 1000 ? value : value.substring(0, 1000);
+    }
+
+    private void broadcastMonitorUpdate(Node node) {
+        try {
+            JSONObject data = new JSONObject();
+            data.put("wallMonitorEnabled", node.getWallMonitorEnabled());
+            data.put("wallMonitorStatus", node.getWallMonitorStatus());
+            data.put("wallMonitorLastCheckAt", node.getWallMonitorLastCheckAt());
+            data.put("wallMonitorConsecutiveFailures", node.getWallMonitorConsecutiveFailures());
+            data.put("wallMonitorChinaSuccessCount", node.getWallMonitorChinaSuccessCount());
+            data.put("wallMonitorChinaTotalCount", node.getWallMonitorChinaTotalCount());
+            data.put("wallMonitorGlobalSuccessCount", node.getWallMonitorGlobalSuccessCount());
+            data.put("wallMonitorGlobalTotalCount", node.getWallMonitorGlobalTotalCount());
+            data.put("wallMonitorLatencyMs", node.getWallMonitorLatencyMs());
+            data.put("wallMonitorMessage", node.getWallMonitorMessage());
+
+            JSONObject message = new JSONObject();
+            message.put("id", node.getId());
+            message.put("type", "wallMonitor");
+            message.put("data", data);
+            WebSocketServer.broadcastMessage(message.toJSONString());
+        } catch (Exception e) {
+            log.warn("Broadcast node wall monitor update failed, nodeId={}, error={}", node.getId(), e.getMessage());
+        }
+    }
+
+    private static class TcpTarget {
+        private final String host;
+        private final int port;
+
+        private TcpTarget(String host, int port) {
+            this.host = host;
+            this.port = port;
+        }
+
+        @Override
+        public String toString() {
+            return host + ":" + port;
+        }
+    }
+
+    private static class ProbeResult {
+        private boolean success;
+        private double latencyMs;
+        private String message;
+
+        private static ProbeResult ok(double latencyMs) {
+            ProbeResult result = new ProbeResult();
+            result.success = true;
+            result.latencyMs = latencyMs;
+            result.message = "OK";
+            return result;
+        }
+
+        private static ProbeResult fail(String message) {
+            ProbeResult result = new ProbeResult();
+            result.success = false;
+            result.latencyMs = 0;
+            result.message = message == null ? "TCP连接失败" : message;
+            return result;
+        }
+    }
+
+    private static class ProbeSummary {
+        private int successCount;
+        private int totalCount;
+        private double totalLatencyMs;
+        private String firstError;
+
+        private double averageLatencyMs() {
+            return successCount <= 0 ? 0 : totalLatencyMs / successCount;
+        }
+
+        private String firstErrorOrDefault() {
+            return firstError == null ? "无可用探测点" : firstError;
+        }
+    }
+
+    private static class MonitorDecision {
+        private String status;
+        private int consecutiveFailures;
+        private int chinaSuccessCount;
+        private int chinaTotalCount;
+        private int globalSuccessCount;
+        private int globalTotalCount;
+        private double latencyMs;
+        private String message;
+    }
+}

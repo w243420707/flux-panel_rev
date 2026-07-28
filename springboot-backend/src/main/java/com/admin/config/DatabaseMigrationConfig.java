@@ -25,6 +25,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("add tunnel.in_node_ids", () -> ensureColumn(connection, "tunnel", "in_node_ids", "ALTER TABLE tunnel ADD COLUMN in_node_ids LONGTEXT NULL AFTER in_node_id"));
             runStep("add tunnel.out_node_ids", () -> ensureColumn(connection, "tunnel", "out_node_ids", "ALTER TABLE tunnel ADD COLUMN out_node_ids LONGTEXT NULL AFTER out_node_id"));
             runStep("add node dual-stack runtime ip columns", () -> addNodeRuntimeIpColumns(connection));
+            runStep("add node wall monitor columns", () -> addNodeWallMonitorColumns(connection));
             runStep("relax node ip columns", () -> relaxNodeIpColumns(connection));
             runStep("widen tunnel ip columns", () -> widenIpColumns(connection));
             runStep("create cloudflare dns tables", () -> createCloudflareTables(connection));
@@ -107,6 +108,8 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 "ALTER TABLE `node` ADD INDEX `idx_node_secret` (`secret`)");
         ensureIndex(connection, "node", "idx_node_status",
                 "ALTER TABLE `node` ADD INDEX `idx_node_status` (`status`)");
+        ensureIndex(connection, "node", "idx_node_wall_monitor_status",
+                "ALTER TABLE `node` ADD INDEX `idx_node_wall_monitor_status` (`wall_monitor_status`)");
         ensureIndex(connection, "cloudflare_dns_binding", "idx_cloudflare_dns_binding_status",
                 "ALTER TABLE `cloudflare_dns_binding` ADD INDEX `idx_cloudflare_dns_binding_status` (`status`)");
     }
@@ -165,6 +168,29 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             statement.executeUpdate("UPDATE node SET server_ipv4 = server_ip WHERE server_ipv4 = '' AND server_ip REGEXP '^[0-9]{1,3}(\\\\.[0-9]{1,3}){3}$'");
             statement.executeUpdate("UPDATE node SET server_ipv6 = server_ip WHERE server_ipv6 = '' AND server_ip LIKE '%:%'");
         }
+    }
+
+    private void addNodeWallMonitorColumns(Connection connection) throws Exception {
+        ensureColumn(connection, "node", "wall_monitor_enabled",
+                "ALTER TABLE node ADD COLUMN wall_monitor_enabled TINYINT NOT NULL DEFAULT 1 AFTER version");
+        ensureColumn(connection, "node", "wall_monitor_status",
+                "ALTER TABLE node ADD COLUMN wall_monitor_status VARCHAR(32) NOT NULL DEFAULT 'PENDING' AFTER wall_monitor_enabled");
+        ensureColumn(connection, "node", "wall_monitor_last_check_at",
+                "ALTER TABLE node ADD COLUMN wall_monitor_last_check_at BIGINT NULL AFTER wall_monitor_status");
+        ensureColumn(connection, "node", "wall_monitor_consecutive_failures",
+                "ALTER TABLE node ADD COLUMN wall_monitor_consecutive_failures INT NOT NULL DEFAULT 0 AFTER wall_monitor_last_check_at");
+        ensureColumn(connection, "node", "wall_monitor_china_success_count",
+                "ALTER TABLE node ADD COLUMN wall_monitor_china_success_count INT NOT NULL DEFAULT 0 AFTER wall_monitor_consecutive_failures");
+        ensureColumn(connection, "node", "wall_monitor_china_total_count",
+                "ALTER TABLE node ADD COLUMN wall_monitor_china_total_count INT NOT NULL DEFAULT 0 AFTER wall_monitor_china_success_count");
+        ensureColumn(connection, "node", "wall_monitor_global_success_count",
+                "ALTER TABLE node ADD COLUMN wall_monitor_global_success_count INT NOT NULL DEFAULT 0 AFTER wall_monitor_china_total_count");
+        ensureColumn(connection, "node", "wall_monitor_global_total_count",
+                "ALTER TABLE node ADD COLUMN wall_monitor_global_total_count INT NOT NULL DEFAULT 0 AFTER wall_monitor_global_success_count");
+        ensureColumn(connection, "node", "wall_monitor_latency_ms",
+                "ALTER TABLE node ADD COLUMN wall_monitor_latency_ms DOUBLE NULL AFTER wall_monitor_global_total_count");
+        ensureColumn(connection, "node", "wall_monitor_message",
+                "ALTER TABLE node ADD COLUMN wall_monitor_message VARCHAR(1000) NULL AFTER wall_monitor_latency_ms");
     }
 
     private void createCloudflareTables(Connection connection) throws Exception {

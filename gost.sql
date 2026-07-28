@@ -63,6 +63,16 @@ CREATE TABLE `node` (
   `port_sta` int(10) NOT NULL,
   `port_end` int(10) NOT NULL,
   `version` varchar(100) DEFAULT NULL,
+  `wall_monitor_enabled` tinyint(1) NOT NULL DEFAULT '1',
+  `wall_monitor_status` varchar(32) NOT NULL DEFAULT 'PENDING',
+  `wall_monitor_last_check_at` bigint(20) DEFAULT NULL,
+  `wall_monitor_consecutive_failures` int(10) NOT NULL DEFAULT '0',
+  `wall_monitor_china_success_count` int(10) NOT NULL DEFAULT '0',
+  `wall_monitor_china_total_count` int(10) NOT NULL DEFAULT '0',
+  `wall_monitor_global_success_count` int(10) NOT NULL DEFAULT '0',
+  `wall_monitor_global_total_count` int(10) NOT NULL DEFAULT '0',
+  `wall_monitor_latency_ms` double DEFAULT NULL,
+  `wall_monitor_message` varchar(1000) DEFAULT NULL,
   `created_time` bigint(20) NOT NULL,
   `updated_time` bigint(20) DEFAULT NULL,
   `status` int(10) NOT NULL
@@ -216,7 +226,8 @@ ALTER TABLE `forward`
 ALTER TABLE `node`
   ADD PRIMARY KEY (`id`),
   ADD KEY `idx_node_secret` (`secret`),
-  ADD KEY `idx_node_status` (`status`);
+  ADD KEY `idx_node_status` (`status`),
+  ADD KEY `idx_node_wall_monitor_status` (`wall_monitor_status`);
 
 --
 -- 表的索引 `speed_limit`

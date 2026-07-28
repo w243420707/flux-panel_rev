@@ -17,7 +17,8 @@ import {
   getNodeList, 
   updateNode, 
   deleteNode,
-  getNodeInstallCommand
+  getNodeInstallCommand,
+  checkNodeWallMonitor
 } from "@/api";
 
 interface Node {
@@ -42,6 +43,17 @@ interface Node {
     uptime: number;
   } | null;
   copyLoading?: boolean;
+  wallMonitorEnabled?: number;
+  wallMonitorStatus?: string;
+  wallMonitorLastCheckAt?: number;
+  wallMonitorConsecutiveFailures?: number;
+  wallMonitorChinaSuccessCount?: number;
+  wallMonitorChinaTotalCount?: number;
+  wallMonitorGlobalSuccessCount?: number;
+  wallMonitorGlobalTotalCount?: number;
+  wallMonitorLatencyMs?: number;
+  wallMonitorMessage?: string;
+  wallMonitorChecking?: boolean;
 }
 
 interface NodeForm {
@@ -102,7 +114,8 @@ export default function NodePage() {
           ...node,
           connectionStatus: node.status === 1 ? 'online' : 'offline',
           systemInfo: null,
-          copyLoading: false
+          copyLoading: false,
+          wallMonitorChecking: false
         })));
       } else {
         toast.error(res.msg || '加载节点列表失败');
@@ -170,6 +183,17 @@ export default function NodePage() {
             ...node,
             connectionStatus: messageData === 1 ? 'online' : 'offline',
             systemInfo: messageData === 0 ? null : node.systemInfo
+          };
+        }
+        return node;
+      }));
+    } else if (type === 'wallMonitor') {
+      setNodeList(prev => prev.map(node => {
+        if (node.id == id) {
+          return {
+            ...node,
+            ...messageData,
+            wallMonitorChecking: false
           };
         }
         return node;
@@ -327,6 +351,47 @@ export default function NodePage() {
     return "danger";
   };
 
+  const getWallMonitorColor = (node: Node): "default" | "primary" | "secondary" | "success" | "warning" | "danger" => {
+    if (node.wallMonitorEnabled === 0) return "default";
+    switch (node.wallMonitorStatus) {
+      case "OK":
+        return "success";
+      case "OBSERVING":
+        return "warning";
+      case "SUSPECTED_BLOCKED":
+        return "danger";
+      case "CHECK_FAILED":
+        return "warning";
+      case "NODE_OFFLINE":
+        return "default";
+      default:
+        return "secondary";
+    }
+  };
+
+  const getWallMonitorLabel = (node: Node): string => {
+    if (node.wallMonitorEnabled === 0) return "未开启";
+    switch (node.wallMonitorStatus) {
+      case "OK":
+        return "正常";
+      case "OBSERVING":
+        return "观察中";
+      case "SUSPECTED_BLOCKED":
+        return "疑似被墙";
+      case "CHECK_FAILED":
+        return "检测异常";
+      case "NODE_OFFLINE":
+        return "节点离线";
+      default:
+        return "待检测";
+    }
+  };
+
+  const formatMonitorTime = (timestamp?: number): string => {
+    if (!timestamp) return "-";
+    return new Date(timestamp).toLocaleString();
+  };
+
   // 验证IP地址格式
   const validateIp = (ip: string): boolean => {
     if (!ip || !ip.trim()) return false;
@@ -480,6 +545,31 @@ export default function NodePage() {
       setInstallCommandModal(false);
     } catch (error) {
       toast.error('复制失败，请手动选择文本复制。原因：请使用https访问面板（例如nginx反代），http无法复制。');
+    }
+  };
+
+  // 节点被墙监测
+  const handleWallMonitorCheck = async (node: Node) => {
+    setNodeList(prev => prev.map(n =>
+      n.id === node.id ? { ...n, wallMonitorChecking: true } : n
+    ));
+
+    try {
+      const res = await checkNodeWallMonitor(node.id);
+      if (res.code === 0 && res.data) {
+        setNodeList(prev => prev.map(n =>
+          n.id === node.id ? { ...n, ...res.data, wallMonitorChecking: false } : n
+        ));
+        toast.success('检测完成');
+      } else {
+        toast.error(res.msg || '检测失败');
+      }
+    } catch (error) {
+      toast.error('检测失败，请稍后重试');
+    } finally {
+      setNodeList(prev => prev.map(n =>
+        n.id === node.id ? { ...n, wallMonitorChecking: false } : n
+      ));
     }
   };
 
@@ -682,6 +772,30 @@ export default function NodePage() {
                         }
                       </span>
                     </div>
+                    <div className="rounded border border-default-200 bg-default-50 dark:bg-default-100/20 p-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-default-600">被墙监测</span>
+                        <Chip
+                          color={getWallMonitorColor(node)}
+                          variant="flat"
+                          size="sm"
+                          className="text-xs"
+                        >
+                          {getWallMonitorLabel(node)}
+                        </Chip>
+                      </div>
+                      <div className="mt-1 truncate text-default-500" title={node.wallMonitorMessage || ""}>
+                        {node.wallMonitorMessage || "等待定时检测"}
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2 text-default-400">
+                        <span>国内 {node.wallMonitorChinaSuccessCount || 0}/{node.wallMonitorChinaTotalCount || 0}</span>
+                        <span>国际 {node.wallMonitorGlobalSuccessCount || 0}/{node.wallMonitorGlobalTotalCount || 0}</span>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2 text-default-400">
+                        <span>延迟 {node.wallMonitorLatencyMs ? `${node.wallMonitorLatencyMs.toFixed(0)}ms` : "-"}</span>
+                        <span>{formatMonitorTime(node.wallMonitorLastCheckAt)}</span>
+                      </div>
+                    </div>
                   </div>
 
                   {/* 系统监控 */}
@@ -805,6 +919,17 @@ export default function NodePage() {
                         删除
                       </Button>
                     </div>
+                    <Button
+                      size="sm"
+                      variant="flat"
+                      color="warning"
+                      onPress={() => handleWallMonitorCheck(node)}
+                      isLoading={node.wallMonitorChecking}
+                      isDisabled={node.connectionStatus !== 'online'}
+                      className="w-full min-h-8"
+                    >
+                      立即检测
+                    </Button>
                   </div>
                 </CardBody>
               </Card>
