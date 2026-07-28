@@ -226,6 +226,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                     "use_tunnel_nodes INT NULL," +
                     "record_type VARCHAR(20) NULL," +
                     "smart_pool_enabled TINYINT NOT NULL DEFAULT 0," +
+                    "smart_pool_preferred_node_ids LONGTEXT NULL," +
                     "smart_pool_active_node_ids LONGTEXT NULL," +
                     "smart_pool_backup_node_ids LONGTEXT NULL," +
                     "smart_pool_last_switch_at BIGINT NULL," +
@@ -242,8 +243,10 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
     private void addCloudflareSmartPoolColumns(Connection connection) throws Exception {
         ensureColumn(connection, "cloudflare_dns_binding", "smart_pool_enabled",
                 "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_enabled TINYINT NOT NULL DEFAULT 0 AFTER record_type");
+        ensureColumn(connection, "cloudflare_dns_binding", "smart_pool_preferred_node_ids",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_preferred_node_ids LONGTEXT NULL AFTER smart_pool_enabled");
         ensureColumn(connection, "cloudflare_dns_binding", "smart_pool_active_node_ids",
-                "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_active_node_ids LONGTEXT NULL AFTER smart_pool_enabled");
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_active_node_ids LONGTEXT NULL AFTER smart_pool_preferred_node_ids");
         ensureColumn(connection, "cloudflare_dns_binding", "smart_pool_backup_node_ids",
                 "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_backup_node_ids LONGTEXT NULL AFTER smart_pool_active_node_ids");
         ensureColumn(connection, "cloudflare_dns_binding", "smart_pool_last_switch_at",

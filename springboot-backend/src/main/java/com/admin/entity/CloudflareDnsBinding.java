@@ -17,6 +17,7 @@ public class CloudflareDnsBinding extends BaseEntity {
     private Integer useTunnelNodes;
     private String recordType;
     private Integer smartPoolEnabled;
+    private String smartPoolPreferredNodeIds;
     private String smartPoolActiveNodeIds;
     private String smartPoolBackupNodeIds;
     private Long smartPoolLastSwitchAt;

@@ -39,6 +39,7 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
 
         Integer useTunnelNodes = dto.getUseTunnelNodes() == null ? 1 : (dto.getUseTunnelNodes() == 1 ? 1 : 0);
         List<Long> nodeIds = normalizeNodeIds(dto.getNodeIds());
+        List<Long> preferredNodeIds = normalizeNodeIds(dto.getSmartPoolPreferredNodeIds());
         if (useTunnelNodes == 0 && nodeIds.isEmpty()) {
             return R.err("手动模式下请选择至少一个节点");
         }
@@ -63,6 +64,7 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
         binding.setNodeIds(useTunnelNodes == 1 ? null : TunnelNodeUtil.toJsonArray(nodeIds));
         binding.setRecordType(resolveRecordType(dto.getRecordType()));
         binding.setSmartPoolEnabled(dto.getSmartPoolEnabled() != null && dto.getSmartPoolEnabled() == 1 ? 1 : 0);
+        binding.setSmartPoolPreferredNodeIds(TunnelNodeUtil.toJsonArray(preferredNodeIds));
         if (binding.getSmartPoolEnabled() == 0) {
             binding.setSmartPoolActiveNodeIds(null);
             binding.setSmartPoolBackupNodeIds(null);

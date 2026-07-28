@@ -265,6 +265,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                 message += "，智能池活跃 " + smartPoolPlan.activeNodeIds.size()
                         + "/" + smartPoolPlan.desiredActiveCount
                         + "，备用 " + smartPoolPlan.backupNodeIds.size()
+                        + "，优先 " + smartPoolPlan.preferredCount
                         + "，排除 " + smartPoolPlan.excludedCount;
             }
             if (!unresolvedNodeIds.isEmpty()) {
@@ -295,23 +296,26 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                                                Map<Long, NodeDnsState> nodeStates) {
         long now = System.currentTimeMillis();
         List<Long> allNodeIds = normalizeNodeIdList(nodeIds);
+        List<Long> preferredNodeIds = filterKnownNodeIds(
+                TunnelNodeUtil.parseNodeIds(binding.getSmartPoolPreferredNodeIds()), allNodeIds);
         List<Long> previousActiveNodeIds = filterKnownNodeIds(
                 TunnelNodeUtil.parseNodeIds(binding.getSmartPoolActiveNodeIds()), allNodeIds);
         int desiredActiveCount = calculateSmartPoolActiveCount(allNodeIds.size());
 
-        List<Long> preferredActiveNodeIds = chooseSmartPoolActiveNodeIds(binding, allNodeIds, nodeStates, desiredActiveCount, now);
+        List<Long> preferredActiveNodeIds = chooseSmartPoolActiveNodeIds(binding, allNodeIds, preferredNodeIds, nodeStates, desiredActiveCount, now);
         List<Long> activeNodeIds = preferredActiveNodeIds;
         if (sameLongList(previousActiveNodeIds, preferredActiveNodeIds)
-                || shouldKeepCurrentSmartPool(binding, previousActiveNodeIds, desiredActiveCount, nodeStates, now)) {
+                || (preferredNodeIds.isEmpty() && shouldKeepCurrentSmartPool(binding, previousActiveNodeIds, desiredActiveCount, nodeStates, now))) {
             activeNodeIds = previousActiveNodeIds;
         }
 
-        List<Long> backupNodeIds = chooseSmartPoolBackupNodeIds(binding, allNodeIds, nodeStates, activeNodeIds, now);
+        List<Long> backupNodeIds = chooseSmartPoolBackupNodeIds(binding, allNodeIds, preferredNodeIds, nodeStates, activeNodeIds, now);
         SmartPoolPlan plan = new SmartPoolPlan();
         plan.now = now;
         plan.desiredActiveCount = desiredActiveCount;
         plan.activeNodeIds = activeNodeIds;
         plan.backupNodeIds = backupNodeIds;
+        plan.preferredCount = preferredNodeIds.size();
         plan.excludedCount = Math.max(0, allNodeIds.size() - activeNodeIds.size() - backupNodeIds.size());
         return plan;
     }
@@ -356,10 +360,11 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
     private List<Long> chooseSmartPoolActiveNodeIds(CloudflareDnsBinding binding,
                                                     List<Long> allNodeIds,
+                                                    List<Long> preferredNodeIds,
                                                     Map<Long, NodeDnsState> nodeStates,
                                                     int desiredActiveCount,
                                                     long now) {
-        List<NodeDnsState> candidates = orderSmartPoolCandidates(binding, allNodeIds, nodeStates, now);
+        List<NodeDnsState> candidates = orderSmartPoolCandidates(binding, allNodeIds, preferredNodeIds, nodeStates, now);
         int limit = Math.min(desiredActiveCount, candidates.size());
         List<Long> activeNodeIds = new ArrayList<>();
         for (int i = 0; i < limit; i++) {
@@ -370,12 +375,13 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
     private List<Long> chooseSmartPoolBackupNodeIds(CloudflareDnsBinding binding,
                                                     List<Long> allNodeIds,
+                                                    List<Long> preferredNodeIds,
                                                     Map<Long, NodeDnsState> nodeStates,
                                                     List<Long> activeNodeIds,
                                                     long now) {
         Set<Long> activeSet = new HashSet<>(activeNodeIds);
         List<Long> backupNodeIds = new ArrayList<>();
-        for (NodeDnsState state : orderSmartPoolCandidates(binding, allNodeIds, nodeStates, now)) {
+        for (NodeDnsState state : orderSmartPoolCandidates(binding, allNodeIds, preferredNodeIds, nodeStates, now)) {
             if (!activeSet.contains(state.nodeId)) {
                 backupNodeIds.add(state.nodeId);
             }
@@ -385,9 +391,11 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
     private List<NodeDnsState> orderSmartPoolCandidates(CloudflareDnsBinding binding,
                                                         List<Long> allNodeIds,
+                                                        List<Long> preferredNodeIds,
                                                         Map<Long, NodeDnsState> nodeStates,
                                                         long now) {
         long bucket = now / SMART_POOL_ROTATE_INTERVAL_MS;
+        Map<Long, Integer> preferredOrder = buildPreferredOrder(preferredNodeIds);
         List<NodeDnsState> candidates = new ArrayList<>();
         for (Long nodeId : allNodeIds) {
             NodeDnsState state = nodeStates.get(nodeId);
@@ -397,6 +405,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         }
         candidates.sort(Comparator
                 .comparingInt(this::smartPoolHealthRank)
+                .thenComparingInt(state -> preferredOrder.getOrDefault(state.nodeId, Integer.MAX_VALUE))
                 .thenComparingLong(state -> stableHash((binding.getId() == null ? 0 : binding.getId())
                         + ":" + bucket + ":" + state.nodeId)));
         return candidates;
@@ -488,6 +497,15 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             }
         }
         return result;
+    }
+
+    private Map<Long, Integer> buildPreferredOrder(List<Long> preferredNodeIds) {
+        Map<Long, Integer> order = new HashMap<>();
+        int index = 0;
+        for (Long nodeId : normalizeNodeIdList(preferredNodeIds)) {
+            order.putIfAbsent(nodeId, index++);
+        }
+        return order;
     }
 
     private boolean sameLongList(List<Long> left, List<Long> right) {
@@ -868,6 +886,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     private static class SmartPoolPlan {
         private long now;
         private int desiredActiveCount;
+        private int preferredCount;
         private List<Long> activeNodeIds = new ArrayList<>();
         private List<Long> backupNodeIds = new ArrayList<>();
         private int excludedCount;

@@ -47,6 +47,7 @@ interface CloudflareDnsBinding {
   recordType?: string;
   status?: number;
   smartPoolEnabled?: number;
+  smartPoolPreferredNodeIds?: string | number[];
   smartPoolActiveNodeIds?: string | number[];
   smartPoolBackupNodeIds?: string | number[];
   smartPoolLastSwitchAt?: number;
@@ -81,6 +82,7 @@ interface BindingForm {
   nodeIds: number[];
   recordType: string;
   smartPoolEnabled: boolean;
+  smartPoolPreferredNodeIds: number[];
 }
 
 const defaultSetting: CloudflareDnsSetting = {
@@ -98,6 +100,7 @@ const defaultBindingForm: BindingForm = {
   nodeIds: [],
   recordType: "AUTO",
   smartPoolEnabled: true,
+  smartPoolPreferredNodeIds: [],
 };
 
 export default function CloudflareDnsPage() {
@@ -221,6 +224,24 @@ export default function CloudflareDnsPage() {
 
   const getPoolNodeIds = (value?: string | number[]) => normalizeNodeIds(value);
 
+  const filterNodeIds = (ids: number[], allowedIds: number[]) => {
+    const allowed = new Set(allowedIds);
+    return ids.filter((id) => allowed.has(id));
+  };
+
+  const getFormBindingNodeIds = () => {
+    if (bindingForm.useTunnelNodes && bindingForm.tunnelId) {
+      const tunnel = getTunnel(bindingForm.tunnelId);
+      return normalizeNodeIds(tunnel?.inNodeIds, tunnel?.inNodeId || null);
+    }
+    return bindingForm.nodeIds;
+  };
+
+  const getPriorityOptionNodes = () => {
+    const allowed = new Set(getFormBindingNodeIds());
+    return nodes.filter((node) => allowed.has(node.id));
+  };
+
   const formatTime = (timestamp?: number) => {
     if (!timestamp) {
       return "-";
@@ -339,6 +360,7 @@ export default function CloudflareDnsPage() {
       nodeIds: normalizeNodeIds(binding.nodeIds),
       recordType: binding.recordType || "AUTO",
       smartPoolEnabled: binding.smartPoolEnabled === 1,
+      smartPoolPreferredNodeIds: normalizeNodeIds(binding.smartPoolPreferredNodeIds),
     });
     setBindingModalOpen(true);
   };
@@ -367,6 +389,7 @@ export default function CloudflareDnsPage() {
         nodeIds: bindingForm.nodeIds,
         recordType: bindingForm.recordType,
         smartPoolEnabled: bindingForm.smartPoolEnabled ? 1 : 0,
+        smartPoolPreferredNodeIds: filterNodeIds(bindingForm.smartPoolPreferredNodeIds, getFormBindingNodeIds()),
       });
       if (res.code === 0) {
         toast.success(res.msg || "DNS 绑定已保存");
@@ -579,6 +602,7 @@ export default function CloudflareDnsPage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {bindings.map((binding) => {
                 const nodeIds = getBindingNodeIds(binding);
+                const preferredPoolNodeIds = getPoolNodeIds(binding.smartPoolPreferredNodeIds);
                 const activePoolNodeIds = getPoolNodeIds(binding.smartPoolActiveNodeIds);
                 const backupPoolNodeIds = getPoolNodeIds(binding.smartPoolBackupNodeIds);
                 return (
@@ -627,6 +651,18 @@ export default function CloudflareDnsPage() {
                             <span className="text-default-500">智能池</span>
                             <Chip size="sm" variant="flat" color="primary">已启用</Chip>
                           </div>
+                          {preferredPoolNodeIds.length > 0 && (
+                            <div>
+                              <div className="text-default-500 mb-1">优先活跃</div>
+                              <div className="flex flex-wrap gap-1">
+                                {preferredPoolNodeIds.map((nodeId) => (
+                                  <Chip key={nodeId} size="sm" variant="flat" color="primary">
+                                    {getNodeName(nodeId)}
+                                  </Chip>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           <div>
                             <div className="text-default-500 mb-1">活跃解析</div>
                             <div className="flex flex-wrap gap-1">
@@ -720,7 +756,14 @@ export default function CloudflareDnsPage() {
                     selectedKeys={bindingForm.tunnelId ? [bindingForm.tunnelId.toString()] : []}
                     onSelectionChange={(keys) => {
                       const selected = Array.from(keys)[0] as string;
-                      setBindingForm((prev) => ({ ...prev, tunnelId: selected ? parseInt(selected, 10) : null }));
+                      const tunnelId = selected ? parseInt(selected, 10) : null;
+                      const tunnel = getTunnel(tunnelId || undefined);
+                      const allowedNodeIds = tunnelId ? normalizeNodeIds(tunnel?.inNodeIds, tunnel?.inNodeId || null) : [];
+                      setBindingForm((prev) => ({
+                        ...prev,
+                        tunnelId,
+                        smartPoolPreferredNodeIds: filterNodeIds(prev.smartPoolPreferredNodeIds, allowedNodeIds),
+                      }));
                     }}
                     variant="bordered"
                   >
@@ -749,7 +792,17 @@ export default function CloudflareDnsPage() {
 
                   <Switch
                     isSelected={bindingForm.useTunnelNodes}
-                    onValueChange={(checked) => setBindingForm((prev) => ({ ...prev, useTunnelNodes: checked }))}
+                    onValueChange={(checked) => setBindingForm((prev) => {
+                      const tunnel = checked && prev.tunnelId ? getTunnel(prev.tunnelId) : undefined;
+                      const allowedNodeIds = checked
+                        ? normalizeNodeIds(tunnel?.inNodeIds, tunnel?.inNodeId || null)
+                        : prev.nodeIds;
+                      return {
+                        ...prev,
+                        useTunnelNodes: checked,
+                        smartPoolPreferredNodeIds: filterNodeIds(prev.smartPoolPreferredNodeIds, allowedNodeIds),
+                      };
+                    })}
                     color="primary"
                   >
                     <span className="text-sm">跟随隧道入口节点</span>
@@ -770,11 +823,37 @@ export default function CloudflareDnsPage() {
                       selectedKeys={nodeIdsToSelectedKeys(bindingForm.nodeIds)}
                       onSelectionChange={(keys) => {
                         const nodeIds = selectedKeysToNodeIds(keys);
-                        setBindingForm((prev) => ({ ...prev, nodeIds }));
+                        setBindingForm((prev) => ({
+                          ...prev,
+                          nodeIds,
+                          smartPoolPreferredNodeIds: filterNodeIds(prev.smartPoolPreferredNodeIds, nodeIds),
+                        }));
                       }}
                       variant="bordered"
                     >
                       {nodes.map((node) => (
+                        <SelectItem key={node.id} textValue={node.name}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="shrink-0">{node.name}</span>
+                            <span className="text-xs text-default-500 truncate text-right min-w-0">{getNodeAddressSummary(node)}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </Select>
+                  )}
+
+                  {bindingForm.smartPoolEnabled && getPriorityOptionNodes().length > 0 && (
+                    <Select
+                      label="优先活跃节点"
+                      selectionMode="multiple"
+                      selectedKeys={nodeIdsToSelectedKeys(filterNodeIds(bindingForm.smartPoolPreferredNodeIds, getFormBindingNodeIds()))}
+                      onSelectionChange={(keys) => {
+                        const nodeIds = filterNodeIds(selectedKeysToNodeIds(keys), getFormBindingNodeIds());
+                        setBindingForm((prev) => ({ ...prev, smartPoolPreferredNodeIds: nodeIds }));
+                      }}
+                      variant="bordered"
+                    >
+                      {getPriorityOptionNodes().map((node) => (
                         <SelectItem key={node.id} textValue={node.name}>
                           <div className="flex items-center justify-between gap-2">
                             <span className="shrink-0">{node.name}</span>

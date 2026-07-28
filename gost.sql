@@ -255,6 +255,7 @@ CREATE TABLE `cloudflare_dns_binding` (
   `use_tunnel_nodes` int(10) DEFAULT NULL,
   `record_type` varchar(20) DEFAULT NULL,
   `smart_pool_enabled` tinyint(1) NOT NULL DEFAULT '0',
+  `smart_pool_preferred_node_ids` longtext DEFAULT NULL,
   `smart_pool_active_node_ids` longtext DEFAULT NULL,
   `smart_pool_backup_node_ids` longtext DEFAULT NULL,
   `smart_pool_last_switch_at` bigint(20) DEFAULT NULL,

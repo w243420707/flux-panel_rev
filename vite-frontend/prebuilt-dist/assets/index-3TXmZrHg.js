@@ -31408,7 +31408,7 @@ function useAriaButton$1(props, ref) {
     })
   };
 }
-var domAnimation$8 = () => __vitePreload(() => import("./index-D8QWUXmO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$8 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple$1 = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -35760,7 +35760,7 @@ function useAriaButton(props, ref) {
     })
   };
 }
-var domAnimation$7 = () => __vitePreload(() => import("./index-D8QWUXmO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$7 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -40141,7 +40141,7 @@ var menuVariants = {
     }
   }
 };
-var domAnimation$6 = () => __vitePreload(() => import("./index-D8QWUXmO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$6 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var NavbarMenu = forwardRef$1((props, ref) => {
   var _a, _b;
   const { className, children, portalContainer, motionProps, style, ...otherProps } = props;
@@ -40475,7 +40475,7 @@ function useNavbar(originalProps) {
     getWrapperProps
   };
 }
-var domAnimation$5 = () => __vitePreload(() => import("./index-D8QWUXmO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$5 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Navbar$1 = forwardRef$1((props, ref) => {
   const { children, ...otherProps } = props;
   const context = useNavbar({ ...otherProps, ref });
@@ -43522,7 +43522,7 @@ function getViewportSize() {
     height: visualViewport && (visualViewport == null ? void 0 : visualViewport.height) || window.innerHeight
   };
 }
-var domAnimation$4 = () => __vitePreload(() => import("./index-D8QWUXmO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$4 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var ModalContent = (props) => {
   const { as, children, role = "dialog", ...otherProps } = props;
   const {
@@ -73482,7 +73482,7 @@ function usePopover$1(originalProps) {
     getContentProps
   };
 }
-var domAnimation$3 = () => __vitePreload(() => import("./index-D8QWUXmO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$3 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var FreeSoloPopoverWrapper = forwardRef$1(
   ({
     children,
@@ -75190,7 +75190,7 @@ function useAccordionItem(props) {
     getSubtitleProps
   };
 }
-var domAnimation$2 = () => __vitePreload(() => import("./index-D8QWUXmO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$2 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var AccordionItem = forwardRef$1((props, ref) => {
   const {
     Component,
@@ -96399,7 +96399,7 @@ function CalendarPicker(props) {
     }
   );
 }
-var domAnimation$1 = () => __vitePreload(() => import("./index-D8QWUXmO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$1 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopLayoutWrapper = reactExports.forwardRef(
   (props, ref) => {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref, ...props });
@@ -98828,7 +98828,8 @@ const defaultBindingForm = {
   useTunnelNodes: true,
   nodeIds: [],
   recordType: "AUTO",
-  smartPoolEnabled: true
+  smartPoolEnabled: true,
+  smartPoolPreferredNodeIds: []
 };
 function CloudflareDnsPage() {
   const [loading, setLoading] = reactExports.useState(true);
@@ -98937,6 +98938,21 @@ function CloudflareDnsPage() {
     return normalizeNodeIds(binding.nodeIds);
   };
   const getPoolNodeIds = (value) => normalizeNodeIds(value);
+  const filterNodeIds = (ids2, allowedIds) => {
+    const allowed = new Set(allowedIds);
+    return ids2.filter((id2) => allowed.has(id2));
+  };
+  const getFormBindingNodeIds = () => {
+    if (bindingForm.useTunnelNodes && bindingForm.tunnelId) {
+      const tunnel = getTunnel(bindingForm.tunnelId);
+      return normalizeNodeIds(tunnel == null ? void 0 : tunnel.inNodeIds, (tunnel == null ? void 0 : tunnel.inNodeId) || null);
+    }
+    return bindingForm.nodeIds;
+  };
+  const getPriorityOptionNodes = () => {
+    const allowed = new Set(getFormBindingNodeIds());
+    return nodes.filter((node) => allowed.has(node.id));
+  };
   const formatTime = (timestamp) => {
     if (!timestamp) {
       return "-";
@@ -99048,7 +99064,8 @@ function CloudflareDnsPage() {
       useTunnelNodes: binding.useTunnelNodes === void 0 || binding.useTunnelNodes === 1,
       nodeIds: normalizeNodeIds(binding.nodeIds),
       recordType: binding.recordType || "AUTO",
-      smartPoolEnabled: binding.smartPoolEnabled === 1
+      smartPoolEnabled: binding.smartPoolEnabled === 1,
+      smartPoolPreferredNodeIds: normalizeNodeIds(binding.smartPoolPreferredNodeIds)
     });
     setBindingModalOpen(true);
   };
@@ -99074,7 +99091,8 @@ function CloudflareDnsPage() {
         useTunnelNodes: bindingForm.useTunnelNodes ? 1 : 0,
         nodeIds: bindingForm.nodeIds,
         recordType: bindingForm.recordType,
-        smartPoolEnabled: bindingForm.smartPoolEnabled ? 1 : 0
+        smartPoolEnabled: bindingForm.smartPoolEnabled ? 1 : 0,
+        smartPoolPreferredNodeIds: filterNodeIds(bindingForm.smartPoolPreferredNodeIds, getFormBindingNodeIds())
       });
       if (res2.code === 0) {
         zt.success(res2.msg || "DNS 绑定已保存");
@@ -99266,6 +99284,7 @@ function CloudflareDnsPage() {
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex justify-end", children: /* @__PURE__ */ jsxRuntimeExports.jsx(button_default$1, { size: "sm", color: "primary", variant: "flat", onPress: openAddBinding, children: "新增绑定" }) }),
         bindings.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(card_default, { className: "shadow-sm border border-divider", children: /* @__PURE__ */ jsxRuntimeExports.jsx(card_body_default, { className: "text-center py-16", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-base font-semibold text-foreground", children: "暂无 DNS 绑定" }) }) }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-1 lg:grid-cols-2 gap-4", children: bindings.map((binding) => {
           const nodeIds = getBindingNodeIds(binding);
+          const preferredPoolNodeIds = getPoolNodeIds(binding.smartPoolPreferredNodeIds);
           const activePoolNodeIds = getPoolNodeIds(binding.smartPoolActiveNodeIds);
           const backupPoolNodeIds = getPoolNodeIds(binding.smartPoolBackupNodeIds);
           return /* @__PURE__ */ jsxRuntimeExports.jsxs(card_default, { className: "shadow-sm border border-divider", children: [
@@ -99295,6 +99314,10 @@ function CloudflareDnsPage() {
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-default-500", children: "智能池" }),
                   /* @__PURE__ */ jsxRuntimeExports.jsx(chip_default, { size: "sm", variant: "flat", color: "primary", children: "已启用" })
+                ] }),
+                preferredPoolNodeIds.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-default-500 mb-1", children: "优先活跃" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-1", children: preferredPoolNodeIds.map((nodeId) => /* @__PURE__ */ jsxRuntimeExports.jsx(chip_default, { size: "sm", variant: "flat", color: "primary", children: getNodeName(nodeId) }, nodeId)) })
                 ] }),
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-default-500 mb-1", children: "活跃解析" }),
@@ -99370,7 +99393,14 @@ function CloudflareDnsPage() {
                 selectedKeys: bindingForm.tunnelId ? [bindingForm.tunnelId.toString()] : [],
                 onSelectionChange: (keys) => {
                   const selected = Array.from(keys)[0];
-                  setBindingForm((prev) => ({ ...prev, tunnelId: selected ? parseInt(selected, 10) : null }));
+                  const tunnelId = selected ? parseInt(selected, 10) : null;
+                  const tunnel = getTunnel(tunnelId || void 0);
+                  const allowedNodeIds = tunnelId ? normalizeNodeIds(tunnel == null ? void 0 : tunnel.inNodeIds, (tunnel == null ? void 0 : tunnel.inNodeId) || null) : [];
+                  setBindingForm((prev) => ({
+                    ...prev,
+                    tunnelId,
+                    smartPoolPreferredNodeIds: filterNodeIds(prev.smartPoolPreferredNodeIds, allowedNodeIds)
+                  }));
                 },
                 variant: "bordered",
                 children: tunnels.map((tunnel) => /* @__PURE__ */ jsxRuntimeExports.jsx(listbox_item_base_default, { textValue: tunnel.name, children: tunnel.name }, tunnel.id))
@@ -99399,7 +99429,15 @@ function CloudflareDnsPage() {
               switch_default,
               {
                 isSelected: bindingForm.useTunnelNodes,
-                onValueChange: (checked) => setBindingForm((prev) => ({ ...prev, useTunnelNodes: checked })),
+                onValueChange: (checked) => setBindingForm((prev) => {
+                  const tunnel = checked && prev.tunnelId ? getTunnel(prev.tunnelId) : void 0;
+                  const allowedNodeIds = checked ? normalizeNodeIds(tunnel == null ? void 0 : tunnel.inNodeIds, (tunnel == null ? void 0 : tunnel.inNodeId) || null) : prev.nodeIds;
+                  return {
+                    ...prev,
+                    useTunnelNodes: checked,
+                    smartPoolPreferredNodeIds: filterNodeIds(prev.smartPoolPreferredNodeIds, allowedNodeIds)
+                  };
+                }),
                 color: "primary",
                 children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm", children: "跟随隧道入口节点" })
               }
@@ -99421,10 +99459,31 @@ function CloudflareDnsPage() {
                 selectedKeys: nodeIdsToSelectedKeys(bindingForm.nodeIds),
                 onSelectionChange: (keys) => {
                   const nodeIds = selectedKeysToNodeIds(keys);
-                  setBindingForm((prev) => ({ ...prev, nodeIds }));
+                  setBindingForm((prev) => ({
+                    ...prev,
+                    nodeIds,
+                    smartPoolPreferredNodeIds: filterNodeIds(prev.smartPoolPreferredNodeIds, nodeIds)
+                  }));
                 },
                 variant: "bordered",
                 children: nodes.map((node) => /* @__PURE__ */ jsxRuntimeExports.jsx(listbox_item_base_default, { textValue: node.name, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-2", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0", children: node.name }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-default-500 truncate text-right min-w-0", children: getNodeAddressSummary(node) })
+                ] }) }, node.id))
+              }
+            ),
+            bindingForm.smartPoolEnabled && getPriorityOptionNodes().length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+              select_default,
+              {
+                label: "优先活跃节点",
+                selectionMode: "multiple",
+                selectedKeys: nodeIdsToSelectedKeys(filterNodeIds(bindingForm.smartPoolPreferredNodeIds, getFormBindingNodeIds())),
+                onSelectionChange: (keys) => {
+                  const nodeIds = filterNodeIds(selectedKeysToNodeIds(keys), getFormBindingNodeIds());
+                  setBindingForm((prev) => ({ ...prev, smartPoolPreferredNodeIds: nodeIds }));
+                },
+                variant: "bordered",
+                children: getPriorityOptionNodes().map((node) => /* @__PURE__ */ jsxRuntimeExports.jsx(listbox_item_base_default, { textValue: node.name, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-2", children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shrink-0", children: node.name }),
                   /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-default-500 truncate text-right min-w-0", children: getNodeAddressSummary(node) })
                 ] }) }, node.id))
@@ -100260,7 +100319,7 @@ var [PopoverProvider, usePopoverContext] = createContext2$1({
   name: "PopoverContext",
   errorMessage: "usePopoverContext: `context` is undefined. Seems you forgot to wrap all popover components within `<Popover />`"
 });
-var domAnimation = () => __vitePreload(() => import("./index-D8QWUXmO.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopoverContent = (props) => {
   const { as, children, className, ...otherProps } = props;
   const {
