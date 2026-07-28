@@ -208,6 +208,19 @@ export default function NodePage() {
             } else {
               systemInfo = messageData;
             }
+
+            const hasSystemMetrics =
+              systemInfo &&
+              (
+                Object.prototype.hasOwnProperty.call(systemInfo, "memory_usage") ||
+                Object.prototype.hasOwnProperty.call(systemInfo, "cpu_usage") ||
+                Object.prototype.hasOwnProperty.call(systemInfo, "bytes_received") ||
+                Object.prototype.hasOwnProperty.call(systemInfo, "bytes_transmitted") ||
+                Object.prototype.hasOwnProperty.call(systemInfo, "uptime")
+              );
+            if (!hasSystemMetrics) {
+              return node;
+            }
             
             const currentUpload = parseInt(systemInfo.bytes_transmitted) || 0;
             const currentDownload = parseInt(systemInfo.bytes_received) || 0;

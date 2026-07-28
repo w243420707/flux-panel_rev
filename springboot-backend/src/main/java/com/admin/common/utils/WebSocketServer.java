@@ -96,7 +96,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                                 GostDto result = new GostDto();
                                 
                                 // 根据响应类型处理不同的数据
-                                if ("PingResponse".equals(responseType) && responseData != null) {
+                                if (("PingResponse".equals(responseType) || "TcpPingResponse".equals(responseType)) && responseData != null) {
                                     // 特殊处理ping响应，将完整的响应数据返回
                                     result.setMsg(responseMessage != null ? responseMessage : "OK");
                                     result.setData(responseData); // 保存ping详细结果
@@ -119,6 +119,10 @@ public class WebSocketServer extends TextWebSocketHandler {
                 }
 
                 // 如果是节点类型，转发消息给其他会话
+                if (decryptedPayload.contains("requestId")) {
+                    return;
+                }
+
                 if (Objects.equals(type, "1")) {
                     JSONObject jsonObject = new JSONObject();
                     jsonObject.put("id", id);
