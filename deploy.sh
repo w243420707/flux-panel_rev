@@ -1033,12 +1033,10 @@ domain_ips() {
   } | sed '/^$/d' | sort -u
 }
 
-domain_points_here() {
-  local domain="$1"
-  local current resolved ip
-  current="$(public_ips)"
-  resolved="$(domain_ips "${domain}")"
-
+ip_sets_intersect() {
+  local current="$1"
+  local resolved="$2"
+  local ip
   [[ -n "${current}" && -n "${resolved}" ]] || return 1
 
   while read -r ip; do
@@ -1050,20 +1048,31 @@ domain_points_here() {
   return 1
 }
 
+domain_points_here() {
+  local domain="$1"
+  local current resolved
+  current="$(public_ips)"
+  resolved="$(domain_ips "${domain}")"
+  ip_sets_intersect "${current}" "${resolved}"
+}
+
 verify_domain_dns() {
   local domain="$1"
+  local current resolved answer
   [[ -n "${domain}" ]] || return 1
 
-  if domain_points_here "${domain}"; then
+  current="$(public_ips)"
+  resolved="$(domain_ips "${domain}")"
+  if ip_sets_intersect "${current}" "${resolved}"; then
     log "DNS check passed for ${domain}."
     return 0
   fi
 
   warn "DNS for ${domain} does not appear to point to this VPS yet."
   warn "Current VPS public IPs:"
-  public_ips | sed 's/^/  - /' || true
+  printf '%s\n' "${current:-none}" | sed 's/^/  - /' || true
   warn "Resolved domain IPs:"
-  domain_ips "${domain}" | sed 's/^/  - /' || true
+  printf '%s\n' "${resolved:-none}" | sed 's/^/  - /' || true
 
   if [[ "${ASSUME_YES}" -eq 1 ]]; then
     warn "Continuing because --yes was supplied."
@@ -1076,7 +1085,9 @@ verify_domain_dns() {
       c|C) return 0 ;;
       s|S) SKIP_SSL=1; return 1 ;;
       *)
-        if domain_points_here "${domain}"; then
+        current="$(public_ips)"
+        resolved="$(domain_ips "${domain}")"
+        if ip_sets_intersect "${current}" "${resolved}"; then
           log "DNS check passed for ${domain}."
           return 0
         fi
@@ -1103,6 +1114,15 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 17 3,15 * * * root certbot renew --quiet --deploy-hook "systemctl reload nginx"
 EOF
   fi
+}
+
+existing_certificate_valid() {
+  local domain="$1"
+  local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
+  local key="/etc/letsencrypt/live/${domain}/privkey.pem"
+
+  [[ -s "${cert}" && -s "${key}" ]] || return 1
+  openssl x509 -checkend 0 -noout -in "${cert}" >/dev/null 2>&1
 }
 
 request_certificate() {
@@ -1147,7 +1167,16 @@ configure_nginx() {
   reload_nginx
 
   if [[ -n "${DOMAIN:-}" && "${SKIP_SSL}" -eq 0 ]]; then
-    if request_certificate "${DOMAIN}" "${LETSENCRYPT_EMAIL:-admin@${DOMAIN}}"; then
+    if existing_certificate_valid "${DOMAIN}"; then
+      log "Existing valid certificate found for ${DOMAIN}. Reusing it."
+      install_certbot_renewal
+      set_env_value SSL_ENABLED true
+      set_env_value PANEL_URL "https://${DOMAIN}"
+      load_env
+      write_nginx_ssl_config "${DOMAIN}" "${FRONTEND_PORT}"
+      activate_nginx_conf
+      reload_nginx
+    elif request_certificate "${DOMAIN}" "${LETSENCRYPT_EMAIL:-admin@${DOMAIN}}"; then
       load_env
       write_nginx_ssl_config "${DOMAIN}" "${FRONTEND_PORT}"
       activate_nginx_conf
