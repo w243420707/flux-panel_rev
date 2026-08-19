@@ -606,7 +606,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         }
 
         if (!aliasRecords.isEmpty()) {
-            deleteManagedRecords(aliasRecords);
+            deleteManagedRecords(setting, aliasRecords);
         }
         cloudflareApiClient.createDnsRecord(setting.getZoneId(), setting.getApiToken(), desiredRecord);
     }
@@ -697,7 +697,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         }
     }
 
-    private void deleteManagedRecords(List<CloudflareDnsRecord> records) {
+    private void deleteManagedRecords(CloudflareDnsSetting setting, List<CloudflareDnsRecord> records) {
         for (CloudflareDnsRecord record : records) {
             cloudflareApiClient.deleteDnsRecord(setting.getZoneId(), setting.getApiToken(), record.getId());
         }

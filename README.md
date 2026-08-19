@@ -105,6 +105,10 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 ## 更新日志
 
+### 2026-08-19 v1.3.9
+
+- 修复 Cloudflare DNS 别名同步里的后端编译错误，恢复 VPS 更新时的后端构建流程。
+
 ### 2026-08-19 v1.3.8
 
 - Cloudflare DNS 多域名同步改为主域名 + 别名模式：首个域名下发真实 A/AAAA 记录，其余域名自动下发 CNAME 指向主域名。
