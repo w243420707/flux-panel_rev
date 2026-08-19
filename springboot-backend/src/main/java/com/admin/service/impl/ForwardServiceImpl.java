@@ -348,51 +348,15 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Override
     public R deleteForward(Long id) {
-        // 1. 获取当前用户信息
-        UserInfo currentUser = getCurrentUserInfo();
+        synchronized (forwardConfigLock) {
+            UserInfo currentUser = getCurrentUserInfo();
 
-        // 2. 检查转发是否存在
-        Forward forward = validateForwardExists(id, currentUser);
-        if (forward == null) {
-            return R.err("端口转发不存在");
-        }
-
-        // 3. 获取隧道信息
-        Tunnel tunnel = validateTunnel(forward.getTunnelId());
-        if (tunnel == null) {
-            return R.err("隧道不存在");
-        }
-
-        // 4. 权限检查（仅普通用户需要）
-        UserTunnel userTunnel = null;
-        if (currentUser.getRoleId() != ADMIN_ROLE_ID) {
-            userTunnel = getUserTunnel(currentUser.getUserId(), tunnel.getId().intValue());
-            if (userTunnel == null) {
-                return R.err("你没有该隧道权限");
+            Forward forward = validateForwardExists(id, currentUser);
+            if (forward == null) {
+                return R.err("端口转发不存在");
             }
-        } else {
-            // 管理员删除用户记录时，需要获取对应的UserTunnel用于构建正确的服务名称
-            userTunnel = getUserTunnel(forward.getUserId(), tunnel.getId().intValue());
-        }
 
-        // 5. 获取所需的节点信息
-        NodeInfo nodeInfo = getRequiredNodes(tunnel);
-        if (nodeInfo.isHasError()) {
-            return R.err(nodeInfo.getErrorMessage());
-        }
-
-        // 6. 调用Gost服务删除转发
-        R gostResult = deleteGostServices(forward, tunnel, nodeInfo, userTunnel);
-        if (gostResult.getCode() != 0) {
-            return gostResult;
-        }
-
-        // 7. 删除转发记录
-        boolean result = this.removeById(id);
-        if (result) {
-            return R.ok("端口转发删除成功");
-        } else {
-            return R.err("端口转发删除失败");
+            return deleteForwardWithContext(forward, currentUser, new HashMap<>(), new HashMap<>(), new HashMap<>());
         }
     }
 
@@ -403,11 +367,32 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             return R.err("请选择需要删除的转发");
         }
 
+        UserInfo currentUser = getCurrentUserInfo();
         int success = 0;
         List<Map<String, Object>> failures = new ArrayList<>();
         synchronized (forwardConfigLock) {
+            List<Forward> forwardList = this.listByIds(normalizedIds);
+            Map<Long, Forward> forwardMap = forwardList.stream()
+                    .collect(Collectors.toMap(Forward::getId, forwardItem -> forwardItem));
+            Map<Integer, Tunnel> tunnelCache = new HashMap<>();
+            Map<String, UserTunnel> userTunnelCache = new HashMap<>();
+            Map<Integer, NodeInfo> nodeInfoCache = new HashMap<>();
+
             for (Long id : normalizedIds) {
-                R result = force ? forceDeleteForward(id) : deleteForward(id);
+                Forward forward = forwardMap.get(id);
+                if (forward == null) {
+                    addBatchDeleteFailure(failures, id, "端口转发不存在");
+                    continue;
+                }
+
+                if (!canOperateForward(forward, currentUser)) {
+                    addBatchDeleteFailure(failures, id, "端口转发不存在");
+                    continue;
+                }
+
+                R result = force
+                        ? forceDeleteForwardInternal(forward)
+                        : deleteForwardWithContext(forward, currentUser, tunnelCache, userTunnelCache, nodeInfoCache);
                 if (result.getCode() == 0) {
                     success++;
                     continue;
@@ -445,22 +430,87 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Override
     public R forceDeleteForward(Long id) {
-        // 1. 获取当前用户信息
-        UserInfo currentUser = getCurrentUserInfo();
+        synchronized (forwardConfigLock) {
+            UserInfo currentUser = getCurrentUserInfo();
 
-        // 2. 检查转发是否存在且用户有权限操作
-        Forward forward = validateForwardExists(id, currentUser);
-        if (forward == null) {
-            return R.err("端口转发不存在");
+            Forward forward = validateForwardExists(id, currentUser);
+            if (forward == null) {
+                return R.err("端口转发不存在");
+            }
+
+            return forceDeleteForwardInternal(forward);
+        }
+    }
+
+    private R deleteForwardWithContext(Forward forward, UserInfo currentUser,
+                                       Map<Integer, Tunnel> tunnelCache,
+                                       Map<String, UserTunnel> userTunnelCache,
+                                       Map<Integer, NodeInfo> nodeInfoCache) {
+        Tunnel tunnel = getCachedTunnel(forward.getTunnelId(), tunnelCache);
+        if (tunnel == null) {
+            return R.err("隧道不存在");
         }
 
-        // 3. 直接删除转发记录，跳过GOST服务删除
-        boolean result = this.removeById(id);
-        if (result) {
-            return R.ok("端口转发强制删除成功");
+        UserTunnel userTunnel;
+        if (currentUser.getRoleId() != ADMIN_ROLE_ID) {
+            userTunnel = getCachedUserTunnel(currentUser.getUserId(), tunnel.getId().intValue(), userTunnelCache);
+            if (userTunnel == null) {
+                return R.err("你没有该隧道权限");
+            }
         } else {
-            return R.err("端口转发强制删除失败");
+            userTunnel = getCachedUserTunnel(forward.getUserId(), tunnel.getId().intValue(), userTunnelCache);
         }
+
+        NodeInfo nodeInfo = getCachedNodeInfo(tunnel, nodeInfoCache);
+        if (nodeInfo.isHasError()) {
+            return R.err(nodeInfo.getErrorMessage());
+        }
+
+        R gostResult = deleteGostServices(forward, tunnel, nodeInfo, userTunnel);
+        if (gostResult.getCode() != 0) {
+            return gostResult;
+        }
+
+        return this.removeById(forward.getId()) ? R.ok("端口转发删除成功") : R.err("端口转发删除失败");
+    }
+
+    private R forceDeleteForwardInternal(Forward forward) {
+        return this.removeById(forward.getId()) ? R.ok("端口转发强制删除成功") : R.err("端口转发强制删除失败");
+    }
+
+    private boolean canOperateForward(Forward forward, UserInfo currentUser) {
+        return currentUser.getRoleId() == ADMIN_ROLE_ID
+                || Objects.equals(currentUser.getUserId(), forward.getUserId());
+    }
+
+    private Tunnel getCachedTunnel(Integer tunnelId, Map<Integer, Tunnel> tunnelCache) {
+        if (!tunnelCache.containsKey(tunnelId)) {
+            tunnelCache.put(tunnelId, validateTunnel(tunnelId));
+        }
+        return tunnelCache.get(tunnelId);
+    }
+
+    private UserTunnel getCachedUserTunnel(Integer userId, Integer tunnelId, Map<String, UserTunnel> userTunnelCache) {
+        String cacheKey = userId + ":" + tunnelId;
+        if (!userTunnelCache.containsKey(cacheKey)) {
+            userTunnelCache.put(cacheKey, getUserTunnel(userId, tunnelId));
+        }
+        return userTunnelCache.get(cacheKey);
+    }
+
+    private NodeInfo getCachedNodeInfo(Tunnel tunnel, Map<Integer, NodeInfo> nodeInfoCache) {
+        Integer tunnelId = tunnel.getId();
+        if (!nodeInfoCache.containsKey(tunnelId)) {
+            nodeInfoCache.put(tunnelId, getRequiredNodes(tunnel));
+        }
+        return nodeInfoCache.get(tunnelId);
+    }
+
+    private void addBatchDeleteFailure(List<Map<String, Object>> failures, Long id, String message) {
+        Map<String, Object> failure = new LinkedHashMap<>();
+        failure.put("id", id);
+        failure.put("message", message == null || message.isBlank() ? "删除失败" : message);
+        failures.add(failure);
     }
 
     private List<Long> normalizeForwardIds(List<Long> ids) {

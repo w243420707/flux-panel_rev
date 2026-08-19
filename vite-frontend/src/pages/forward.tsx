@@ -37,6 +37,7 @@ import {
   getForwardList, 
   updateForward, 
   deleteForward,
+  batchDeleteForwards,
   forceDeleteForward,
   userTunnel, 
   pauseForwardService,
@@ -92,11 +93,16 @@ interface ApiResult<T = any> {
   data?: T;
 }
 
+interface BatchDeleteFailure {
+  id: number;
+  message: string;
+}
+
 interface BatchDeleteResult {
   total: number;
   success: number;
   failed: number;
-  failures: Array<{ id: number; message: string }>;
+  failures: BatchDeleteFailure[];
   force?: boolean;
 }
 
@@ -551,75 +557,53 @@ export default function ForwardPage() {
       return;
     }
 
-    const confirmed = window.confirm(`确定批量删除选中的 ${validIds.length} 个转发吗？\n\n会先按常规删除清理节点端转发服务。`);
+    const confirmed = window.confirm(`确定批量删除选中的 ${validIds.length} 个转发吗？\n\n会一次性调用后端批处理清理节点端转发服务。`);
     if (!confirmed) {
       return;
     }
 
     setBatchDeleteLoading(true);
     let remainingFailedIds: number[] = [];
-    const runDeleteQueue = async (ids: number[], force: boolean): Promise<BatchDeleteResult> => {
-      const failures: Array<{ id: number; message: string }> = [];
-      let success = 0;
-      const progressToastId = `batch-delete-${Date.now()}`;
-
-      try {
-        for (let index = 0; index < ids.length; index += 1) {
-          const id = ids[index];
-          toast.loading(
-            `${force ? '正在强制删除' : '正在删除'} ${index + 1}/${ids.length} 个转发...`,
-            { id: progressToastId }
-          );
-
-          try {
-            const res = force ? await forceDeleteForward(id) : await deleteForward(id);
-            if (res.code === 0) {
-              success += 1;
-            } else {
-              failures.push({ id, message: res.msg || '删除失败' });
-            }
-          } catch (error) {
-            failures.push({
-              id,
-              message: error instanceof Error ? error.message : '删除请求失败'
-            });
-          }
-        }
-      } finally {
-        toast.dismiss(progressToastId);
-      }
-
-      return {
-        total: ids.length,
-        success,
-        failed: failures.length,
-        failures,
-        force
-      };
-    };
+    const progressToastId = `batch-delete-${Date.now()}`;
 
     try {
-      const result = await runDeleteQueue(validIds, false);
-      remainingFailedIds = result.failures.map((failure) => failure.id).filter(Boolean);
+      toast.loading(`正在批量删除 ${validIds.length} 个转发...`, { id: progressToastId });
 
-      if (result.success > 0) {
-        toast.success(`已删除 ${result.success} 个转发`);
+      const result = await batchDeleteForwards(validIds, false);
+      const payload = result.data as BatchDeleteResult | undefined;
+
+      if (!payload) {
+        throw new Error(result.msg || '批量删除失败');
+      }
+
+      remainingFailedIds = payload.failures
+        .map((failure: BatchDeleteFailure) => failure.id)
+        .filter((id): id is number => Boolean(id));
+
+      if (payload.success > 0) {
+        toast.success(`已删除 ${payload.success} 个转发`);
       }
 
       if (remainingFailedIds.length > 0) {
-        const failedPreview = result.failures
+        const failedPreview = payload.failures
           .slice(0, 5)
-          .map((failure) => `#${failure.id}: ${failure.message}`)
+          .map((failure: BatchDeleteFailure) => `#${failure.id}: ${failure.message}`)
           .join('\n');
         const forceConfirmed = window.confirm(
-          `常规批量删除完成：成功 ${result.success} 个，失败 ${remainingFailedIds.length} 个。\n\n${failedPreview}${result.failures.length > 5 ? '\n...' : ''}\n\n是否强制删除失败项？\n\n注意：强制删除只删除面板记录，不验证节点端服务是否已清理。`
+          `常规批量删除完成：成功 ${payload.success} 个，失败 ${remainingFailedIds.length} 个。\n\n${failedPreview}${payload.failures.length > 5 ? '\n...' : ''}\n\n是否强制删除失败项？\n\n注意：强制删除只删除面板记录，不验证节点端服务是否已清理。`
         );
 
         if (forceConfirmed) {
-          const forceResult = await runDeleteQueue(remainingFailedIds, true);
-          remainingFailedIds = forceResult.failures.map((failure) => failure.id).filter(Boolean);
-          if (forceResult.success > 0) {
-            toast.success(`已强制删除 ${forceResult.success} 个失败项`);
+          const forceResult = await batchDeleteForwards(remainingFailedIds, true);
+          const forcePayload = forceResult.data as BatchDeleteResult | undefined;
+          if (!forcePayload) {
+            throw new Error(forceResult.msg || '强制删除失败');
+          }
+          remainingFailedIds = forcePayload.failures
+            .map((failure: BatchDeleteFailure) => failure.id)
+            .filter((id): id is number => Boolean(id));
+          if (forcePayload.success > 0) {
+            toast.success(`已强制删除 ${forcePayload.success} 个失败项`);
           }
           if (remainingFailedIds.length > 0) {
             toast.error(`仍有 ${remainingFailedIds.length} 个转发删除失败`);
@@ -638,6 +622,7 @@ export default function ForwardPage() {
       console.error('批量删除失败:', error);
       toast.error('批量删除失败');
     } finally {
+      toast.dismiss(progressToastId);
       setBatchDeleteLoading(false);
     }
   };

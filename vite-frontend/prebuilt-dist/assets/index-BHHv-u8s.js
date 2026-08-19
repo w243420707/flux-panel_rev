@@ -31408,7 +31408,7 @@ function useAriaButton$1(props, ref) {
     })
   };
 }
-var domAnimation$8 = () => __vitePreload(() => import("./index-DL0O3QfA.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$8 = () => __vitePreload(() => import("./index-ChAXnI0c.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple$1 = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -35760,7 +35760,7 @@ function useAriaButton(props, ref) {
     })
   };
 }
-var domAnimation$7 = () => __vitePreload(() => import("./index-DL0O3QfA.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$7 = () => __vitePreload(() => import("./index-ChAXnI0c.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -39815,6 +39815,7 @@ const createForward = (data) => Network.post("/forward/create", data);
 const getForwardList = () => Network.post("/forward/list");
 const updateForward = (data) => Network.post("/forward/update", data);
 const deleteForward = (id2) => Network.post("/forward/delete", { id: id2 });
+const batchDeleteForwards = (ids2, force = false) => Network.post("/forward/batch-delete", { ids: ids2, force });
 const forceDeleteForward = (id2) => Network.post("/forward/force-delete", { id: id2 });
 const pauseForwardService = (forwardId) => Network.post("/forward/pause", { id: forwardId });
 const resumeForwardService = (forwardId) => Network.post("/forward/resume", { id: forwardId });
@@ -39831,7 +39832,7 @@ const getConfigByName = (name) => Network.post("/config/get", { name });
 const updateConfigs = (configMap) => Network.post("/config/update", configMap);
 const checkCaptcha = () => Network.post("/captcha/check");
 const CACHE_PREFIX = "vite_config_";
-const VERSION = "1.3.13";
+const VERSION = "1.3.14";
 const APP_VERSION = "1.0.3";
 const getInitialConfig = () => {
   if (typeof window === "undefined") {
@@ -40141,7 +40142,7 @@ var menuVariants = {
     }
   }
 };
-var domAnimation$6 = () => __vitePreload(() => import("./index-DL0O3QfA.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$6 = () => __vitePreload(() => import("./index-ChAXnI0c.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var NavbarMenu = forwardRef$1((props, ref) => {
   var _a, _b;
   const { className, children, portalContainer, motionProps, style, ...otherProps } = props;
@@ -40475,7 +40476,7 @@ function useNavbar(originalProps) {
     getWrapperProps
   };
 }
-var domAnimation$5 = () => __vitePreload(() => import("./index-DL0O3QfA.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$5 = () => __vitePreload(() => import("./index-ChAXnI0c.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Navbar$1 = forwardRef$1((props, ref) => {
   const { children, ...otherProps } = props;
   const context = useNavbar({ ...otherProps, ref });
@@ -43522,7 +43523,7 @@ function getViewportSize() {
     height: visualViewport && (visualViewport == null ? void 0 : visualViewport.height) || window.innerHeight
   };
 }
-var domAnimation$4 = () => __vitePreload(() => import("./index-DL0O3QfA.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$4 = () => __vitePreload(() => import("./index-ChAXnI0c.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var ModalContent = (props) => {
   const { as, children, role = "dialog", ...otherProps } = props;
   const {
@@ -73482,7 +73483,7 @@ function usePopover$1(originalProps) {
     getContentProps
   };
 }
-var domAnimation$3 = () => __vitePreload(() => import("./index-DL0O3QfA.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$3 = () => __vitePreload(() => import("./index-ChAXnI0c.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var FreeSoloPopoverWrapper = forwardRef$1(
   ({
     children,
@@ -75190,7 +75191,7 @@ function useAccordionItem(props) {
     getSubtitleProps
   };
 }
-var domAnimation$2 = () => __vitePreload(() => import("./index-DL0O3QfA.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$2 = () => __vitePreload(() => import("./index-ChAXnI0c.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var AccordionItem = forwardRef$1((props, ref) => {
   const {
     Component,
@@ -79881,64 +79882,38 @@ function ForwardPage() {
     }
     setBatchDeleteLoading(true);
     let remainingFailedIds = [];
-    const runDeleteQueue = async (ids2, force) => {
-      const failures = [];
-      let success = 0;
-      const progressToastId = `batch-delete-${Date.now()}`;
-      try {
-        for (let index2 = 0; index2 < ids2.length; index2 += 1) {
-          const id2 = ids2[index2];
-          zt.loading(
-            `${force ? "正在强制删除" : "正在删除"} ${index2 + 1}/${ids2.length} 个转发...`,
-            { id: progressToastId }
-          );
-          try {
-            const res2 = force ? await forceDeleteForward(id2) : await deleteForward(id2);
-            if (res2.code === 0) {
-              success += 1;
-            } else {
-              failures.push({ id: id2, message: res2.msg || "删除失败" });
-            }
-          } catch (error) {
-            failures.push({
-              id: id2,
-              message: error instanceof Error ? error.message : "删除请求失败"
-            });
-          }
-        }
-      } finally {
-        zt.dismiss(progressToastId);
-      }
-      return {
-        total: ids2.length,
-        success,
-        failed: failures.length,
-        failures,
-        force
-      };
-    };
+    const progressToastId = `batch-delete-${Date.now()}`;
     try {
-      const result = await runDeleteQueue(validIds, false);
-      remainingFailedIds = result.failures.map((failure) => failure.id).filter(Boolean);
-      if (result.success > 0) {
-        zt.success(`已删除 ${result.success} 个转发`);
+      zt.loading(`正在批量删除 ${validIds.length} 个转发...`, { id: progressToastId });
+      const result = await batchDeleteForwards(validIds, false);
+      const payload = result.data;
+      if (!payload) {
+        throw new Error(result.msg || "批量删除失败");
+      }
+      remainingFailedIds = payload.failures.map((failure) => failure.id).filter((id2) => Boolean(id2));
+      if (payload.success > 0) {
+        zt.success(`已删除 ${payload.success} 个转发`);
       }
       if (remainingFailedIds.length > 0) {
-        const failedPreview = result.failures.slice(0, 5).map((failure) => `#${failure.id}: ${failure.message}`).join("\n");
+        const failedPreview = payload.failures.slice(0, 5).map((failure) => `#${failure.id}: ${failure.message}`).join("\n");
         const forceConfirmed = window.confirm(
-          `常规批量删除完成：成功 ${result.success} 个，失败 ${remainingFailedIds.length} 个。
+          `常规批量删除完成：成功 ${payload.success} 个，失败 ${remainingFailedIds.length} 个。
 
-${failedPreview}${result.failures.length > 5 ? "\n..." : ""}
+${failedPreview}${payload.failures.length > 5 ? "\n..." : ""}
 
 是否强制删除失败项？
 
 注意：强制删除只删除面板记录，不验证节点端服务是否已清理。`
         );
         if (forceConfirmed) {
-          const forceResult = await runDeleteQueue(remainingFailedIds, true);
-          remainingFailedIds = forceResult.failures.map((failure) => failure.id).filter(Boolean);
-          if (forceResult.success > 0) {
-            zt.success(`已强制删除 ${forceResult.success} 个失败项`);
+          const forceResult = await batchDeleteForwards(remainingFailedIds, true);
+          const forcePayload = forceResult.data;
+          if (!forcePayload) {
+            throw new Error(forceResult.msg || "强制删除失败");
+          }
+          remainingFailedIds = forcePayload.failures.map((failure) => failure.id).filter((id2) => Boolean(id2));
+          if (forcePayload.success > 0) {
+            zt.success(`已强制删除 ${forcePayload.success} 个失败项`);
           }
           if (remainingFailedIds.length > 0) {
             zt.error(`仍有 ${remainingFailedIds.length} 个转发删除失败`);
@@ -79956,6 +79931,7 @@ ${failedPreview}${result.failures.length > 5 ? "\n..." : ""}
       console.error("批量删除失败:", error);
       zt.error("批量删除失败");
     } finally {
+      zt.dismiss(progressToastId);
       setBatchDeleteLoading(false);
     }
   };
@@ -96622,7 +96598,7 @@ function CalendarPicker(props) {
     }
   );
 }
-var domAnimation$1 = () => __vitePreload(() => import("./index-DL0O3QfA.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$1 = () => __vitePreload(() => import("./index-ChAXnI0c.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopLayoutWrapper = reactExports.forwardRef(
   (props, ref) => {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref, ...props });
@@ -100626,7 +100602,7 @@ var [PopoverProvider, usePopoverContext] = createContext2$1({
   name: "PopoverContext",
   errorMessage: "usePopoverContext: `context` is undefined. Seems you forgot to wrap all popover components within `<Popover />`"
 });
-var domAnimation = () => __vitePreload(() => import("./index-DL0O3QfA.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation = () => __vitePreload(() => import("./index-ChAXnI0c.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopoverContent = (props) => {
   const { as, children, className, ...otherProps } = props;
   const {
