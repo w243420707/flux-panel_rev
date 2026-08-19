@@ -499,7 +499,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     private NodeInfo getCachedNodeInfo(Tunnel tunnel, Map<Integer, NodeInfo> nodeInfoCache) {
-        Integer tunnelId = tunnel.getId();
+        Integer tunnelId = tunnel.getId().intValue();
         if (!nodeInfoCache.containsKey(tunnelId)) {
             nodeInfoCache.put(tunnelId, getRequiredNodes(tunnel));
         }
