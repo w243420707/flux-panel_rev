@@ -31408,7 +31408,7 @@ function useAriaButton$1(props, ref) {
     })
   };
 }
-var domAnimation$8 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$8 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple$1 = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -35760,7 +35760,7 @@ function useAriaButton(props, ref) {
     })
   };
 }
-var domAnimation$7 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$7 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -39815,6 +39815,7 @@ const createForward = (data) => Network.post("/forward/create", data);
 const getForwardList = () => Network.post("/forward/list");
 const updateForward = (data) => Network.post("/forward/update", data);
 const deleteForward = (id2) => Network.post("/forward/delete", { id: id2 });
+const batchDeleteForwards = (ids2, force = false) => Network.post("/forward/batch-delete", { ids: ids2, force });
 const forceDeleteForward = (id2) => Network.post("/forward/force-delete", { id: id2 });
 const pauseForwardService = (forwardId) => Network.post("/forward/pause", { id: forwardId });
 const resumeForwardService = (forwardId) => Network.post("/forward/resume", { id: forwardId });
@@ -39831,7 +39832,7 @@ const getConfigByName = (name) => Network.post("/config/get", { name });
 const updateConfigs = (configMap) => Network.post("/config/update", configMap);
 const checkCaptcha = () => Network.post("/captcha/check");
 const CACHE_PREFIX = "vite_config_";
-const VERSION = "1.3.4";
+const VERSION = "1.3.5";
 const APP_VERSION = "1.0.3";
 const getInitialConfig = () => {
   if (typeof window === "undefined") {
@@ -40141,7 +40142,7 @@ var menuVariants = {
     }
   }
 };
-var domAnimation$6 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$6 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var NavbarMenu = forwardRef$1((props, ref) => {
   var _a, _b;
   const { className, children, portalContainer, motionProps, style, ...otherProps } = props;
@@ -40475,7 +40476,7 @@ function useNavbar(originalProps) {
     getWrapperProps
   };
 }
-var domAnimation$5 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$5 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Navbar$1 = forwardRef$1((props, ref) => {
   const { children, ...otherProps } = props;
   const context = useNavbar({ ...otherProps, ref });
@@ -43522,7 +43523,7 @@ function getViewportSize() {
     height: visualViewport && (visualViewport == null ? void 0 : visualViewport.height) || window.innerHeight
   };
 }
-var domAnimation$4 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$4 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var ModalContent = (props) => {
   const { as, children, role = "dialog", ...otherProps } = props;
   const {
@@ -73482,7 +73483,7 @@ function usePopover$1(originalProps) {
     getContentProps
   };
 }
-var domAnimation$3 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$3 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var FreeSoloPopoverWrapper = forwardRef$1(
   ({
     children,
@@ -75190,7 +75191,7 @@ function useAccordionItem(props) {
     getSubtitleProps
   };
 }
-var domAnimation$2 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$2 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var AccordionItem = forwardRef$1((props, ref) => {
   const {
     Component,
@@ -79576,6 +79577,9 @@ function ForwardPage() {
   const [isEdit, setIsEdit] = reactExports.useState(false);
   const [submitLoading, setSubmitLoading] = reactExports.useState(false);
   const [deleteLoading, setDeleteLoading] = reactExports.useState(false);
+  const [batchDeleteMode, setBatchDeleteMode] = reactExports.useState(false);
+  const [batchDeleteLoading, setBatchDeleteLoading] = reactExports.useState(false);
+  const [selectedForwardIds, setSelectedForwardIds] = reactExports.useState([]);
   const [diagnosisLoading, setDiagnosisLoading] = reactExports.useState(false);
   const [forwardToDelete, setForwardToDelete] = reactExports.useState(null);
   const [currentDiagnosisForward, setCurrentDiagnosisForward] = reactExports.useState(null);
@@ -79604,6 +79608,9 @@ function ForwardPage() {
   reactExports.useEffect(() => {
     loadData();
   }, []);
+  reactExports.useEffect(() => {
+    setSelectedForwardIds((prev) => prev.filter((id2) => forwards.some((forward) => forward.id === id2)));
+  }, [forwards]);
   const handleViewModeChange = () => {
     const newMode = viewMode === "grouped" ? "direct" : "grouped";
     setViewMode(newMode);
@@ -79850,6 +79857,91 @@ function ForwardPage() {
       zt.error("删除失败");
     } finally {
       setDeleteLoading(false);
+    }
+  };
+  const normalizeBatchDeleteResult = (res2, requestedIds) => {
+    const data = res2.data;
+    if (data) {
+      return {
+        total: Number(data.total || requestedIds.length),
+        success: Number(data.success || 0),
+        failed: Number(data.failed || 0),
+        failures: Array.isArray(data.failures) ? data.failures : [],
+        force: data.force
+      };
+    }
+    return {
+      total: requestedIds.length,
+      success: 0,
+      failed: requestedIds.length,
+      failures: requestedIds.map((id2) => ({ id: id2, message: res2.msg || "删除失败" }))
+    };
+  };
+  const handleBatchModeToggle = () => {
+    if (batchDeleteLoading) {
+      return;
+    }
+    if (batchDeleteMode) {
+      setSelectedForwardIds([]);
+    }
+    setBatchDeleteMode((prev) => !prev);
+  };
+  const executeBatchDelete = async () => {
+    const validIds = selectedForwardIds.filter((id2) => forwards.some((forward) => forward.id === id2));
+    if (validIds.length === 0) {
+      zt.error("请选择需要删除的转发");
+      return;
+    }
+    const confirmed = window.confirm(`确定批量删除选中的 ${validIds.length} 个转发吗？
+
+会先按常规删除清理节点端转发服务。`);
+    if (!confirmed) {
+      return;
+    }
+    setBatchDeleteLoading(true);
+    let remainingFailedIds = [];
+    try {
+      const res2 = await batchDeleteForwards(validIds, false);
+      const result = normalizeBatchDeleteResult(res2, validIds);
+      remainingFailedIds = result.failures.map((failure) => failure.id).filter(Boolean);
+      if (result.success > 0) {
+        zt.success(`已删除 ${result.success} 个转发`);
+      }
+      if (remainingFailedIds.length > 0) {
+        const failedPreview = result.failures.slice(0, 5).map((failure) => `#${failure.id}: ${failure.message}`).join("\n");
+        const forceConfirmed = window.confirm(
+          `常规批量删除完成：成功 ${result.success} 个，失败 ${remainingFailedIds.length} 个。
+
+${failedPreview}${result.failures.length > 5 ? "\n..." : ""}
+
+是否强制删除失败项？
+
+注意：强制删除只删除面板记录，不验证节点端服务是否已清理。`
+        );
+        if (forceConfirmed) {
+          const forceRes = await batchDeleteForwards(remainingFailedIds, true);
+          const forceResult = normalizeBatchDeleteResult(forceRes, remainingFailedIds);
+          remainingFailedIds = forceResult.failures.map((failure) => failure.id).filter(Boolean);
+          if (forceResult.success > 0) {
+            zt.success(`已强制删除 ${forceResult.success} 个失败项`);
+          }
+          if (remainingFailedIds.length > 0) {
+            zt.error(`仍有 ${remainingFailedIds.length} 个转发删除失败`);
+          }
+        } else {
+          zt.error(`有 ${remainingFailedIds.length} 个转发删除失败`);
+        }
+      }
+      await loadData(false);
+      setSelectedForwardIds(remainingFailedIds);
+      if (remainingFailedIds.length === 0) {
+        setBatchDeleteMode(false);
+      }
+    } catch (error) {
+      console.error("批量删除失败:", error);
+      zt.error("批量删除失败");
+    } finally {
+      setBatchDeleteLoading(false);
     }
   };
   const handleTunnelChange = (tunnelId) => {
@@ -80449,6 +80541,28 @@ function ForwardPage() {
     }
     return sortedForwards;
   };
+  const getVisibleForwardIds = () => {
+    return getSortedForwards().map((forward) => forward.id).filter((id2) => id2 > 0);
+  };
+  const isForwardSelected = (id2) => selectedForwardIds.includes(id2);
+  const areAllVisibleForwardsSelected = () => {
+    const visibleIds = getVisibleForwardIds();
+    return visibleIds.length > 0 && visibleIds.every((id2) => selectedForwardIds.includes(id2));
+  };
+  const toggleSelectAllVisible = () => {
+    const visibleIds = getVisibleForwardIds();
+    if (visibleIds.length === 0) {
+      return;
+    }
+    if (visibleIds.every((id2) => selectedForwardIds.includes(id2))) {
+      setSelectedForwardIds([]);
+      return;
+    }
+    setSelectedForwardIds(visibleIds);
+  };
+  const toggleForwardSelection = (id2) => {
+    setSelectedForwardIds((prev) => prev.includes(id2) ? prev.filter((selectedId) => selectedId !== id2) : [...prev, id2]);
+  };
   const SortableForwardCard = ({ forward }) => {
     if (!forward || !forward.id) {
       return null;
@@ -80471,14 +80585,28 @@ function ForwardPage() {
   const renderForwardCard = (forward, listeners) => {
     const statusDisplay = getStatusDisplay(forward.status);
     const strategyDisplay = getStrategyDisplay(forward.strategy);
-    return /* @__PURE__ */ jsxRuntimeExports.jsxs(card_default, { className: "group shadow-sm border border-divider hover:shadow-md transition-shadow duration-200", children: [
+    const selected = isForwardSelected(forward.id);
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs(card_default, { className: `group shadow-sm border hover:shadow-md transition-shadow duration-200 ${selected ? "border-danger ring-1 ring-danger/40" : "border-divider"}`, children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(card_header_default, { className: "pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between items-start w-full", children: [
+        batchDeleteMode && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: `w-7 h-7 mr-2 rounded-md border flex items-center justify-center flex-shrink-0 transition-colors ${selected ? "bg-danger text-white border-danger" : "border-default-300 text-default-500 hover:border-danger hover:text-danger"}`,
+            onClick: (event) => {
+              event.stopPropagation();
+              toggleForwardSelection(forward.id);
+            },
+            title: selected ? "取消选择" : "选择转发",
+            children: selected ? /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-4 h-4", fill: "currentColor", viewBox: "0 0 20 20", children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fillRule: "evenodd", d: "M16.707 5.293a1 1 0 010 1.414l-7.5 7.5a1 1 0 01-1.414 0l-3.5-3.5a1 1 0 111.414-1.414L8.5 12.086l6.793-6.793a1 1 0 011.414 0z", clipRule: "evenodd" }) }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-3.5 h-3.5 rounded-sm border border-current" })
+          }
+        ),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-foreground truncate text-sm", children: forward.name }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-default-500 truncate", children: forward.tunnelName })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5 ml-2", children: [
-          viewMode === "direct" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          viewMode === "direct" && !batchDeleteMode && /* @__PURE__ */ jsxRuntimeExports.jsx(
             "div",
             {
               className: `cursor-grab active:cursor-grabbing p-2 text-default-400 hover:text-default-600 transition-colors touch-manipulation ${isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`,
@@ -80609,7 +80737,52 @@ function ForwardPage() {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-3 lg:px-6 py-8", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between mb-6", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-end gap-2 flex-wrap", children: [
+        batchDeleteMode && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(chip_default, { color: selectedForwardIds.length > 0 ? "danger" : "default", variant: "flat", size: "sm", children: [
+            "已选 ",
+            selectedForwardIds.length
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            button_default$1,
+            {
+              size: "sm",
+              variant: "flat",
+              color: "default",
+              onPress: toggleSelectAllVisible,
+              isDisabled: batchDeleteLoading || getVisibleForwardIds().length === 0,
+              children: areAllVisibleForwardsSelected() ? "取消全选" : "全选"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            button_default$1,
+            {
+              size: "sm",
+              variant: "flat",
+              color: "danger",
+              onPress: executeBatchDelete,
+              isLoading: batchDeleteLoading,
+              isDisabled: selectedForwardIds.length === 0,
+              startContent: !batchDeleteLoading && /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { className: "w-4 h-4", fill: "currentColor", viewBox: "0 0 20 20", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fillRule: "evenodd", d: "M9 2a1 1 0 000 2h2a1 1 0 100-2H9z", clipRule: "evenodd" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fillRule: "evenodd", d: "M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 012 0v4a1 1 0 11-2 0V7zM12 7a1 1 0 012 0v4a1 1 0 11-2 0V7z", clipRule: "evenodd" })
+              ] }),
+              children: "删除所选"
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          button_default$1,
+          {
+            size: "sm",
+            variant: "flat",
+            color: batchDeleteMode ? "danger" : "default",
+            onPress: handleBatchModeToggle,
+            isDisabled: batchDeleteLoading,
+            startContent: /* @__PURE__ */ jsxRuntimeExports.jsx("svg", { className: "w-4 h-4", fill: "currentColor", viewBox: "0 0 20 20", children: batchDeleteMode ? /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fillRule: "evenodd", d: "M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z", clipRule: "evenodd" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("path", { fillRule: "evenodd", d: "M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm2 4a1 1 0 000 2h10a1 1 0 100-2H5zm-1 5a1 1 0 100 2h7a1 1 0 100-2H4z", clipRule: "evenodd" }) }),
+            children: batchDeleteMode ? "退出批量" : "批量删除"
+          }
+        ),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           button_default$1,
           {
@@ -96399,7 +96572,7 @@ function CalendarPicker(props) {
     }
   );
 }
-var domAnimation$1 = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$1 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopLayoutWrapper = reactExports.forwardRef(
   (props, ref) => {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref, ...props });
@@ -100319,7 +100492,7 @@ var [PopoverProvider, usePopoverContext] = createContext2$1({
   name: "PopoverContext",
   errorMessage: "usePopoverContext: `context` is undefined. Seems you forgot to wrap all popover components within `<Popover />`"
 });
-var domAnimation = () => __vitePreload(() => import("./index-BwbilLtV.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopoverContent = (props) => {
   const { as, children, className, ...otherProps } = props;
   const {

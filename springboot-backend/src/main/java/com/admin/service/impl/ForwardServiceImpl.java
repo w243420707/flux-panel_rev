@@ -396,6 +396,43 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     @Override
+    public R batchDeleteForwards(List<Long> ids, boolean force) {
+        List<Long> normalizedIds = normalizeForwardIds(ids);
+        if (normalizedIds.isEmpty()) {
+            return R.err("请选择需要删除的转发");
+        }
+
+        int success = 0;
+        List<Map<String, Object>> failures = new ArrayList<>();
+        synchronized (forwardConfigLock) {
+            for (Long id : normalizedIds) {
+                R result = force ? forceDeleteForward(id) : deleteForward(id);
+                if (result.getCode() == 0) {
+                    success++;
+                    continue;
+                }
+                Map<String, Object> failure = new LinkedHashMap<>();
+                failure.put("id", id);
+                failure.put("message", result.getMsg());
+                failures.add(failure);
+            }
+        }
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("total", normalizedIds.size());
+        data.put("success", success);
+        data.put("failed", failures.size());
+        data.put("failures", failures);
+        data.put("force", force);
+
+        String message = (force ? "批量强制删除" : "批量删除")
+                + "完成，成功 " + success + " 个，失败 " + failures.size() + " 个";
+        R response = failures.isEmpty() ? R.ok(data) : R.err(message);
+        response.setData(data);
+        return response;
+    }
+
+    @Override
     public R pauseForward(Long id) {
         return changeForwardStatus(id, FORWARD_STATUS_PAUSED, "暂停", "PauseService");
     }
@@ -423,6 +460,18 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         } else {
             return R.err("端口转发强制删除失败");
         }
+    }
+
+    private List<Long> normalizeForwardIds(List<Long> ids) {
+        LinkedHashSet<Long> normalizedIds = new LinkedHashSet<>();
+        if (ids != null) {
+            for (Long id : ids) {
+                if (id != null && id > 0) {
+                    normalizedIds.add(id);
+                }
+            }
+        }
+        return new ArrayList<>(normalizedIds);
     }
 
     /**

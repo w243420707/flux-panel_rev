@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="./vite.svg" />
-
+    
     <title>flux-panel_rev</title>
     <script>
       // 防止暗黑模式闪烁：在页面加载前立即应用系统主题
       (function() {
         // 立即检测系统主题并应用
         const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-
+        
         // 立即设置主题类，避免闪烁
         if (isDarkMode) {
           document.documentElement.classList.add('dark');
@@ -19,7 +19,7 @@
           document.documentElement.classList.remove('dark');
           document.documentElement.style.colorScheme = 'light';
         }
-
+        
         // 监听系统主题变化
         if (window.matchMedia) {
           window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
@@ -32,13 +32,13 @@
             }
           });
         }
-
+        
         // 检测H5模式并设置标记，避免布局切换时的闪屏
         const isMobile = window.innerWidth <= 768;
         const isMobileBrowser = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         const urlParams = new URLSearchParams(window.location.search);
         const isH5Param = urlParams.get('h5') === 'true';
-
+        
         if (isMobile || isMobileBrowser || isH5Param) {
           document.documentElement.classList.add('h5-mode');
         } else {
@@ -53,13 +53,13 @@
         --toaster-color: #000000;
         --toaster-border: #e5e7eb;
       }
-
+      
       html.dark {
         --toaster-bg: #374151;
         --toaster-color: #ffffff;
         --toaster-border: #4b5563;
       }
-
+      
       /* 默认浅色主题样式 */
       body {
         margin: 0;
@@ -71,13 +71,13 @@
         overscroll-behavior: none;
         -webkit-overflow-scrolling: touch;
       }
-
+      
       /* 暗色主题样式 */
       html.dark body {
         background-color: #000000;
         color: #ffffff;
       }
-
+      
       #root {
         min-height: 100vh;
         background-color: inherit;
@@ -94,43 +94,43 @@
       @supports (-webkit-touch-callout: none) {
         #root { min-height: -webkit-fill-available; }
       }
-
+      
       /* 防止加载时的闪烁 */
       * {
         box-sizing: border-box;
       }
-
+      
       /* 确保在主题切换时平滑过渡 */
       html {
         transition: color-scheme 0.2s ease;
         /* 禁用整个页面的弹性滚动 */
         overscroll-behavior: none;
       }
-
+      
       /* 防止布局切换时的闪屏 */
       .h5-mode #root {
         background-color: #ffffff;
       }
-
+      
       .h5-mode.dark #root {
         background-color: #000000;
       }
-
+      
       .pc-mode #root {
         background-color: #ffffff;
       }
-
+      
       .pc-mode.dark #root {
         background-color: #000000;
       }
-
+            
       /* 移动端滚动优化 */
       @media (max-width: 768px) {
         html, body {
           overscroll-behavior: none;
           -webkit-overflow-scrolling: touch;
         }
-
+        
         /* 确保固定定位的元素不受滚动影响 */
         .fixed {
           overscroll-behavior: none;
@@ -152,11 +152,10 @@
       name="viewport"
     />
     <link href="./assets/favicon-DI5FVxIz.ico" rel="icon" />
-    <script type="module" src="./assets/index-3TXmZrHg.js"></script>
-    <link rel="stylesheet" href="./assets/index-B9ATKFBS.css">
+    <script type="module" src="./assets/index-B3KkIso2.js"></script>
+    <link rel="stylesheet" href="./assets/index-Bk0zfYAZ.css">
   </head>
   <body>
-    <div id="root"></div>
-
+    <div id="root"></div>
   </body>
 </html>

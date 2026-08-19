@@ -37,6 +37,7 @@ import {
   getForwardList, 
   updateForward, 
   deleteForward,
+  batchDeleteForwards,
   forceDeleteForward,
   userTunnel, 
   pauseForwardService,
@@ -90,6 +91,19 @@ interface ApiResult<T = any> {
   code: number;
   msg: string;
   data?: T;
+}
+
+interface BatchDeleteFailure {
+  id: number;
+  message: string;
+}
+
+interface BatchDeleteResult {
+  total: number;
+  success: number;
+  failed: number;
+  failures: BatchDeleteFailure[];
+  force?: boolean;
 }
 
 const PORT_CONFLICT_CODE = -409;
@@ -169,6 +183,9 @@ export default function ForwardPage() {
   const [isEdit, setIsEdit] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [batchDeleteMode, setBatchDeleteMode] = useState(false);
+  const [batchDeleteLoading, setBatchDeleteLoading] = useState(false);
+  const [selectedForwardIds, setSelectedForwardIds] = useState<number[]>([]);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [forwardToDelete, setForwardToDelete] = useState<Forward | null>(null);
   const [currentDiagnosisForward, setCurrentDiagnosisForward] = useState<Forward | null>(null);
@@ -211,6 +228,10 @@ export default function ForwardPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    setSelectedForwardIds(prev => prev.filter(id => forwards.some(forward => forward.id === id)));
+  }, [forwards]);
 
   // 切换显示模式并保存到localStorage
   const handleViewModeChange = () => {
@@ -516,6 +537,95 @@ export default function ForwardPage() {
       toast.error('删除失败');
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  const normalizeBatchDeleteResult = (res: ApiResult<BatchDeleteResult>, requestedIds: number[]): BatchDeleteResult => {
+    const data = res.data;
+    if (data) {
+      return {
+        total: Number(data.total || requestedIds.length),
+        success: Number(data.success || 0),
+        failed: Number(data.failed || 0),
+        failures: Array.isArray(data.failures) ? data.failures : [],
+        force: data.force
+      };
+    }
+    return {
+      total: requestedIds.length,
+      success: 0,
+      failed: requestedIds.length,
+      failures: requestedIds.map((id) => ({ id, message: res.msg || '删除失败' }))
+    };
+  };
+
+  const handleBatchModeToggle = () => {
+    if (batchDeleteLoading) {
+      return;
+    }
+    if (batchDeleteMode) {
+      setSelectedForwardIds([]);
+    }
+    setBatchDeleteMode((prev) => !prev);
+  };
+
+  const executeBatchDelete = async () => {
+    const validIds = selectedForwardIds.filter((id) => forwards.some((forward) => forward.id === id));
+    if (validIds.length === 0) {
+      toast.error('请选择需要删除的转发');
+      return;
+    }
+
+    const confirmed = window.confirm(`确定批量删除选中的 ${validIds.length} 个转发吗？\n\n会先按常规删除清理节点端转发服务。`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBatchDeleteLoading(true);
+    let remainingFailedIds: number[] = [];
+    try {
+      const res = await batchDeleteForwards(validIds, false) as ApiResult<BatchDeleteResult>;
+      const result = normalizeBatchDeleteResult(res, validIds);
+      remainingFailedIds = result.failures.map((failure) => failure.id).filter(Boolean);
+
+      if (result.success > 0) {
+        toast.success(`已删除 ${result.success} 个转发`);
+      }
+
+      if (remainingFailedIds.length > 0) {
+        const failedPreview = result.failures
+          .slice(0, 5)
+          .map((failure) => `#${failure.id}: ${failure.message}`)
+          .join('\n');
+        const forceConfirmed = window.confirm(
+          `常规批量删除完成：成功 ${result.success} 个，失败 ${remainingFailedIds.length} 个。\n\n${failedPreview}${result.failures.length > 5 ? '\n...' : ''}\n\n是否强制删除失败项？\n\n注意：强制删除只删除面板记录，不验证节点端服务是否已清理。`
+        );
+
+        if (forceConfirmed) {
+          const forceRes = await batchDeleteForwards(remainingFailedIds, true) as ApiResult<BatchDeleteResult>;
+          const forceResult = normalizeBatchDeleteResult(forceRes, remainingFailedIds);
+          remainingFailedIds = forceResult.failures.map((failure) => failure.id).filter(Boolean);
+          if (forceResult.success > 0) {
+            toast.success(`已强制删除 ${forceResult.success} 个失败项`);
+          }
+          if (remainingFailedIds.length > 0) {
+            toast.error(`仍有 ${remainingFailedIds.length} 个转发删除失败`);
+          }
+        } else {
+          toast.error(`有 ${remainingFailedIds.length} 个转发删除失败`);
+        }
+      }
+
+      await loadData(false);
+      setSelectedForwardIds(remainingFailedIds);
+      if (remainingFailedIds.length === 0) {
+        setBatchDeleteMode(false);
+      }
+    } catch (error) {
+      console.error('批量删除失败:', error);
+      toast.error('批量删除失败');
+    } finally {
+      setBatchDeleteLoading(false);
     }
   };
 
@@ -1261,6 +1371,37 @@ export default function ForwardPage() {
     return sortedForwards;
   };
 
+  const getVisibleForwardIds = (): number[] => {
+    return getSortedForwards()
+      .map((forward) => forward.id)
+      .filter((id) => id > 0);
+  };
+
+  const isForwardSelected = (id: number) => selectedForwardIds.includes(id);
+
+  const areAllVisibleForwardsSelected = () => {
+    const visibleIds = getVisibleForwardIds();
+    return visibleIds.length > 0 && visibleIds.every((id) => selectedForwardIds.includes(id));
+  };
+
+  const toggleSelectAllVisible = () => {
+    const visibleIds = getVisibleForwardIds();
+    if (visibleIds.length === 0) {
+      return;
+    }
+    if (visibleIds.every((id) => selectedForwardIds.includes(id))) {
+      setSelectedForwardIds([]);
+      return;
+    }
+    setSelectedForwardIds(visibleIds);
+  };
+
+  const toggleForwardSelection = (id: number) => {
+    setSelectedForwardIds((prev) => (
+      prev.includes(id) ? prev.filter((selectedId) => selectedId !== id) : [...prev, id]
+    ));
+  };
+
   // 可拖拽的转发卡片组件
   const SortableForwardCard = ({ forward }: { forward: Forward }) => {
     // 确保 forward 对象有效
@@ -1294,17 +1435,41 @@ export default function ForwardPage() {
   const renderForwardCard = (forward: Forward, listeners?: any) => {
     const statusDisplay = getStatusDisplay(forward.status);
     const strategyDisplay = getStrategyDisplay(forward.strategy);
+    const selected = isForwardSelected(forward.id);
     
     return (
-      <Card key={forward.id} className="group shadow-sm border border-divider hover:shadow-md transition-shadow duration-200">
+      <Card key={forward.id} className={`group shadow-sm border hover:shadow-md transition-shadow duration-200 ${selected ? 'border-danger ring-1 ring-danger/40' : 'border-divider'}`}>
         <CardHeader className="pb-2">
           <div className="flex justify-between items-start w-full">
+            {batchDeleteMode && (
+              <button
+                type="button"
+                className={`w-7 h-7 mr-2 rounded-md border flex items-center justify-center flex-shrink-0 transition-colors ${
+                  selected
+                    ? 'bg-danger text-white border-danger'
+                    : 'border-default-300 text-default-500 hover:border-danger hover:text-danger'
+                }`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleForwardSelection(forward.id);
+                }}
+                title={selected ? '取消选择' : '选择转发'}
+              >
+                {selected ? (
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-7.5 7.5a1 1 0 01-1.414 0l-3.5-3.5a1 1 0 111.414-1.414L8.5 12.086l6.793-6.793a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                ) : (
+                  <span className="w-3.5 h-3.5 rounded-sm border border-current" />
+                )}
+              </button>
+            )}
             <div className="flex-1 min-w-0">
               <h3 className="font-semibold text-foreground truncate text-sm">{forward.name}</h3>
               <p className="text-xs text-default-500 truncate">{forward.tunnelName}</p>
             </div>
             <div className="flex items-center gap-1.5 ml-2">
-              {viewMode === 'direct' && (
+              {viewMode === 'direct' && !batchDeleteMode && (
                 <div 
                   className={`cursor-grab active:cursor-grabbing p-2 text-default-400 hover:text-default-600 transition-colors touch-manipulation ${
                     isMobile 
@@ -1476,7 +1641,59 @@ export default function ForwardPage() {
         <div className="flex items-center justify-between mb-6">
           <div className="flex-1">
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-end gap-2 flex-wrap">
+            {batchDeleteMode && (
+              <>
+                <Chip color={selectedForwardIds.length > 0 ? 'danger' : 'default'} variant="flat" size="sm">
+                  已选 {selectedForwardIds.length}
+                </Chip>
+                <Button
+                  size="sm"
+                  variant="flat"
+                  color="default"
+                  onPress={toggleSelectAllVisible}
+                  isDisabled={batchDeleteLoading || getVisibleForwardIds().length === 0}
+                >
+                  {areAllVisibleForwardsSelected() ? '取消全选' : '全选'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="flat"
+                  color="danger"
+                  onPress={executeBatchDelete}
+                  isLoading={batchDeleteLoading}
+                  isDisabled={selectedForwardIds.length === 0}
+                  startContent={
+                    !batchDeleteLoading && (
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" clipRule="evenodd" />
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 012 0v4a1 1 0 11-2 0V7zM12 7a1 1 0 012 0v4a1 1 0 11-2 0V7z" clipRule="evenodd" />
+                      </svg>
+                    )
+                  }
+                >
+                  删除所选
+                </Button>
+              </>
+            )}
+            <Button
+              size="sm"
+              variant="flat"
+              color={batchDeleteMode ? 'danger' : 'default'}
+              onPress={handleBatchModeToggle}
+              isDisabled={batchDeleteLoading}
+              startContent={
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  {batchDeleteMode ? (
+                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                  ) : (
+                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm2 4a1 1 0 000 2h10a1 1 0 100-2H5zm-1 5a1 1 0 100 2h7a1 1 0 100-2H4z" clipRule="evenodd" />
+                  )}
+                </svg>
+              }
+            >
+              {batchDeleteMode ? '退出批量' : '批量删除'}
+            </Button>
             {/* 显示模式切换按钮 */}
             <Button
               size="sm"

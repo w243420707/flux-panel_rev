@@ -10,6 +10,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -54,6 +57,15 @@ public class ForwardController extends BaseController {
     }
 
     @LogAnnotation
+    @PostMapping("/batch-delete")
+    public R batchDelete(@RequestBody Map<String, Object> params) {
+        List<Long> ids = parseIds(params.get("ids"));
+        boolean force = Boolean.TRUE.equals(params.get("force"))
+                || "true".equalsIgnoreCase(String.valueOf(params.get("force")));
+        return forwardService.batchDeleteForwards(ids, force);
+    }
+
+    @LogAnnotation
     @PostMapping("/force-delete")
     public R forceDelete(@RequestBody Map<String, Object> params) {
         Long id = Long.valueOf(params.get("id").toString());
@@ -95,6 +107,35 @@ public class ForwardController extends BaseController {
     @PostMapping("/update-order")
     public R updateForwardOrder(@RequestBody Map<String, Object> params) {
         return forwardService.updateForwardOrder(params);
+    }
+
+    private List<Long> parseIds(Object value) {
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        if (value instanceof List<?>) {
+            for (Object item : (List<?>) value) {
+                Long id = parseId(item);
+                if (id != null && id > 0) {
+                    ids.add(id);
+                }
+            }
+            return new ArrayList<>(ids);
+        }
+        Long id = parseId(value);
+        if (id != null && id > 0) {
+            ids.add(id);
+        }
+        return new ArrayList<>(ids);
+    }
+
+    private Long parseId(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Long.valueOf(value.toString());
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
 }
