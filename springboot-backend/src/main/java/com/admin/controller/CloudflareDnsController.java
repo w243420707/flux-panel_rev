@@ -98,20 +98,67 @@ public class CloudflareDnsController extends BaseController {
     @RequireRole
     @PostMapping("/binding/save")
     public R saveBinding(@RequestBody CloudflareDnsBindingDto dto) {
+        CloudflareDnsBinding existingBinding = dto != null && dto.getId() != null
+                ? cloudflareDnsBindingService.getBindingById(dto.getId())
+                : null;
         R result = cloudflareDnsBindingService.saveBinding(dto);
         if (result.getCode() != 0 || !(result.getData() instanceof CloudflareDnsBinding)) {
             return result;
         }
 
         CloudflareDnsBinding binding = (CloudflareDnsBinding) result.getData();
+        String cleanupWarning = null;
         CloudflareDnsSetting setting = cloudflareDnsSettingService.getCurrentSetting();
-        if (setting.getEnabled() != null && setting.getEnabled() == 1) {
+        boolean dnsEnabled = setting.getEnabled() != null && setting.getEnabled() == 1;
+        if (dnsEnabled && existingBinding != null) {
+            java.util.List<String> oldDomains = parseDomains(existingBinding.getDomain());
+            java.util.List<String> newDomains = parseDomains(binding.getDomain());
+            oldDomains.removeAll(newDomains);
+            if (!oldDomains.isEmpty()) {
+                R cleanupResult = cloudflareDnsSyncService.deleteBindingRecordsByDomains(binding.getId(), oldDomains);
+                if (cleanupResult.getCode() != 0) {
+                    cleanupWarning = cleanupResult.getMsg();
+                }
+            }
+        }
+        if (dnsEnabled) {
             R syncResult = cloudflareDnsSyncService.syncBinding(binding.getId(), "binding-save");
             if (syncResult.getCode() != 0) {
                 result.setMsg("DNS 绑定已保存，但同步失败: " + syncResult.getMsg());
+            } else if (StringUtils.hasText(cleanupWarning)) {
+                result.setMsg("DNS 绑定已保存，但旧域名清理失败: " + cleanupWarning + "；" + syncResult.getMsg());
             }
+        } else if (StringUtils.hasText(cleanupWarning)) {
+            result.setMsg("DNS 绑定已保存，但旧域名清理失败: " + cleanupWarning);
         }
         return result;
+    }
+
+    private java.util.List<String> parseDomains(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return new java.util.ArrayList<>();
+        }
+        try {
+            java.util.List<String> domains = com.alibaba.fastjson.JSON.parseArray(raw, String.class);
+            if (domains != null) {
+                return domains.stream()
+                        .filter(StringUtils::hasText)
+                        .map(this::normalizeDomain)
+                        .distinct()
+                        .collect(java.util.stream.Collectors.toList());
+            }
+        } catch (Exception ignored) {
+            // Legacy single-domain storage.
+        }
+        return java.util.Collections.singletonList(normalizeDomain(raw));
+    }
+
+    private String normalizeDomain(String value) {
+        String domain = value.trim().toLowerCase(java.util.Locale.ROOT);
+        while (domain.endsWith(".")) {
+            domain = domain.substring(0, domain.length() - 1);
+        }
+        return domain;
     }
 
     @LogAnnotation

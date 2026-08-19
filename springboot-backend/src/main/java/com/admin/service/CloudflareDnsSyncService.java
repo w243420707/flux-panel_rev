@@ -15,5 +15,7 @@ public interface CloudflareDnsSyncService {
 
     R deleteBindingAndRecords(Long bindingId);
 
+    R deleteBindingRecordsByDomains(Long bindingId, java.util.List<String> domains);
+
     R deleteBindingsByTunnel(Long tunnelId);
 }

@@ -6,6 +6,7 @@ import com.admin.common.utils.TunnelNodeUtil;
 import com.admin.entity.CloudflareDnsBinding;
 import com.admin.mapper.CloudflareDnsBindingMapper;
 import com.admin.service.CloudflareDnsBindingService;
+import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.springframework.stereotype.Service;
@@ -14,6 +15,7 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBindingMapper, CloudflareDnsBinding> implements CloudflareDnsBindingService {
@@ -33,9 +35,6 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
         if (dto.getTunnelId() == null || dto.getTunnelId() <= 0) {
             return R.err("请选择隧道");
         }
-        if (!StringUtils.hasText(dto.getDomain())) {
-            return R.err("请输入需要同步的域名");
-        }
 
         Integer useTunnelNodes = dto.getUseTunnelNodes() == null ? 1 : (dto.getUseTunnelNodes() == 1 ? 1 : 0);
         List<Long> nodeIds = normalizeNodeIds(dto.getNodeIds());
@@ -44,11 +43,19 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
             return R.err("手动模式下请选择至少一个节点");
         }
 
-        String domain = normalizeDomain(dto.getDomain());
-        if (!isValidDomain(domain)) {
-            return R.err("域名格式不正确");
+        List<String> domains = normalizeDomains(dto.getDomains());
+        if (domains.isEmpty()) {
+            domains = parseDomains(dto.getDomain());
         }
-        R duplicateCheck = checkDuplicate(dto.getId(), domain);
+        if (domains.isEmpty()) {
+            return R.err("请至少填写一个域名");
+        }
+        for (String domain : domains) {
+            if (!isValidDomain(domain)) {
+                return R.err("域名格式不正确: " + domain);
+            }
+        }
+        R duplicateCheck = checkDuplicate(dto.getId(), domains);
         if (duplicateCheck.getCode() != 0) {
             return duplicateCheck;
         }
@@ -59,7 +66,7 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
         }
 
         binding.setTunnelId(dto.getTunnelId());
-        binding.setDomain(domain);
+        binding.setDomain(JSON.toJSONString(domains));
         binding.setUseTunnelNodes(useTunnelNodes);
         binding.setNodeIds(useTunnelNodes == 1 ? null : TunnelNodeUtil.toJsonArray(nodeIds));
         binding.setRecordType(resolveRecordType(dto.getRecordType()));
@@ -94,13 +101,20 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
         return id == null ? null : this.getById(id);
     }
 
-    private R checkDuplicate(Long id, String domain) {
-        QueryWrapper<CloudflareDnsBinding> wrapper = new QueryWrapper<CloudflareDnsBinding>()
-                .eq("domain", domain);
-        if (id != null) {
-            wrapper.ne("id", id);
+    private R checkDuplicate(Long id, List<String> domains) {
+        List<CloudflareDnsBinding> bindings = this.list();
+        for (CloudflareDnsBinding binding : bindings) {
+            if (id != null && id.equals(binding.getId())) {
+                continue;
+            }
+            List<String> existingDomains = parseDomains(binding.getDomain());
+            for (String domain : domains) {
+                if (existingDomains.contains(domain)) {
+                    return R.err("该域名已经绑定了 DNS 同步: " + domain);
+                }
+            }
         }
-        return this.count(wrapper) > 0 ? R.err("该域名已经绑定了 DNS 同步") : R.ok();
+        return R.ok();
     }
 
     private List<Long> normalizeNodeIds(List<Long> rawIds) {
@@ -115,12 +129,38 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
         return new ArrayList<>(ids);
     }
 
-    private String normalizeDomain(String domain) {
-        String normalized = domain.trim().toLowerCase();
-        while (normalized.endsWith(".")) {
-            normalized = normalized.substring(0, normalized.length() - 1);
+    private List<String> parseDomains(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return new ArrayList<>();
         }
-        return normalized;
+        try {
+            List<String> domains = JSON.parseArray(raw, String.class);
+            if (domains != null) {
+                return normalizeDomains(domains);
+            }
+        } catch (Exception ignored) {
+            // Fall back to the legacy single-domain format.
+        }
+        return normalizeDomains(List.of(raw));
+    }
+
+    private List<String> normalizeDomains(List<String> rawDomains) {
+        LinkedHashSet<String> domains = new LinkedHashSet<>();
+        if (rawDomains != null) {
+            for (String rawDomain : rawDomains) {
+                if (!StringUtils.hasText(rawDomain)) {
+                    continue;
+                }
+                String normalized = rawDomain.trim().toLowerCase(Locale.ROOT);
+                while (normalized.endsWith(".")) {
+                    normalized = normalized.substring(0, normalized.length() - 1);
+                }
+                if (!normalized.isEmpty()) {
+                    domains.add(normalized);
+                }
+            }
+        }
+        return new ArrayList<>(domains);
     }
 
     private boolean isValidDomain(String domain) {

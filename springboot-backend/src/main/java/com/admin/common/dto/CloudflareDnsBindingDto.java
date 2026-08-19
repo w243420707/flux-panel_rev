@@ -9,6 +9,7 @@ public class CloudflareDnsBindingDto {
     private Long id;
     private Long tunnelId;
     private String domain;
+    private List<String> domains;
     private List<Long> nodeIds;
     private Integer useTunnelNodes;
     private String recordType;

@@ -31408,7 +31408,7 @@ function useAriaButton$1(props, ref) {
     })
   };
 }
-var domAnimation$8 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$8 = () => __vitePreload(() => import("./index-4_sLAL-6.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple$1 = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -35760,7 +35760,7 @@ function useAriaButton(props, ref) {
     })
   };
 }
-var domAnimation$7 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$7 = () => __vitePreload(() => import("./index-4_sLAL-6.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -39832,7 +39832,7 @@ const getConfigByName = (name) => Network.post("/config/get", { name });
 const updateConfigs = (configMap) => Network.post("/config/update", configMap);
 const checkCaptcha = () => Network.post("/captcha/check");
 const CACHE_PREFIX = "vite_config_";
-const VERSION = "1.3.5";
+const VERSION = "1.3.6";
 const APP_VERSION = "1.0.3";
 const getInitialConfig = () => {
   if (typeof window === "undefined") {
@@ -40142,7 +40142,7 @@ var menuVariants = {
     }
   }
 };
-var domAnimation$6 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$6 = () => __vitePreload(() => import("./index-4_sLAL-6.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var NavbarMenu = forwardRef$1((props, ref) => {
   var _a, _b;
   const { className, children, portalContainer, motionProps, style, ...otherProps } = props;
@@ -40476,7 +40476,7 @@ function useNavbar(originalProps) {
     getWrapperProps
   };
 }
-var domAnimation$5 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$5 = () => __vitePreload(() => import("./index-4_sLAL-6.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Navbar$1 = forwardRef$1((props, ref) => {
   const { children, ...otherProps } = props;
   const context = useNavbar({ ...otherProps, ref });
@@ -43523,7 +43523,7 @@ function getViewportSize() {
     height: visualViewport && (visualViewport == null ? void 0 : visualViewport.height) || window.innerHeight
   };
 }
-var domAnimation$4 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$4 = () => __vitePreload(() => import("./index-4_sLAL-6.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var ModalContent = (props) => {
   const { as, children, role = "dialog", ...otherProps } = props;
   const {
@@ -73483,7 +73483,7 @@ function usePopover$1(originalProps) {
     getContentProps
   };
 }
-var domAnimation$3 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$3 = () => __vitePreload(() => import("./index-4_sLAL-6.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var FreeSoloPopoverWrapper = forwardRef$1(
   ({
     children,
@@ -75191,7 +75191,7 @@ function useAccordionItem(props) {
     getSubtitleProps
   };
 }
-var domAnimation$2 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$2 = () => __vitePreload(() => import("./index-4_sLAL-6.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var AccordionItem = forwardRef$1((props, ref) => {
   const {
     Component,
@@ -96572,7 +96572,7 @@ function CalendarPicker(props) {
     }
   );
 }
-var domAnimation$1 = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$1 = () => __vitePreload(() => import("./index-4_sLAL-6.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopLayoutWrapper = reactExports.forwardRef(
   (props, ref) => {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref, ...props });
@@ -98997,7 +98997,7 @@ const defaultSetting = {
 };
 const defaultBindingForm = {
   tunnelId: null,
-  domain: "",
+  domains: [""],
   useTunnelNodes: true,
   nodeIds: [],
   recordType: "AUTO",
@@ -99084,6 +99084,49 @@ function CloudflareDnsPage() {
     return Array.from(keys || []).map((key) => parseInt(String(key), 10)).filter((id2) => !Number.isNaN(id2));
   };
   const nodeIdsToSelectedKeys = (ids2) => new Set(ids2.map((id2) => id2.toString()));
+  const normalizeDomainValue = (value) => {
+    let domain = value.trim().toLowerCase();
+    while (domain.endsWith(".")) {
+      domain = domain.slice(0, -1);
+    }
+    return domain;
+  };
+  const normalizeDomainList = (values) => {
+    const domains = [];
+    values.forEach((value) => {
+      const domain = normalizeDomainValue(value);
+      if (domain && !domains.includes(domain)) {
+        domains.push(domain);
+      }
+    });
+    return domains;
+  };
+  const parseBindingDomains = (value) => {
+    if (!(value == null ? void 0 : value.trim())) {
+      return [""];
+    }
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        const domains = normalizeDomainList(parsed.map((item) => String(item || "")));
+        return domains.length > 0 ? domains : [""];
+      }
+    } catch {
+    }
+    const domain = normalizeDomainValue(value);
+    return domain ? [domain] : [""];
+  };
+  const getBindingDomains = (binding) => parseBindingDomains(binding.domain).filter(Boolean);
+  const getBindingDomainSummary = (binding) => {
+    const domains = getBindingDomains(binding);
+    if (domains.length === 0) {
+      return "-";
+    }
+    if (domains.length === 1) {
+      return domains[0];
+    }
+    return `${domains[0]} +${domains.length - 1}`;
+  };
   const getTunnel = (id2) => tunnels.find((tunnel) => tunnel.id === id2);
   const getTunnelName = (id2) => {
     var _a;
@@ -99226,14 +99269,14 @@ function CloudflareDnsPage() {
     }
   };
   const openAddBinding = () => {
-    setBindingForm(defaultBindingForm);
+    setBindingForm({ ...defaultBindingForm, domains: [""] });
     setBindingModalOpen(true);
   };
   const openEditBinding = (binding) => {
     setBindingForm({
       id: binding.id,
       tunnelId: binding.tunnelId,
-      domain: binding.domain,
+      domains: parseBindingDomains(binding.domain),
       useTunnelNodes: binding.useTunnelNodes === void 0 || binding.useTunnelNodes === 1,
       nodeIds: normalizeNodeIds(binding.nodeIds),
       recordType: binding.recordType || "AUTO",
@@ -99247,8 +99290,9 @@ function CloudflareDnsPage() {
       zt.error("请选择隧道");
       return;
     }
-    if (!bindingForm.domain.trim()) {
-      zt.error("请输入域名");
+    const domains = normalizeDomainList(bindingForm.domains);
+    if (domains.length === 0) {
+      zt.error("请至少输入一个域名");
       return;
     }
     if (!bindingForm.useTunnelNodes && bindingForm.nodeIds.length === 0) {
@@ -99260,7 +99304,8 @@ function CloudflareDnsPage() {
       const res2 = await saveCloudflareDnsBinding({
         id: bindingForm.id,
         tunnelId: bindingForm.tunnelId,
-        domain: bindingForm.domain,
+        domain: domains[0],
+        domains,
         useTunnelNodes: bindingForm.useTunnelNodes ? 1 : 0,
         nodeIds: bindingForm.nodeIds,
         recordType: bindingForm.recordType,
@@ -99281,7 +99326,7 @@ function CloudflareDnsPage() {
     }
   };
   const handleDeleteBinding = async (binding) => {
-    if (!window.confirm(`确定删除 DNS 绑定 ${binding.domain} 吗？`)) {
+    if (!window.confirm(`确定删除 DNS 绑定 ${getBindingDomainSummary(binding)} 吗？`)) {
       return;
     }
     setBindingActionId(binding.id);
@@ -99463,7 +99508,7 @@ function CloudflareDnsPage() {
           return /* @__PURE__ */ jsxRuntimeExports.jsxs(card_default, { className: "shadow-sm border border-divider", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(card_header_default, { className: "pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between items-start w-full gap-3", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-sm text-foreground truncate", children: binding.domain }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-sm text-foreground truncate", children: getBindingDomainSummary(binding) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-default-500 truncate", children: getTunnelName(binding.tunnelId) })
               ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsx(chip_default, { size: "sm", variant: "flat", color: getStatusColor(binding.lastSyncStatus), children: getStatusText(binding.lastSyncStatus) })
@@ -99549,16 +99594,54 @@ function CloudflareDnsPage() {
         children: /* @__PURE__ */ jsxRuntimeExports.jsx(modal_content_default, { children: (onClose) => /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(modal_header_default, { children: bindingForm.id ? "编辑 DNS 绑定" : "新增 DNS 绑定" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(modal_body_default, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              input_default,
-              {
-                label: "域名",
-                placeholder: "tunnel.example.com",
-                value: bindingForm.domain,
-                onChange: (e3) => setBindingForm((prev) => ({ ...prev, domain: e3.target.value })),
-                variant: "bordered"
-              }
-            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center justify-between gap-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm text-default-700", children: "域名" }) }),
+              bindingForm.domains.map((domain, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  input_default,
+                  {
+                    placeholder: "tunnel.example.com",
+                    value: domain,
+                    onChange: (e3) => setBindingForm((prev) => {
+                      const domains = [...prev.domains];
+                      domains[index2] = e3.target.value;
+                      return { ...prev, domains };
+                    }),
+                    variant: "bordered"
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  button_default$1,
+                  {
+                    size: "sm",
+                    variant: "flat",
+                    color: "danger",
+                    isIconOnly: true,
+                    "aria-label": "删除域名",
+                    isDisabled: bindingForm.domains.length <= 1,
+                    onPress: () => setBindingForm((prev) => {
+                      if (prev.domains.length <= 1) {
+                        return prev;
+                      }
+                      return { ...prev, domains: prev.domains.filter((_2, itemIndex) => itemIndex !== index2) };
+                    }),
+                    children: "×"
+                  }
+                )
+              ] }, index2)),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                button_default$1,
+                {
+                  size: "sm",
+                  variant: "flat",
+                  color: "primary",
+                  isIconOnly: true,
+                  "aria-label": "新增域名",
+                  onPress: () => setBindingForm((prev) => ({ ...prev, domains: [...prev.domains, ""] })),
+                  children: "+"
+                }
+              )
+            ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               select_default,
               {
@@ -100492,7 +100575,7 @@ var [PopoverProvider, usePopoverContext] = createContext2$1({
   name: "PopoverContext",
   errorMessage: "usePopoverContext: `context` is undefined. Seems you forgot to wrap all popover components within `<Popover />`"
 });
-var domAnimation = () => __vitePreload(() => import("./index-kKrGQ15-.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation = () => __vitePreload(() => import("./index-4_sLAL-6.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopoverContent = (props) => {
   const { as, children, className, ...otherProps } = props;
   const {

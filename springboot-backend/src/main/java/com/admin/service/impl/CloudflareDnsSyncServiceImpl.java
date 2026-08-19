@@ -180,6 +180,33 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     }
 
     @Override
+    public R deleteBindingRecordsByDomains(Long bindingId, List<String> domains) {
+        if (bindingId == null) {
+            return R.err("DNS 绑定 ID 不能为空");
+        }
+        List<String> normalizedDomains = normalizeDomains(domains);
+        if (normalizedDomains.isEmpty()) {
+            return R.ok("没有需要清理的域名");
+        }
+
+        CloudflareDnsSetting setting = cloudflareDnsSettingService.getCurrentSetting();
+        String readyMessage = validateCredentials(setting);
+        if (readyMessage != null) {
+            return R.err(readyMessage);
+        }
+
+        CloudflareDnsBinding binding = new CloudflareDnsBinding();
+        binding.setId(bindingId);
+        binding.setDomain(JSON.toJSONString(normalizedDomains));
+        try {
+            deleteManagedRecords(setting, binding);
+            return R.ok("DNS 记录已清理");
+        } catch (Exception e) {
+            return R.err("清理 DNS 记录失败: " + e.getMessage());
+        }
+    }
+
+    @Override
     public R deleteBindingsByTunnel(Long tunnelId) {
         if (tunnelId == null) {
             return R.ok();
@@ -221,6 +248,11 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                 markBinding(binding, SYNC_FAILED, "绑定没有可用节点", null);
                 return R.err("绑定没有可用节点");
             }
+            List<String> domains = resolveDomains(binding);
+            if (domains.isEmpty()) {
+                markBinding(binding, SYNC_FAILED, "绑定没有域名", null);
+                return R.err("绑定没有域名");
+            }
 
             String recordType = resolveRecordType(binding.getRecordType(), setting.getRecordType());
             Map<Long, NodeDnsState> nodeStates = resolveNodeStates(nodeIds, recordType);
@@ -254,13 +286,16 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             }
 
             List<CloudflareDnsRecord> existingRecords = fetchManagedRecords(setting, binding);
-            Set<String> desiredRecordKeys = desiredTargets.stream()
-                    .map(this::targetContentKey)
-                    .collect(Collectors.toSet());
+            Set<String> desiredRecordKeys = new HashSet<>();
+            for (String domain : domains) {
+                for (CloudflareDnsTarget target : desiredTargets) {
+                    desiredRecordKeys.add(targetRecordKey(domain, target));
+                }
+            }
             upsertDesiredRecords(setting, binding, desiredTargets, existingRecords);
             deleteStaleRecords(setting, binding, existingRecords, unresolvedNodeIds, desiredRecordKeys);
 
-            String message = "DNS 同步成功，目标记录 " + desiredTargets.size() + " 条";
+            String message = "DNS 同步成功，域名 " + domains.size() + " 个，目标记录 " + (domains.size() * desiredTargets.size()) + " 条";
             if (smartPoolPlan != null) {
                 message += "，智能池活跃 " + smartPoolPlan.activeNodeIds.size()
                         + "/" + smartPoolPlan.desiredActiveCount
@@ -272,7 +307,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                 message += "，" + unresolvedNodeIds.size() + " 个活跃节点解析失败已保留旧记录";
             }
             markBinding(binding, SYNC_SUCCESS, message, desiredTargets);
-            updateSettingSyncStatus(setting, SYNC_SUCCESS, "最近由 " + trigger + " 触发: " + binding.getDomain());
+            updateSettingSyncStatus(setting, SYNC_SUCCESS, "最近由 " + trigger + " 触发: " + String.join(", ", domains));
             return R.ok(message);
         } catch (Exception e) {
             log.warn("Cloudflare DNS sync failed, bindingId={}, trigger={}, error={}", binding.getId(), trigger, e.getMessage());
@@ -525,18 +560,21 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                                       CloudflareDnsBinding binding,
                                       List<CloudflareDnsTarget> desiredTargets,
                                       List<CloudflareDnsRecord> existingRecords) {
+        List<String> domains = resolveDomains(binding);
         Map<String, CloudflareDnsRecord> existingByTarget = existingRecords.stream()
                 .collect(Collectors.toMap(this::recordContentKey, record -> record, (left, right) -> left));
 
         for (CloudflareDnsTarget target : desiredTargets) {
-            CloudflareDnsRecord existing = existingByTarget.get(targetContentKey(target));
-            CloudflareDnsRecord desiredRecord = buildDesiredRecord(setting, binding, target);
-            if (existing == null) {
-                cloudflareApiClient.createDnsRecord(setting.getZoneId(), setting.getApiToken(), desiredRecord);
-                continue;
-            }
-            if (shouldUpdateRecord(existing, desiredRecord)) {
-                cloudflareApiClient.updateDnsRecord(setting.getZoneId(), setting.getApiToken(), existing.getId(), desiredRecord);
+            for (String domain : domains) {
+                CloudflareDnsRecord existing = existingByTarget.get(targetRecordKey(domain, target));
+                CloudflareDnsRecord desiredRecord = buildDesiredRecord(setting, binding, domain, target);
+                if (existing == null) {
+                    cloudflareApiClient.createDnsRecord(setting.getZoneId(), setting.getApiToken(), desiredRecord);
+                    continue;
+                }
+                if (shouldUpdateRecord(existing, desiredRecord)) {
+                    cloudflareApiClient.updateDnsRecord(setting.getZoneId(), setting.getApiToken(), existing.getId(), desiredRecord);
+                }
             }
         }
     }
@@ -558,9 +596,12 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         }
     }
 
-    private CloudflareDnsRecord buildDesiredRecord(CloudflareDnsSetting setting, CloudflareDnsBinding binding, CloudflareDnsTarget target) {
+    private CloudflareDnsRecord buildDesiredRecord(CloudflareDnsSetting setting,
+                                                   CloudflareDnsBinding binding,
+                                                   String domain,
+                                                   CloudflareDnsTarget target) {
         CloudflareDnsRecord record = new CloudflareDnsRecord();
-        record.setName(binding.getDomain());
+        record.setName(domain);
         record.setType(target.getRecordType());
         record.setContent(target.getContent());
         record.setTtl(resolveTtl(setting.getTtl()));
@@ -571,11 +612,13 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
     private List<CloudflareDnsRecord> fetchManagedRecords(CloudflareDnsSetting setting, CloudflareDnsBinding binding) {
         List<CloudflareDnsRecord> records = new ArrayList<>();
-        for (String type : MANAGED_RECORD_TYPES) {
-            records.addAll(cloudflareApiClient.listDnsRecords(setting.getZoneId(), setting.getApiToken(), binding.getDomain(), type)
-                    .stream()
-                    .filter(record -> isManagedRecord(binding, record))
-                    .collect(Collectors.toList()));
+        for (String domain : resolveDomains(binding)) {
+            for (String type : MANAGED_RECORD_TYPES) {
+                records.addAll(cloudflareApiClient.listDnsRecords(setting.getZoneId(), setting.getApiToken(), domain, type)
+                        .stream()
+                        .filter(record -> isManagedRecord(binding, record))
+                        .collect(Collectors.toList()));
+            }
         }
         return records;
     }
@@ -595,6 +638,40 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             return TunnelNodeUtil.getInNodeIds(tunnel);
         }
         return TunnelNodeUtil.parseNodeIds(binding.getNodeIds());
+    }
+
+    private List<String> resolveDomains(CloudflareDnsBinding binding) {
+        if (binding == null || !StringUtils.hasText(binding.getDomain())) {
+            return new ArrayList<>();
+        }
+        try {
+            List<String> domains = JSON.parseArray(binding.getDomain(), String.class);
+            if (domains != null) {
+                return normalizeDomains(domains);
+            }
+        } catch (Exception ignored) {
+            // Legacy single-domain storage.
+        }
+        return normalizeDomains(Collections.singletonList(binding.getDomain()));
+    }
+
+    private List<String> normalizeDomains(List<String> rawDomains) {
+        LinkedHashSet<String> domains = new LinkedHashSet<>();
+        if (rawDomains != null) {
+            for (String rawDomain : rawDomains) {
+                if (!StringUtils.hasText(rawDomain)) {
+                    continue;
+                }
+                String domain = rawDomain.trim().toLowerCase(Locale.ROOT);
+                while (domain.endsWith(".")) {
+                    domain = domain.substring(0, domain.length() - 1);
+                }
+                if (!domain.isEmpty()) {
+                    domains.add(domain);
+                }
+            }
+        }
+        return new ArrayList<>(domains);
     }
 
     private List<CloudflareDnsTarget> resolveNodeTargets(Node node, String recordType) {
@@ -817,13 +894,15 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     }
 
     private String recordContentKey(CloudflareDnsRecord record) {
+        String name = record.getName() == null ? "" : record.getName().toLowerCase(Locale.ROOT);
         String type = record.getType() == null ? "" : record.getType().toUpperCase();
         String content = record.getContent() == null ? "" : record.getContent();
-        return type + "|" + content;
+        return name + "|" + type + "|" + content;
     }
 
-    private String targetContentKey(CloudflareDnsTarget target) {
-        return target.getRecordType() + "|" + target.getContent();
+    private String targetRecordKey(String domain, CloudflareDnsTarget target) {
+        String normalizedDomain = domain == null ? "" : domain.toLowerCase(Locale.ROOT);
+        return normalizedDomain + "|" + target.getRecordType() + "|" + target.getContent();
     }
 
     private Long extractCommentLong(String comment, String key) {

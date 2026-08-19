@@ -250,7 +250,7 @@ CREATE TABLE `cloudflare_dns_binding` (
   `updated_time` bigint(20) DEFAULT NULL,
   `status` int(10) DEFAULT NULL,
   `tunnel_id` int(10) DEFAULT NULL,
-  `domain` varchar(255) DEFAULT NULL,
+  `domain` longtext DEFAULT NULL,
   `node_ids` longtext DEFAULT NULL,
   `use_tunnel_nodes` int(10) DEFAULT NULL,
   `record_type` varchar(20) DEFAULT NULL,

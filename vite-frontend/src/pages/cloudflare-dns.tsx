@@ -77,7 +77,7 @@ interface Node {
 interface BindingForm {
   id?: number;
   tunnelId: number | null;
-  domain: string;
+  domains: string[];
   useTunnelNodes: boolean;
   nodeIds: number[];
   recordType: string;
@@ -95,7 +95,7 @@ const defaultSetting: CloudflareDnsSetting = {
 
 const defaultBindingForm: BindingForm = {
   tunnelId: null,
-  domain: "",
+  domains: [""],
   useTunnelNodes: true,
   nodeIds: [],
   recordType: "AUTO",
@@ -196,6 +196,55 @@ export default function CloudflareDnsPage() {
   };
 
   const nodeIdsToSelectedKeys = (ids: number[]) => new Set(ids.map((id) => id.toString()));
+
+  const normalizeDomainValue = (value: string) => {
+    let domain = value.trim().toLowerCase();
+    while (domain.endsWith(".")) {
+      domain = domain.slice(0, -1);
+    }
+    return domain;
+  };
+
+  const normalizeDomainList = (values: string[]) => {
+    const domains: string[] = [];
+    values.forEach((value) => {
+      const domain = normalizeDomainValue(value);
+      if (domain && !domains.includes(domain)) {
+        domains.push(domain);
+      }
+    });
+    return domains;
+  };
+
+  const parseBindingDomains = (value?: string) => {
+    if (!value?.trim()) {
+      return [""];
+    }
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        const domains = normalizeDomainList(parsed.map((item) => String(item || "")));
+        return domains.length > 0 ? domains : [""];
+      }
+    } catch {
+      // 兼容旧版本的单域名字段。
+    }
+    const domain = normalizeDomainValue(value);
+    return domain ? [domain] : [""];
+  };
+
+  const getBindingDomains = (binding: CloudflareDnsBinding) => parseBindingDomains(binding.domain).filter(Boolean);
+
+  const getBindingDomainSummary = (binding: CloudflareDnsBinding) => {
+    const domains = getBindingDomains(binding);
+    if (domains.length === 0) {
+      return "-";
+    }
+    if (domains.length === 1) {
+      return domains[0];
+    }
+    return `${domains[0]} +${domains.length - 1}`;
+  };
 
   const getTunnel = (id?: number) => tunnels.find((tunnel) => tunnel.id === id);
 
@@ -347,7 +396,7 @@ export default function CloudflareDnsPage() {
   };
 
   const openAddBinding = () => {
-    setBindingForm(defaultBindingForm);
+    setBindingForm({ ...defaultBindingForm, domains: [""] });
     setBindingModalOpen(true);
   };
 
@@ -355,7 +404,7 @@ export default function CloudflareDnsPage() {
     setBindingForm({
       id: binding.id,
       tunnelId: binding.tunnelId,
-      domain: binding.domain,
+      domains: parseBindingDomains(binding.domain),
       useTunnelNodes: binding.useTunnelNodes === undefined || binding.useTunnelNodes === 1,
       nodeIds: normalizeNodeIds(binding.nodeIds),
       recordType: binding.recordType || "AUTO",
@@ -370,8 +419,9 @@ export default function CloudflareDnsPage() {
       toast.error("请选择隧道");
       return;
     }
-    if (!bindingForm.domain.trim()) {
-      toast.error("请输入域名");
+    const domains = normalizeDomainList(bindingForm.domains);
+    if (domains.length === 0) {
+      toast.error("请至少输入一个域名");
       return;
     }
     if (!bindingForm.useTunnelNodes && bindingForm.nodeIds.length === 0) {
@@ -384,7 +434,8 @@ export default function CloudflareDnsPage() {
       const res = await saveCloudflareDnsBinding({
         id: bindingForm.id,
         tunnelId: bindingForm.tunnelId,
-        domain: bindingForm.domain,
+        domain: domains[0],
+        domains,
         useTunnelNodes: bindingForm.useTunnelNodes ? 1 : 0,
         nodeIds: bindingForm.nodeIds,
         recordType: bindingForm.recordType,
@@ -406,7 +457,7 @@ export default function CloudflareDnsPage() {
   };
 
   const handleDeleteBinding = async (binding: CloudflareDnsBinding) => {
-    if (!window.confirm(`确定删除 DNS 绑定 ${binding.domain} 吗？`)) {
+    if (!window.confirm(`确定删除 DNS 绑定 ${getBindingDomainSummary(binding)} 吗？`)) {
       return;
     }
     setBindingActionId(binding.id);
@@ -610,7 +661,7 @@ export default function CloudflareDnsPage() {
                     <CardHeader className="pb-2">
                       <div className="flex justify-between items-start w-full gap-3">
                         <div className="min-w-0">
-                          <h3 className="font-semibold text-sm text-foreground truncate">{binding.domain}</h3>
+                          <h3 className="font-semibold text-sm text-foreground truncate">{getBindingDomainSummary(binding)}</h3>
                           <p className="text-xs text-default-500 truncate">{getTunnelName(binding.tunnelId)}</p>
                         </div>
                         <Chip size="sm" variant="flat" color={getStatusColor(binding.lastSyncStatus) as any}>
@@ -743,13 +794,51 @@ export default function CloudflareDnsPage() {
               <ModalHeader>{bindingForm.id ? "编辑 DNS 绑定" : "新增 DNS 绑定"}</ModalHeader>
               <ModalBody>
                 <div className="space-y-4">
-                  <Input
-                    label="域名"
-                    placeholder="tunnel.example.com"
-                    value={bindingForm.domain}
-                    onChange={(e) => setBindingForm((prev) => ({ ...prev, domain: e.target.value }))}
-                    variant="bordered"
-                  />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm text-default-700">域名</span>
+                    </div>
+                    {bindingForm.domains.map((domain, index) => (
+                      <div key={index} className="flex items-center gap-2">
+                        <Input
+                          placeholder="tunnel.example.com"
+                          value={domain}
+                          onChange={(e) => setBindingForm((prev) => {
+                            const domains = [...prev.domains];
+                            domains[index] = e.target.value;
+                            return { ...prev, domains };
+                          })}
+                          variant="bordered"
+                        />
+                        <Button
+                          size="sm"
+                          variant="flat"
+                          color="danger"
+                          isIconOnly
+                          aria-label="删除域名"
+                          isDisabled={bindingForm.domains.length <= 1}
+                          onPress={() => setBindingForm((prev) => {
+                            if (prev.domains.length <= 1) {
+                              return prev;
+                            }
+                            return { ...prev, domains: prev.domains.filter((_, itemIndex) => itemIndex !== index) };
+                          })}
+                        >
+                          ×
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      size="sm"
+                      variant="flat"
+                      color="primary"
+                      isIconOnly
+                      aria-label="新增域名"
+                      onPress={() => setBindingForm((prev) => ({ ...prev, domains: [...prev.domains, ""] }))}
+                    >
+                      +
+                    </Button>
+                  </div>
 
                   <Select
                     label="隧道"

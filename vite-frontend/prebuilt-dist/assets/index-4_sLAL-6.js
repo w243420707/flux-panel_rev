@@ -1,4 +1,4 @@
-import { d as domAnimation } from "./index-B3KkIso2.js";
+import { d as domAnimation } from "./index-R0a7gtpC.js";
 var index_default = domAnimation;
 export {
   index_default as default

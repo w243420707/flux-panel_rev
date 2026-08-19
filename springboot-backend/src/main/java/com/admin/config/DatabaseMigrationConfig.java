@@ -30,6 +30,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("widen tunnel ip columns", () -> widenIpColumns(connection));
             runStep("create cloudflare dns tables", () -> createCloudflareTables(connection));
             runStep("add cloudflare dns smart pool columns", () -> addCloudflareSmartPoolColumns(connection));
+            runStep("widen cloudflare dns domain storage", () -> widenCloudflareDnsDomainStorage(connection));
             runStep("seed cloudflare dns setting", () -> seedCloudflareSetting(connection));
             runStep("add query indexes", () -> addQueryIndexes(connection));
             runStep("backfill tunnel node arrays", () -> backfillNodeArrays(connection));
@@ -221,7 +222,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                     "updated_time BIGINT NULL," +
                     "status INT NULL," +
                     "tunnel_id BIGINT NULL," +
-                    "domain VARCHAR(255) NULL," +
+                    "domain LONGTEXT NULL," +
                     "node_ids LONGTEXT NULL," +
                     "use_tunnel_nodes INT NULL," +
                     "record_type VARCHAR(20) NULL," +
@@ -253,6 +254,12 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_last_switch_at BIGINT NULL AFTER smart_pool_backup_node_ids");
         ensureColumn(connection, "cloudflare_dns_binding", "smart_pool_next_rotate_at",
                 "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_next_rotate_at BIGINT NULL AFTER smart_pool_last_switch_at");
+    }
+
+    private void widenCloudflareDnsDomainStorage(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE cloudflare_dns_binding MODIFY COLUMN domain LONGTEXT NULL");
+        }
     }
 
     private void seedCloudflareSetting(Connection connection) throws Exception {
