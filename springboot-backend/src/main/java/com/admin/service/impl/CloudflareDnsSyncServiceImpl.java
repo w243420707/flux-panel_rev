@@ -35,11 +35,12 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     private static final String RECORD_TYPE_AUTO = "AUTO";
     private static final String RECORD_TYPE_A = "A";
     private static final String RECORD_TYPE_AAAA = "AAAA";
+    private static final String RECORD_TYPE_CNAME = "CNAME";
     private static final String SYNC_SUCCESS = "SUCCESS";
     private static final String SYNC_FAILED = "FAILED";
     private static final String SYNC_SKIPPED = "SKIPPED";
     private static final String MANAGED_COMMENT_PREFIX = "flux-panel_rev";
-    private static final List<String> MANAGED_RECORD_TYPES = Arrays.asList(RECORD_TYPE_A, RECORD_TYPE_AAAA);
+    private static final List<String> MANAGED_RECORD_TYPES = Arrays.asList(RECORD_TYPE_A, RECORD_TYPE_AAAA, RECORD_TYPE_CNAME);
     private static final String WALL_STATUS_OK = "OK";
     private static final String WALL_STATUS_OBSERVING = "OBSERVING";
     private static final String WALL_STATUS_SUSPECTED_BLOCKED = "SUSPECTED_BLOCKED";
@@ -253,6 +254,8 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                 markBinding(binding, SYNC_FAILED, "绑定没有域名", null);
                 return R.err("绑定没有域名");
             }
+            String primaryDomain = domains.get(0);
+            List<String> aliasDomains = domains.size() > 1 ? domains.subList(1, domains.size()) : Collections.emptyList();
 
             String recordType = resolveRecordType(binding.getRecordType(), setting.getRecordType());
             Map<Long, NodeDnsState> nodeStates = resolveNodeStates(nodeIds, recordType);
@@ -285,17 +288,22 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                 return R.err(message);
             }
 
-            List<CloudflareDnsRecord> existingRecords = fetchManagedRecords(setting, binding);
-            Set<String> desiredRecordKeys = new HashSet<>();
-            for (String domain : domains) {
-                for (CloudflareDnsTarget target : desiredTargets) {
-                    desiredRecordKeys.add(targetRecordKey(domain, target));
-                }
-            }
-            upsertDesiredRecords(setting, binding, desiredTargets, existingRecords);
-            deleteStaleRecords(setting, binding, existingRecords, unresolvedNodeIds, desiredRecordKeys);
+            List<CloudflareDnsRecord> primaryExistingRecords = fetchManagedRecords(setting, binding, primaryDomain);
+            deleteRecordsByType(setting, primaryExistingRecords, RECORD_TYPE_CNAME);
+            primaryExistingRecords = filterManagedRecords(primaryExistingRecords, record -> !RECORD_TYPE_CNAME.equalsIgnoreCase(record.getType()));
 
-            String message = "DNS 同步成功，域名 " + domains.size() + " 个，目标记录 " + (domains.size() * desiredTargets.size()) + " 条";
+            Set<String> desiredRecordKeys = new HashSet<>();
+            for (CloudflareDnsTarget target : desiredTargets) {
+                desiredRecordKeys.add(targetRecordKey(primaryDomain, target));
+            }
+            upsertDesiredRecords(setting, binding, primaryDomain, desiredTargets, primaryExistingRecords);
+            deleteStaleRecords(setting, binding, primaryExistingRecords, unresolvedNodeIds, desiredRecordKeys);
+
+            for (String aliasDomain : aliasDomains) {
+                syncAliasDomain(setting, binding, aliasDomain, primaryDomain);
+            }
+
+            String message = "DNS 同步成功，主域名 1 个，别名 " + aliasDomains.size() + " 个，主记录 " + desiredTargets.size() + " 条";
             if (smartPoolPlan != null) {
                 message += "，智能池活跃 " + smartPoolPlan.activeNodeIds.size()
                         + "/" + smartPoolPlan.desiredActiveCount
@@ -558,25 +566,49 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
     private void upsertDesiredRecords(CloudflareDnsSetting setting,
                                       CloudflareDnsBinding binding,
+                                      String primaryDomain,
                                       List<CloudflareDnsTarget> desiredTargets,
                                       List<CloudflareDnsRecord> existingRecords) {
-        List<String> domains = resolveDomains(binding);
         Map<String, CloudflareDnsRecord> existingByTarget = existingRecords.stream()
                 .collect(Collectors.toMap(this::recordContentKey, record -> record, (left, right) -> left));
 
         for (CloudflareDnsTarget target : desiredTargets) {
-            for (String domain : domains) {
-                CloudflareDnsRecord existing = existingByTarget.get(targetRecordKey(domain, target));
-                CloudflareDnsRecord desiredRecord = buildDesiredRecord(setting, binding, domain, target);
-                if (existing == null) {
-                    cloudflareApiClient.createDnsRecord(setting.getZoneId(), setting.getApiToken(), desiredRecord);
-                    continue;
-                }
-                if (shouldUpdateRecord(existing, desiredRecord)) {
-                    cloudflareApiClient.updateDnsRecord(setting.getZoneId(), setting.getApiToken(), existing.getId(), desiredRecord);
-                }
+            CloudflareDnsRecord existing = existingByTarget.get(targetRecordKey(primaryDomain, target));
+            CloudflareDnsRecord desiredRecord = buildDesiredRecord(setting, binding, primaryDomain, target);
+            if (existing == null) {
+                cloudflareApiClient.createDnsRecord(setting.getZoneId(), setting.getApiToken(), desiredRecord);
+                continue;
+            }
+            if (shouldUpdateRecord(existing, desiredRecord)) {
+                cloudflareApiClient.updateDnsRecord(setting.getZoneId(), setting.getApiToken(), existing.getId(), desiredRecord);
             }
         }
+    }
+
+    private void syncAliasDomain(CloudflareDnsSetting setting,
+                                 CloudflareDnsBinding binding,
+                                 String aliasDomain,
+                                 String primaryDomain) {
+        List<CloudflareDnsRecord> aliasRecords = fetchManagedRecords(setting, binding, aliasDomain);
+        CloudflareDnsRecord desiredRecord = buildAliasRecord(setting, binding, aliasDomain, primaryDomain);
+        CloudflareDnsRecord existingCname = aliasRecords.stream()
+                .filter(record -> RECORD_TYPE_CNAME.equalsIgnoreCase(record.getType()))
+                .findFirst()
+                .orElse(null);
+        boolean hasConflict = aliasRecords.stream()
+                .anyMatch(record -> !RECORD_TYPE_CNAME.equalsIgnoreCase(record.getType()));
+
+        if (!hasConflict && existingCname != null) {
+            if (shouldUpdateRecord(existingCname, desiredRecord)) {
+                cloudflareApiClient.updateDnsRecord(setting.getZoneId(), setting.getApiToken(), existingCname.getId(), desiredRecord);
+            }
+            return;
+        }
+
+        if (!aliasRecords.isEmpty()) {
+            deleteManagedRecords(aliasRecords);
+        }
+        cloudflareApiClient.createDnsRecord(setting.getZoneId(), setting.getApiToken(), desiredRecord);
     }
 
     private void deleteStaleRecords(CloudflareDnsSetting setting,
@@ -596,6 +628,16 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         }
     }
 
+    private void deleteRecordsByType(CloudflareDnsSetting setting,
+                                     List<CloudflareDnsRecord> records,
+                                     String recordType) {
+        for (CloudflareDnsRecord record : records) {
+            if (record != null && recordType.equalsIgnoreCase(record.getType())) {
+                cloudflareApiClient.deleteDnsRecord(setting.getZoneId(), setting.getApiToken(), record.getId());
+            }
+        }
+    }
+
     private CloudflareDnsRecord buildDesiredRecord(CloudflareDnsSetting setting,
                                                    CloudflareDnsBinding binding,
                                                    String domain,
@@ -610,9 +652,35 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         return record;
     }
 
+    private CloudflareDnsRecord buildAliasRecord(CloudflareDnsSetting setting,
+                                                 CloudflareDnsBinding binding,
+                                                 String aliasDomain,
+                                                 String primaryDomain) {
+        CloudflareDnsRecord record = new CloudflareDnsRecord();
+        record.setName(aliasDomain);
+        record.setType(RECORD_TYPE_CNAME);
+        record.setContent(primaryDomain);
+        record.setTtl(resolveTtl(setting.getTtl()));
+        record.setProxied(false);
+        record.setComment(buildComment(binding, null, RECORD_TYPE_CNAME));
+        return record;
+    }
+
     private List<CloudflareDnsRecord> fetchManagedRecords(CloudflareDnsSetting setting, CloudflareDnsBinding binding) {
+        return fetchManagedRecords(setting, binding, resolveDomains(binding));
+    }
+
+    private List<CloudflareDnsRecord> fetchManagedRecords(CloudflareDnsSetting setting,
+                                                          CloudflareDnsBinding binding,
+                                                          String domain) {
+        return fetchManagedRecords(setting, binding, Collections.singletonList(domain));
+    }
+
+    private List<CloudflareDnsRecord> fetchManagedRecords(CloudflareDnsSetting setting,
+                                                          CloudflareDnsBinding binding,
+                                                          List<String> domains) {
         List<CloudflareDnsRecord> records = new ArrayList<>();
-        for (String domain : resolveDomains(binding)) {
+        for (String domain : domains) {
             for (String type : MANAGED_RECORD_TYPES) {
                 records.addAll(cloudflareApiClient.listDnsRecords(setting.getZoneId(), setting.getApiToken(), domain, type)
                         .stream()
@@ -627,6 +695,20 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         for (CloudflareDnsRecord record : fetchManagedRecords(setting, binding)) {
             cloudflareApiClient.deleteDnsRecord(setting.getZoneId(), setting.getApiToken(), record.getId());
         }
+    }
+
+    private void deleteManagedRecords(List<CloudflareDnsRecord> records) {
+        for (CloudflareDnsRecord record : records) {
+            cloudflareApiClient.deleteDnsRecord(setting.getZoneId(), setting.getApiToken(), record.getId());
+        }
+    }
+
+    private List<CloudflareDnsRecord> filterManagedRecords(List<CloudflareDnsRecord> records,
+                                                           java.util.function.Predicate<CloudflareDnsRecord> predicate) {
+        if (records == null || records.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return records.stream().filter(predicate).collect(Collectors.toList());
     }
 
     private List<Long> resolveNodeIds(CloudflareDnsBinding binding) {
@@ -884,7 +966,14 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     }
 
     private String buildComment(CloudflareDnsBinding binding, Long nodeId, String type) {
-        return MANAGED_COMMENT_PREFIX + "|binding=" + binding.getId() + "|node=" + nodeId + "|type=" + type;
+        StringBuilder builder = new StringBuilder(MANAGED_COMMENT_PREFIX)
+                .append("|binding=")
+                .append(binding.getId());
+        if (nodeId != null) {
+            builder.append("|node=").append(nodeId);
+        }
+        builder.append("|type=").append(type);
+        return builder.toString();
     }
 
     private boolean isManagedRecord(CloudflareDnsBinding binding, CloudflareDnsRecord record) {

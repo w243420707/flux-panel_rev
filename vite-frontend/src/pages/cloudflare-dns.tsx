@@ -243,7 +243,7 @@ export default function CloudflareDnsPage() {
     if (domains.length === 1) {
       return domains[0];
     }
-    return `${domains[0]} +${domains.length - 1}`;
+    return `${domains[0]} +${domains.length - 1} 别名`;
   };
 
   const getTunnel = (id?: number) => tunnels.find((tunnel) => tunnel.id === id);
@@ -801,7 +801,8 @@ export default function CloudflareDnsPage() {
                     {bindingForm.domains.map((domain, index) => (
                       <div key={index} className="flex items-center gap-2">
                         <Input
-                          placeholder="tunnel.example.com"
+                          label={index === 0 ? "主域名" : `别名 ${index}`}
+                          placeholder={index === 0 ? "主域名（A/AAAA）" : "别名域名（CNAME）"}
                           value={domain}
                           onChange={(e) => setBindingForm((prev) => {
                             const domains = [...prev.domains];
@@ -833,7 +834,7 @@ export default function CloudflareDnsPage() {
                       variant="flat"
                       color="primary"
                       isIconOnly
-                      aria-label="新增域名"
+                      aria-label="新增别名"
                       onPress={() => setBindingForm((prev) => ({ ...prev, domains: [...prev.domains, ""] }))}
                     >
                       +

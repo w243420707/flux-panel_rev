@@ -37,7 +37,6 @@ import {
   getForwardList, 
   updateForward, 
   deleteForward,
-  batchDeleteForwards,
   forceDeleteForward,
   userTunnel, 
   pauseForwardService,
@@ -93,16 +92,11 @@ interface ApiResult<T = any> {
   data?: T;
 }
 
-interface BatchDeleteFailure {
-  id: number;
-  message: string;
-}
-
 interface BatchDeleteResult {
   total: number;
   success: number;
   failed: number;
-  failures: BatchDeleteFailure[];
+  failures: Array<{ id: number; message: string }>;
   force?: boolean;
 }
 
@@ -540,25 +534,6 @@ export default function ForwardPage() {
     }
   };
 
-  const normalizeBatchDeleteResult = (res: ApiResult<BatchDeleteResult>, requestedIds: number[]): BatchDeleteResult => {
-    const data = res.data;
-    if (data) {
-      return {
-        total: Number(data.total || requestedIds.length),
-        success: Number(data.success || 0),
-        failed: Number(data.failed || 0),
-        failures: Array.isArray(data.failures) ? data.failures : [],
-        force: data.force
-      };
-    }
-    return {
-      total: requestedIds.length,
-      success: 0,
-      failed: requestedIds.length,
-      failures: requestedIds.map((id) => ({ id, message: res.msg || '删除失败' }))
-    };
-  };
-
   const handleBatchModeToggle = () => {
     if (batchDeleteLoading) {
       return;
@@ -583,9 +558,48 @@ export default function ForwardPage() {
 
     setBatchDeleteLoading(true);
     let remainingFailedIds: number[] = [];
+    const runDeleteQueue = async (ids: number[], force: boolean): Promise<BatchDeleteResult> => {
+      const failures: Array<{ id: number; message: string }> = [];
+      let success = 0;
+      const progressToastId = `batch-delete-${Date.now()}`;
+
+      try {
+        for (let index = 0; index < ids.length; index += 1) {
+          const id = ids[index];
+          toast.loading(
+            `${force ? '正在强制删除' : '正在删除'} ${index + 1}/${ids.length} 个转发...`,
+            { id: progressToastId }
+          );
+
+          try {
+            const res = force ? await forceDeleteForward(id) : await deleteForward(id);
+            if (res.code === 0) {
+              success += 1;
+            } else {
+              failures.push({ id, message: res.msg || '删除失败' });
+            }
+          } catch (error) {
+            failures.push({
+              id,
+              message: error instanceof Error ? error.message : '删除请求失败'
+            });
+          }
+        }
+      } finally {
+        toast.dismiss(progressToastId);
+      }
+
+      return {
+        total: ids.length,
+        success,
+        failed: failures.length,
+        failures,
+        force
+      };
+    };
+
     try {
-      const res = await batchDeleteForwards(validIds, false) as ApiResult<BatchDeleteResult>;
-      const result = normalizeBatchDeleteResult(res, validIds);
+      const result = await runDeleteQueue(validIds, false);
       remainingFailedIds = result.failures.map((failure) => failure.id).filter(Boolean);
 
       if (result.success > 0) {
@@ -602,8 +616,7 @@ export default function ForwardPage() {
         );
 
         if (forceConfirmed) {
-          const forceRes = await batchDeleteForwards(remainingFailedIds, true) as ApiResult<BatchDeleteResult>;
-          const forceResult = normalizeBatchDeleteResult(forceRes, remainingFailedIds);
+          const forceResult = await runDeleteQueue(remainingFailedIds, true);
           remainingFailedIds = forceResult.failures.map((failure) => failure.id).filter(Boolean);
           if (forceResult.success > 0) {
             toast.success(`已强制删除 ${forceResult.success} 个失败项`);
