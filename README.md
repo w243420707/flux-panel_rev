@@ -105,6 +105,14 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 ## 更新日志
 
+### 2026-08-19 v1.3.10
+
+- 节点端公网 IP 改为后台定时刷新并并行探测，心跳会直接带上最新的 `public_ip` / `public_ipv4` / `public_ipv6`。
+- 面板端收到节点心跳后会即时更新节点表里的运行时 IP，并同步刷新节点管理页面显示。
+- 节点管理里的公网 IP 刷新与 Cloudflare DNS 同步开关解耦，开关只控制 DNS 是否自动同步。
+- 补充数据库迁移：旧数据里 `auto_update_node_ip` 为空时自动回填为 `1`，避免老库升级后节点 IP 长期不更新。
+- 重新构建并提交 `go-gost/releases/` 下的 Linux 节点二进制。
+
 ### 2026-08-19 v1.3.9
 
 - 修复 Cloudflare DNS 别名同步里的后端编译错误，恢复 VPS 更新时的后端构建流程。

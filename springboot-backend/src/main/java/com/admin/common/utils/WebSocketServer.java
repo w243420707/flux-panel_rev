@@ -77,6 +77,10 @@ public class WebSocketServer extends TextWebSocketHandler {
                 String decryptedPayload = decryptMessageIfNeeded(message.getPayload(), nodeSecret);
 
                 if (decryptedPayload.contains("memory_usage")){
+                    if (Objects.equals(type, "1")) {
+                        handleNodeSystemInfo(id, session, decryptedPayload);
+                    }
+                    sendToUser(session, "{\"type\":\"call\"}", nodeSecret);
                     // 先发送确认消息
                     sendToUser(session, "{\"type\":\"call\"}", nodeSecret);
                 }else if (decryptedPayload.contains("requestId")) {
@@ -141,6 +145,62 @@ public class WebSocketServer extends TextWebSocketHandler {
         } catch (Exception e) {
             log.info("处理WebSocket消息时发生异常: {}", e.getMessage(), e);
         }
+    }
+
+    private void handleNodeSystemInfo(String id, WebSocketSession session, String payload) {
+        try {
+            JSONObject info = JSONObject.parseObject(payload);
+            String publicIp = firstNonBlank(info.getString("public_ip"), info.getString("publicIp"), info.getString("host_ip"));
+            String publicIpv4 = firstNonBlank(info.getString("public_ipv4"), info.getString("publicIpv4"));
+            String publicIpv6 = firstNonBlank(info.getString("public_ipv6"), info.getString("publicIpv6"));
+            if (StringUtils.isBlank(publicIp) && StringUtils.isBlank(publicIpv4) && StringUtils.isBlank(publicIpv6)) {
+                return;
+            }
+            if (!runtimeIpsChanged(session, publicIp, publicIpv4, publicIpv6)) {
+                return;
+            }
+
+            Long nodeId = Long.valueOf(id);
+            String clientIp = (String) session.getAttributes().get("clientIp");
+            nodeService.refreshRuntimeNodeServerIp(nodeId, publicIp, publicIpv4, publicIpv6, clientIp);
+            rememberRuntimeIps(session, publicIp, publicIpv4, publicIpv6);
+        } catch (Exception e) {
+            log.info("刷新节点公网IP失败: {}", e.getMessage());
+        }
+    }
+
+    private boolean runtimeIpsChanged(WebSocketSession session, String publicIp, String publicIpv4, String publicIpv6) {
+        return !Objects.equals(normalizeRuntimeIp(publicIp), session.getAttributes().get("lastPublicIp"))
+                || !Objects.equals(normalizeRuntimeIp(publicIpv4), session.getAttributes().get("lastPublicIpv4"))
+                || !Objects.equals(normalizeRuntimeIp(publicIpv6), session.getAttributes().get("lastPublicIpv6"));
+    }
+
+    private void rememberRuntimeIps(WebSocketSession session, String publicIp, String publicIpv4, String publicIpv6) {
+        rememberRuntimeIp(session, "lastPublicIp", publicIp);
+        rememberRuntimeIp(session, "lastPublicIpv4", publicIpv4);
+        rememberRuntimeIp(session, "lastPublicIpv6", publicIpv6);
+    }
+
+    private void rememberRuntimeIp(WebSocketSession session, String key, String value) {
+        String normalized = normalizeRuntimeIp(value);
+        if (normalized == null) {
+            session.getAttributes().remove(key);
+        } else {
+            session.getAttributes().put(key, normalized);
+        }
+    }
+
+    private String normalizeRuntimeIp(String value) {
+        return StringUtils.isBlank(value) ? null : value.trim();
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (StringUtils.isNotBlank(value)) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     /**
@@ -262,6 +322,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                     // 更新状态和版本信息
                     if (nodePublicIp != null || nodePublicIpv4 != null || nodePublicIpv6 != null || clientIp != null) {
                         nodeService.refreshRuntimeNodeServerIp(nodeId, nodePublicIp, nodePublicIpv4, nodePublicIpv6, clientIp);
+                        rememberRuntimeIps(session, nodePublicIp, nodePublicIpv4, nodePublicIpv6);
                         node = nodeService.getById(nodeId);
                     }
                     node.setStatus(1);

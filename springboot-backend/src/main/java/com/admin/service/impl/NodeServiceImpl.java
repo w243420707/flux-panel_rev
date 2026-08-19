@@ -361,10 +361,6 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         String oldServerIpv4 = normalizeNodeAddress(node.getServerIpv4());
         String oldServerIpv6 = normalizeNodeAddress(node.getServerIpv6());
         String oldEntryIp = normalizeNodeAddress(node.getIp());
-        if (!autoUpdateEnabled && StrUtil.isNotBlank(oldServerIp)) {
-            return false;
-        }
-
         boolean entryIpFollowsServer = StrUtil.isBlank(oldEntryIp)
                 || Objects.equals(oldEntryIp, oldServerIp)
                 || Objects.equals(oldEntryIp, oldServerIpv4)
@@ -395,7 +391,9 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         if (updated) {
             refreshMultiNodeTunnelIps(id);
             refreshForwardConfigsByNode(id);
-            syncCloudflareDnsByNode(id, "node-runtime-ip");
+            if (autoUpdateEnabled) {
+                syncCloudflareDnsByNode(id, "node-runtime-ip");
+            }
         }
         return updated;
     }

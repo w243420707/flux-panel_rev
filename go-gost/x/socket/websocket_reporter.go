@@ -30,6 +30,9 @@ type SystemInfo struct {
 	BytesTransmitted uint64  `json:"bytes_transmitted"` // 发送字节数
 	CPUUsage         float64 `json:"cpu_usage"`         // CPU使用率（百分比）
 	MemoryUsage      float64 `json:"memory_usage"`      // 内存使用率（百分比）
+	PublicIP         string  `json:"public_ip,omitempty"`
+	PublicIPv4       string  `json:"public_ipv4,omitempty"`
+	PublicIPv6       string  `json:"public_ipv6,omitempty"`
 }
 
 // NetworkStats 网络统计信息
@@ -96,8 +99,12 @@ type WebSocketReporter struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	connected      bool
-	connecting     bool              // 新增：正在连接状态
-	connMutex      sync.Mutex        // 新增：连接状态锁
+	connecting     bool       // 新增：正在连接状态
+	connMutex      sync.Mutex // 新增：连接状态锁
+	publicIPMutex  sync.RWMutex
+	publicIP       string
+	publicIPv4     string
+	publicIPv6     string
 	aesCrypto      *crypto.AESCrypto // 新增：AES加密器
 }
 
@@ -118,7 +125,7 @@ func NewWebSocketReporter(serverURL string, secret string) *WebSocketReporter {
 		url:            serverURL,
 		reconnectTime:  5 * time.Second,  // 重连间隔
 		pingInterval:   2 * time.Second,  // 发送间隔改为2秒
-		configInterval: 10 * time.Minute, // 配置上报间隔
+		configInterval: 30 * time.Second, // 公网IP刷新间隔
 		ctx:            ctx,
 		cancel:         cancel,
 		connected:      false,
@@ -212,6 +219,7 @@ func (w *WebSocketReporter) connect() error {
 		if publicIP == "" {
 			publicIP = publicIPv6
 		}
+		w.setPublicIPs(publicIP, publicIPv4, publicIPv6)
 		currentURL = buildWebSocketURL(w.addr, w.secret, w.version, publicIP, publicIPv4, publicIPv6)
 		w.url = currentURL
 	}
@@ -266,6 +274,10 @@ func (w *WebSocketReporter) handleConnection() {
 	// 启动消息接收goroutine
 	go w.receiveMessages()
 
+	refreshDone := make(chan struct{})
+	go w.refreshPublicIPs(refreshDone)
+	defer close(refreshDone)
+
 	// 主发送循环
 	ticker := time.NewTicker(w.pingInterval)
 	defer ticker.Stop()
@@ -299,6 +311,7 @@ func (w *WebSocketReporter) collectSystemInfo() SystemInfo {
 	networkStats := getNetworkStats()
 	cpuInfo := getCPUInfo()
 	memoryInfo := getMemoryInfo()
+	publicIP, publicIPv4, publicIPv6 := w.getPublicIPs()
 
 	return SystemInfo{
 		Uptime:           getUptime(),
@@ -306,7 +319,60 @@ func (w *WebSocketReporter) collectSystemInfo() SystemInfo {
 		BytesTransmitted: networkStats.BytesTransmitted,
 		CPUUsage:         cpuInfo.Usage,
 		MemoryUsage:      memoryInfo.Usage,
+		PublicIP:         publicIP,
+		PublicIPv4:       publicIPv4,
+		PublicIPv6:       publicIPv6,
 	}
+}
+
+func (w *WebSocketReporter) refreshPublicIPs(done <-chan struct{}) {
+	ticker := time.NewTicker(w.configInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-w.ctx.Done():
+			return
+		case <-done:
+			return
+		case <-ticker.C:
+			publicIPv4, publicIPv6 := detectPublicIPs()
+			if publicIPv4 == "" && publicIPv6 == "" {
+				continue
+			}
+
+			publicIP := publicIPv4
+			if publicIP == "" {
+				publicIP = publicIPv6
+			}
+			w.setPublicIPs(publicIP, publicIPv4, publicIPv6)
+		}
+	}
+}
+
+func (w *WebSocketReporter) setPublicIPs(publicIP, publicIPv4, publicIPv6 string) {
+	w.publicIPMutex.Lock()
+	defer w.publicIPMutex.Unlock()
+
+	if publicIPv4 != "" {
+		w.publicIPv4 = publicIPv4
+	}
+	if publicIPv6 != "" {
+		w.publicIPv6 = publicIPv6
+	}
+	if publicIP != "" {
+		w.publicIP = publicIP
+	} else if w.publicIPv4 != "" {
+		w.publicIP = w.publicIPv4
+	} else {
+		w.publicIP = w.publicIPv6
+	}
+}
+
+func (w *WebSocketReporter) getPublicIPs() (string, string, string) {
+	w.publicIPMutex.RLock()
+	defer w.publicIPMutex.RUnlock()
+	return w.publicIP, w.publicIPv4, w.publicIPv6
 }
 
 // sendSystemInfo 发送系统信息
@@ -1044,8 +1110,19 @@ func detectPublicIPs() (string, string) {
 		"https://cloudflare.com/cdn-cgi/trace",
 	}
 
-	publicIPv4 := detectPublicIPWithNetwork("tcp4", endpoints)
-	publicIPv6 := detectPublicIPWithNetwork("tcp6", endpoints)
+	var publicIPv4 string
+	var publicIPv6 string
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		publicIPv4 = detectPublicIPWithNetwork("tcp4", endpoints)
+	}()
+	go func() {
+		defer wg.Done()
+		publicIPv6 = detectPublicIPWithNetwork("tcp6", endpoints)
+	}()
+	wg.Wait()
 	if publicIPv4 != "" {
 		fmt.Printf("🌐 检测到公网IPv4: %s\n", publicIPv4)
 	}
@@ -1059,7 +1136,10 @@ func detectPublicIPs() (string, string) {
 }
 
 func detectPublicIPWithNetwork(network string, endpoints []string) string {
-	dialer := &net.Dialer{Timeout: 3 * time.Second}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dialer := &net.Dialer{Timeout: 2 * time.Second}
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
@@ -1068,30 +1148,60 @@ func detectPublicIPWithNetwork(network string, endpoints []string) string {
 	}
 	defer transport.CloseIdleConnections()
 
-	client := &http.Client{Timeout: 3 * time.Second, Transport: transport}
-	for _, endpoint := range endpoints {
-		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
-		if err != nil {
-			continue
-		}
-		req.Header.Set("User-Agent", "flux-panel-node/1.2.1")
-		resp, err := client.Do(req)
-		if err != nil {
-			continue
-		}
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		if readErr != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			continue
-		}
+	client := &http.Client{Timeout: 2 * time.Second, Transport: transport}
+	results := make(chan string, 1)
+	var wg sync.WaitGroup
 
-		ip := parsePublicIPResponse(string(body))
-		if ip != "" && isPublicIPLiteral(ip) {
-			return ip
-		}
+	for _, endpoint := range endpoints {
+		endpoint := endpoint
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+			if err != nil {
+				return
+			}
+			req.Header.Set("User-Agent", "flux-panel-node/1.3.10")
+			resp, err := client.Do(req)
+			if err != nil {
+				return
+			}
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			if readErr != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				return
+			}
+
+			ip := parsePublicIPResponse(string(body))
+			if ip != "" && isPublicIPLiteral(ip) {
+				select {
+				case results <- ip:
+				default:
+				}
+			}
+		}()
 	}
 
-	return ""
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case ip := <-results:
+		cancel()
+		wg.Wait()
+		return ip
+	case <-done:
+		select {
+		case ip := <-results:
+			return ip
+		default:
+		}
+		return ""
+	}
 }
 
 func parsePublicIPResponse(body string) string {

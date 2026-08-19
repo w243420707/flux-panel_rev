@@ -209,6 +209,29 @@ export default function NodePage() {
               systemInfo = messageData;
             }
 
+            const getRuntimeIp = (...keys: string[]) => {
+              for (const key of keys) {
+                const value = systemInfo?.[key];
+                if (typeof value === "string" && value.trim()) {
+                  return value.trim();
+                }
+              }
+              return "";
+            };
+            const publicIp = getRuntimeIp("public_ip", "publicIp", "host_ip");
+            const publicIpv4 = getRuntimeIp("public_ipv4", "publicIpv4");
+            const publicIpv6 = getRuntimeIp("public_ipv6", "publicIpv6");
+            const hasRuntimeIp = Boolean(publicIp || publicIpv4 || publicIpv6);
+            const nextServerIp = publicIp || publicIpv4 || publicIpv6 || node.serverIp;
+            const currentRuntimeIps = [node.serverIp, node.serverIpv4, node.serverIpv6].filter(Boolean);
+            const entryFollowsRuntimeIp = !node.ip || currentRuntimeIps.includes(node.ip);
+            const runtimeIpPatch = hasRuntimeIp ? {
+              ip: entryFollowsRuntimeIp ? nextServerIp : node.ip,
+              serverIp: nextServerIp,
+              serverIpv4: publicIpv4 || node.serverIpv4,
+              serverIpv6: publicIpv6 || node.serverIpv6,
+            } : {};
+
             const hasSystemMetrics =
               systemInfo &&
               (
@@ -219,7 +242,11 @@ export default function NodePage() {
                 Object.prototype.hasOwnProperty.call(systemInfo, "uptime")
               );
             if (!hasSystemMetrics) {
-              return node;
+              return hasRuntimeIp ? {
+                ...node,
+                ...runtimeIpPatch,
+                connectionStatus: 'online'
+              } : node;
             }
             
             const currentUpload = parseInt(systemInfo.bytes_transmitted) || 0;
@@ -254,6 +281,7 @@ export default function NodePage() {
             
             return {
               ...node,
+              ...runtimeIpPatch,
               connectionStatus: 'online',
               systemInfo: {
                 cpuUsage: parseFloat(systemInfo.cpu_usage) || 0,

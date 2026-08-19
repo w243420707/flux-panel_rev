@@ -32,6 +32,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("add cloudflare dns smart pool columns", () -> addCloudflareSmartPoolColumns(connection));
             runStep("widen cloudflare dns domain storage", () -> widenCloudflareDnsDomainStorage(connection));
             runStep("seed cloudflare dns setting", () -> seedCloudflareSetting(connection));
+            runStep("backfill cloudflare auto node ip setting", () -> backfillCloudflareAutoNodeIpSetting(connection));
             runStep("add query indexes", () -> addQueryIndexes(connection));
             runStep("backfill tunnel node arrays", () -> backfillNodeArrays(connection));
         } catch (Exception e) {
@@ -267,6 +268,12 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             statement.executeUpdate("INSERT IGNORE INTO cloudflare_dns_setting " +
                     "(id, created_time, updated_time, status, enabled, ttl, proxied, record_type, sync_interval_seconds, auto_update_node_ip) VALUES " +
                     "(1, UNIX_TIMESTAMP() * 1000, UNIX_TIMESTAMP() * 1000, 1, 0, 1, 0, 'AUTO', 120, 1)");
+        }
+    }
+
+    private void backfillCloudflareAutoNodeIpSetting(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("UPDATE cloudflare_dns_setting SET auto_update_node_ip = 1 WHERE auto_update_node_ip IS NULL");
         }
     }
 
