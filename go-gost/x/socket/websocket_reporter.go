@@ -87,6 +87,26 @@ type TcpPingResponse struct {
 	RequestId    string  `json:"requestId,omitempty"`
 }
 
+// UdpPingRequest UDP ping请求结构体
+type UdpPingRequest struct {
+	IP        string `json:"ip"`
+	Port      int    `json:"port"`
+	Count     int    `json:"count"`
+	Timeout   int    `json:"timeout"`
+	RequestId string `json:"requestId,omitempty"`
+}
+
+// UdpPingResponse UDP ping响应结构体
+type UdpPingResponse struct {
+	IP           string  `json:"ip"`
+	Port         int     `json:"port"`
+	Success      bool    `json:"success"`
+	AverageTime  float64 `json:"averageTime"`
+	PacketLoss   float64 `json:"packetLoss"`
+	ErrorMessage string  `json:"errorMessage,omitempty"`
+	RequestId    string  `json:"requestId,omitempty"`
+}
+
 type WebSocketReporter struct {
 	url            string
 	addr           string
@@ -616,6 +636,13 @@ func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
 		tcpPingResult, err = w.handleTcpPing(cmd.Data)
 		response.Type = "TcpPingResponse"
 		response.Data = tcpPingResult
+
+	// UDP Ping 诊断命令
+	case "UdpPing":
+		var udpPingResult UdpPingResponse
+		udpPingResult, err = w.handleUdpPing(cmd.Data)
+		response.Type = "UdpPingResponse"
+		response.Data = udpPingResult
 
 	default:
 		err = fmt.Errorf("未知命令类型: %s", cmd.Type)
@@ -1162,7 +1189,7 @@ func detectPublicIPWithNetwork(network string, endpoints []string) string {
 			if err != nil {
 				return
 			}
-			req.Header.Set("User-Agent", "flux-panel-node/1.3.10")
+			req.Header.Set("User-Agent", "flux-panel-node/1.3.13")
 			resp, err := client.Do(req)
 			if err != nil {
 				return
@@ -1362,6 +1389,114 @@ func tcpPingHost(ip string, port int, count int, timeoutMs int) (float64, float6
 	fmt.Printf("✅ TCP ping完成: 平均连接时间 %.2fms，失败率 %.1f%%\n", avgTime, packetLoss)
 
 	return avgTime, packetLoss, nil
+}
+
+// handleUdpPing 处理UDP ping诊断命令
+func (w *WebSocketReporter) handleUdpPing(data interface{}) (UdpPingResponse, error) {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return UdpPingResponse{}, fmt.Errorf("序列化UDP ping数据失败: %v", err)
+	}
+
+	var req UdpPingRequest
+	if err := json.Unmarshal(jsonData, &req); err != nil {
+		return UdpPingResponse{}, fmt.Errorf("解析UDP ping请求失败: %v", err)
+	}
+
+	if req.Count <= 0 {
+		req.Count = 2
+	}
+	if req.Timeout <= 0 {
+		req.Timeout = 5000
+	}
+
+	avgTime, packetLoss, hasResponse, err := udpPingHost(req.IP, req.Port, req.Count, req.Timeout)
+
+	response := UdpPingResponse{
+		IP:        req.IP,
+		Port:      req.Port,
+		RequestId: req.RequestId,
+	}
+
+	if err != nil {
+		response.Success = false
+		response.ErrorMessage = err.Error()
+		return response, nil
+	}
+
+	response.Success = true
+	response.AverageTime = avgTime
+	response.PacketLoss = packetLoss
+	if !hasResponse {
+		response.ErrorMessage = "UDP发送成功，未收到回包"
+	}
+
+	return response, nil
+}
+
+// udpPingHost 执行UDP探测，返回平均响应时间和丢包率
+func udpPingHost(ip string, port int, count int, timeoutMs int) (float64, float64, bool, error) {
+	var totalTime float64
+	var responseCount int
+	var sendSuccessCount int
+
+	timeout := time.Duration(timeoutMs) * time.Millisecond
+	target := net.JoinHostPort(ip, fmt.Sprintf("%d", port))
+
+	fmt.Printf("开始UDP探测: %s, 次数 %d, 超时 %dms\n", target, count, timeoutMs)
+
+	for i := 0; i < count; i++ {
+		start := time.Now()
+
+		conn, err := net.DialTimeout("udp", target, timeout)
+		if err != nil {
+			fmt.Printf("  第%d次UDP探测连接失败: %v\n", i+1, err)
+		} else {
+			if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+				fmt.Printf("  第%d次UDP探测设置超时失败: %v\n", i+1, err)
+			}
+
+			if _, err := conn.Write([]byte("flux-panel-udp-ping")); err != nil {
+				fmt.Printf("  第%d次UDP探测发送失败: %v\n", i+1, err)
+			} else {
+				sendSuccessCount++
+				buf := make([]byte, 64)
+				if _, err := conn.Read(buf); err != nil {
+					if ne, ok := err.(net.Error); ok && ne.Timeout() {
+						fmt.Printf("  第%d次UDP探测已发送，但未收到回包\n", i+1)
+					} else {
+						conn.Close()
+						return 0, 100.0, false, fmt.Errorf("UDP探测失败: %v", err)
+					}
+				} else {
+					elapsed := time.Since(start).Seconds() * 1000
+					totalTime += elapsed
+					responseCount++
+					fmt.Printf("  第%d次UDP探测收到回包: %.2fms\n", i+1, elapsed)
+				}
+			}
+			conn.Close()
+		}
+
+		if i < count-1 {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	if sendSuccessCount == 0 {
+		return 0, 100.0, false, fmt.Errorf("所有UDP探测尝试都失败")
+	}
+
+	if responseCount == 0 {
+		return -1, -1, false, nil
+	}
+
+	avgTime := totalTime / float64(responseCount)
+	packetLoss := float64(count-responseCount) / float64(count) * 100
+
+	fmt.Printf("UDP探测完成: 平均响应时间 %.2fms，失败率 %.1f%%\n", avgTime, packetLoss)
+
+	return avgTime, packetLoss, true, nil
 }
 
 // isValidHostname 验证主机名格式

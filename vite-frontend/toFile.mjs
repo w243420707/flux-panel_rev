@@ -14,4 +14,8 @@ if (/<script\b[^>]*\bnomodule\b/i.test(resultText)) {
 }
 
 fs.writeFileSync(distPath, resultText, 'utf8');
+
+const prebuiltPath = './prebuilt-dist';
+fs.rmSync(prebuiltPath, { recursive: true, force: true });
+fs.cpSync('./dist', prebuiltPath, { recursive: true });
 console.timeEnd('转换耗时');

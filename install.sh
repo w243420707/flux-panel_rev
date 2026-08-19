@@ -233,9 +233,45 @@ download_binary() {
     die "Download failed. Make sure the repository contains $(binary_name) under go-gost/releases/."
   }
 
+  chmod 755 "${tmp_file}"
+  verify_binary_checksum "${tmp_file}" "$(binary_name)"
+  verify_binary "${tmp_file}"
   install -m 755 "${tmp_file}" "${INSTALL_DIR}/${APP_NAME}"
   rm -f "${tmp_file}"
-  verify_binary "${INSTALL_DIR}/${APP_NAME}"
+}
+
+verify_binary_checksum() {
+  local bin="$1" manifest_name="${2:-$(basename "$1")}" manifest_url manifest_file expected actual
+
+  if [[ -n "${GOST_BINARY_URL:-}" ]]; then
+    warn "Custom binary URL detected; skipped repository checksum verification."
+    return 0
+  fi
+
+  if ! command -v sha256sum >/dev/null 2>&1; then
+    warn "Cannot find sha256sum; skipped checksum verification."
+    return 0
+  fi
+
+  manifest_url="${RAW_BINARY_BASE_URL}/SHA256SUMS"
+  manifest_file="$(mktemp)"
+  if ! curl -fsSL --retry 3 --retry-delay 2 "${manifest_url}" -o "${manifest_file}"; then
+    rm -f "${manifest_file}"
+    warn "Checksum manifest not found; skipped checksum verification."
+    return 0
+  fi
+
+  expected="$(awk -v name="${manifest_name}" '$2 == name {print $1; exit}' "${manifest_file}")"
+  rm -f "${manifest_file}"
+
+  if [[ -z "${expected}" ]]; then
+    warn "Checksum manifest does not include ${manifest_name}; skipped checksum verification."
+    return 0
+  fi
+
+  actual="$(sha256sum "${bin}" | awk '{print $1}')"
+  [[ "${actual}" == "${expected}" ]] || die "Checksum verification failed for ${manifest_name}."
+  log "Binary checksum verification passed."
 }
 
 verify_binary() {

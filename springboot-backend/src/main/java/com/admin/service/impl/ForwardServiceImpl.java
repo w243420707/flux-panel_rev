@@ -51,6 +51,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     private static final int FORWARD_STATUS_ERROR = -1;
     private static final int TUNNEL_STATUS_ACTIVE = 1;
     private static final int PORT_CONFLICT_CODE = -409;
+    private static final Set<String> UDP_LIKE_PROTOCOLS = new HashSet<>(Arrays.asList("udp", "quic", "dtls", "http3", "hy2", "hysteria2"));
 
     private static final long BYTES_TO_GB = 1024L * 1024L * 1024L;
     private final Object forwardConfigLock = new Object();
@@ -626,10 +627,11 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
 
         List<CompletableFuture<DiagnosisResult>> diagnosisTasks = new ArrayList<>();
+        boolean udpMode = isUdpLikeProtocol(tunnel.getProtocol());
         String[] remoteAddresses = forward.getRemoteAddr().split(",");
         // 6. 根据隧道类型执行不同的诊断策略
         if (tunnel.getType() == TUNNEL_TYPE_PORT_FORWARD) {
-            // 端口转发：入口节点直接TCP ping目标地址
+            // 端口转发：入口节点直接探测目标地址
             for (Node inNode : nodeInfo.getInNodes()) {
                 for (String remoteAddress : remoteAddresses) {
                     // 提取IP和端口
@@ -639,19 +641,18 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                         return R.err("无法解析目标地址: " + remoteAddress);
                     }
 
-                    diagnosisTasks.add(runDiagnosisAsync(inNode, targetIp, targetPort, "转发->目标"));
+                    diagnosisTasks.add(runDiagnosisAsync(inNode, targetIp, targetPort, udpMode ? "转发->目标 (UDP)" : "转发->目标", udpMode));
                 }
             }
         } else {
-            // 隧道转发：入口TCP ping出口，出口TCP ping目标
-            // 入口TCP ping出口（使用转发的出口端口）
+            // 隧道转发：入口探测出口，出口探测目标
             for (Node inNode : nodeInfo.getInNodes()) {
                 for (Node outNode : nodeInfo.getOutNodes()) {
-                    diagnosisTasks.add(runDiagnosisAsync(inNode, resolveNodeServerAddress(outNode), forward.getOutPort(), "入口->出口: " + outNode.getName()));
+                    diagnosisTasks.add(runDiagnosisAsync(inNode, resolveNodeServerAddress(outNode), forward.getOutPort(), udpMode ? "入口->出口: " + outNode.getName() + " (UDP)" : "入口->出口: " + outNode.getName(), udpMode));
                 }
             }
 
-            // 出口TCP ping目标
+            // 出口探测目标
             for (Node outNode : nodeInfo.getOutNodes()) {
                 for (String remoteAddress : remoteAddresses) {
                     // 提取IP和端口
@@ -660,7 +661,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                     if (targetIp == null || targetPort == -1) {
                         return R.err("无法解析目标地址: " + remoteAddress);
                     }
-                    diagnosisTasks.add(runDiagnosisAsync(outNode, targetIp, targetPort, "出口->目标"));
+                    diagnosisTasks.add(runDiagnosisAsync(outNode, targetIp, targetPort, udpMode ? "出口->目标 (UDP)" : "出口->目标", udpMode));
                 }
             }
         }
@@ -681,7 +682,20 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     private CompletableFuture<DiagnosisResult> runDiagnosisAsync(Node node, String targetIp, int targetPort, String description) {
-        return CompletableFuture.supplyAsync(() -> performTcpPingDiagnosis(node, targetIp, targetPort, description), diagnosisExecutor);
+        return runDiagnosisAsync(node, targetIp, targetPort, description, false);
+    }
+
+    private CompletableFuture<DiagnosisResult> runDiagnosisAsync(Node node, String targetIp, int targetPort, String description, boolean udpMode) {
+        return CompletableFuture.supplyAsync(() -> udpMode
+                ? performUdpPingDiagnosis(node, targetIp, targetPort, description)
+                : performTcpPingDiagnosis(node, targetIp, targetPort, description), diagnosisExecutor);
+    }
+
+    private boolean isUdpLikeProtocol(String protocol) {
+        if (protocol == null) {
+            return false;
+        }
+        return UDP_LIKE_PROTOCOLS.contains(protocol.trim().toLowerCase(Locale.ROOT));
     }
 
     @Override
@@ -873,6 +887,83 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                     result.setMessage("TCP连接成功，但无法解析详细数据");
                     result.setAverageTime(0.0);
                     result.setPacketLoss(0.0);
+                }
+            } else {
+                result.setSuccess(false);
+                result.setMessage(gostResult != null ? gostResult.getMsg() : "节点无响应");
+                result.setAverageTime(-1.0);
+                result.setPacketLoss(100.0);
+            }
+
+            return result;
+        } catch (Exception e) {
+            DiagnosisResult result = new DiagnosisResult();
+            result.setNodeId(node.getId());
+            result.setNodeName(node.getName());
+            result.setTargetIp(targetIp);
+            result.setTargetPort(port);
+            result.setDescription(description);
+            result.setSuccess(false);
+            result.setMessage("诊断执行异常: " + e.getMessage());
+            result.setTimestamp(System.currentTimeMillis());
+            result.setAverageTime(-1.0);
+            result.setPacketLoss(100.0);
+            return result;
+        }
+    }
+
+    private DiagnosisResult performUdpPingDiagnosis(Node node, String targetIp, int port, String description) {
+        try {
+            JSONObject udpPingData = new JSONObject();
+            udpPingData.put("ip", targetIp);
+            udpPingData.put("port", port);
+            udpPingData.put("count", 2);
+            udpPingData.put("timeout", 3000);
+
+            GostDto gostResult = WebSocketServer.send_msg(node.getId(), udpPingData, "UdpPing");
+
+            DiagnosisResult result = new DiagnosisResult();
+            result.setNodeId(node.getId());
+            result.setNodeName(node.getName());
+            result.setTargetIp(targetIp);
+            result.setTargetPort(port);
+            result.setDescription(description);
+            result.setTimestamp(System.currentTimeMillis());
+
+            if (gostResult != null && "OK".equals(gostResult.getMsg())) {
+                try {
+                    if (gostResult.getData() != null) {
+                        JSONObject udpPingResponse = (JSONObject) gostResult.getData();
+                        boolean success = udpPingResponse.getBooleanValue("success");
+
+                        result.setSuccess(success);
+                        if (success) {
+                            double averageTime = udpPingResponse.getDoubleValue("averageTime");
+                            double packetLoss = udpPingResponse.getDoubleValue("packetLoss");
+                            result.setAverageTime(averageTime);
+                            result.setPacketLoss(packetLoss);
+                            if (averageTime < 0 || packetLoss < 0) {
+                                String message = udpPingResponse.getString("errorMessage");
+                                result.setMessage(message == null || message.isBlank() ? "UDP探测成功" : message);
+                            } else {
+                                result.setMessage("UDP连接成功");
+                            }
+                        } else {
+                            result.setMessage(udpPingResponse.getString("errorMessage"));
+                            result.setAverageTime(-1.0);
+                            result.setPacketLoss(100.0);
+                        }
+                    } else {
+                        result.setSuccess(true);
+                        result.setMessage("UDP探测成功");
+                        result.setAverageTime(-1.0);
+                        result.setPacketLoss(-1.0);
+                    }
+                } catch (Exception e) {
+                    result.setSuccess(true);
+                    result.setMessage("UDP探测成功，但无法解析详细数据");
+                    result.setAverageTime(-1.0);
+                    result.setPacketLoss(-1.0);
                 }
             } else {
                 result.setSuccess(false);

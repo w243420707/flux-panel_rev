@@ -841,7 +841,7 @@ export default function ForwardPage() {
 
   // 获取连接质量
   const getQualityDisplay = (averageTime?: number, packetLoss?: number) => {
-    if (averageTime === undefined || packetLoss === undefined) return null;
+    if (averageTime === undefined || packetLoss === undefined || averageTime < 0 || packetLoss < 0) return null;
     
     if (averageTime < 30 && packetLoss === 0) return { text: '🚀 优秀', color: 'success' };
     if (averageTime < 50 && packetLoss === 0) return { text: '✨ 很好', color: 'success' };
@@ -2408,26 +2408,35 @@ export default function ForwardPage() {
                             <CardBody className="pt-0">
                               {result.success ? (
                                 <div className="space-y-3">
-                                  <div className="grid grid-cols-3 gap-4">
-                                    <div className="text-center">
-                                      <div className="text-2xl font-bold text-primary">{result.averageTime?.toFixed(0)}</div>
-                                      <div className="text-small text-default-500">平均延迟(ms)</div>
+                                  {result.averageTime !== undefined && result.packetLoss !== undefined && result.averageTime >= 0 && result.packetLoss >= 0 ? (
+                                    <div className="grid grid-cols-3 gap-4">
+                                      <div className="text-center">
+                                        <div className="text-2xl font-bold text-primary">{result.averageTime?.toFixed(0)}</div>
+                                        <div className="text-small text-default-500">平均延迟(ms)</div>
+                                      </div>
+                                      <div className="text-center">
+                                        <div className="text-2xl font-bold text-warning">{result.packetLoss?.toFixed(1)}</div>
+                                        <div className="text-small text-default-500">丢包率(%)</div>
+                                      </div>
+                                      <div className="text-center">
+                                        {quality && (
+                                          <>
+                                            <Chip color={quality.color as any} variant="flat" size="lg">
+                                              {quality.text}
+                                            </Chip>
+                                            <div className="text-small text-default-500 mt-1">连接质量</div>
+                                          </>
+                                        )}
+                                      </div>
                                     </div>
-                                    <div className="text-center">
-                                      <div className="text-2xl font-bold text-warning">{result.packetLoss?.toFixed(1)}</div>
-                                      <div className="text-small text-default-500">丢包率(%)</div>
-                                    </div>
-                                    <div className="text-center">
-                                      {quality && (
-                                        <>
-                                          <Chip color={quality.color as any} variant="flat" size="lg">
-                                            {quality.text}
-                                          </Chip>
-                                          <div className="text-small text-default-500 mt-1">连接质量</div>
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
+                                  ) : (
+                                    <Alert
+                                      color="primary"
+                                      variant="flat"
+                                      title="UDP 探测结果"
+                                      description={result.message || 'UDP 探测已完成，未返回可用的延迟数据'}
+                                    />
+                                  )}
                                   <div className="text-small text-default-500 flex items-center gap-1">
                                     <span className="flex-shrink-0">目标地址:</span>
                                     <code className="font-mono truncate min-w-0" title={`${result.targetIp}${result.targetPort ? ':' + result.targetPort : ''}`}>

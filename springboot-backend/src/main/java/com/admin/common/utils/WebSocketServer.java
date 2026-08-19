@@ -100,7 +100,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                                 GostDto result = new GostDto();
                                 
                                 // 根据响应类型处理不同的数据
-                                if (("PingResponse".equals(responseType) || "TcpPingResponse".equals(responseType)) && responseData != null) {
+                                if (("PingResponse".equals(responseType) || "TcpPingResponse".equals(responseType) || "UdpPingResponse".equals(responseType)) && responseData != null) {
                                     // 特殊处理ping响应，将完整的响应数据返回
                                     result.setMsg(responseMessage != null ? responseMessage : "OK");
                                     result.setData(responseData); // 保存ping详细结果
@@ -530,17 +530,32 @@ public class WebSocketServer extends TextWebSocketHandler {
             data.put("data", msg);
             data.put("requestId", requestId);
             sendToUser(nodeSession, data.toJSONString(), nodeSecret);
-            GostDto result = future.get(10, TimeUnit.SECONDS);
-            
-            log.info("成功发送消息到节点 {} 并收到响应: {}", node_id, result.getMsg());
-            return result;
-            
+            try {
+                GostDto result = future.get(10, TimeUnit.SECONDS);
+                log.info("成功发送消息到节点 {} 并收到响应: {}", node_id, result.getMsg());
+                return result;
+            } catch (java.util.concurrent.TimeoutException firstTimeout) {
+                log.info("节点 {} 首次等待响应超时，自动再等 5 秒", node_id);
+                try {
+                    GostDto result = future.get(5, TimeUnit.SECONDS);
+                    log.info("节点 {} 在自动重试后收到响应: {}", node_id, result.getMsg());
+                    return result;
+                } catch (java.util.concurrent.TimeoutException secondTimeout) {
+                    pendingRequests.remove(requestId);
+                    GostDto result = new GostDto();
+                    result.setMsg("等待响应超时（已自动再等一次）");
+                    log.info("节点 {} 两次等待均超时，可能存在连接问题", node_id);
+                    return result;
+                }
+            }
         } catch (Exception e) {
-            // 清理请求和映射关系
             pendingRequests.remove(requestId);
 
             GostDto result = new GostDto();
-            if (e instanceof java.util.concurrent.TimeoutException) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+                result.setMsg("发送消息失败: 线程被中断");
+            } else if (e instanceof java.util.concurrent.TimeoutException) {
                 result.setMsg("等待响应超时");
                 log.info("节点 {} 响应超时，可能存在连接问题", node_id);
             } else {

@@ -1,0 +1,65 @@
+name: Build gost releases
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "go-gost/**"
+      - ".github/workflows/build-gost-releases.yml"
+      - "install.sh"
+      - "README.md"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: go-gost
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go-gost/go.mod
+          cache: true
+          cache-dependency-path: go-gost/go.sum
+
+      - name: Build release binaries
+        run: chmod +x scripts/build-releases.sh && scripts/build-releases.sh
+
+      - name: Verify checksums
+        run: cd releases && sha256sum -c SHA256SUMS
+
+      - name: Commit generated releases
+        working-directory: .
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add go-gost/releases
+          if git diff --cached --quiet -- go-gost/releases; then
+            echo "No release changes to commit."
+            exit 0
+          fi
+          git commit -m "build: refresh go-gost releases [skip ci]"
+          git push
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gost-releases
+          path: |
+            go-gost/releases/gost-linux-amd64
+            go-gost/releases/gost-linux-arm64
+            go-gost/releases/gost-linux-armv6
+            go-gost/releases/gost-linux-armv7
+            go-gost/releases/SHA256SUMS
+          if-no-files-found: error
