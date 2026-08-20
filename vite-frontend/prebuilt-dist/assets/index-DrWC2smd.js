@@ -39832,7 +39832,7 @@ const getConfigByName = (name) => Network.post("/config/get", { name });
 const updateConfigs = (configMap) => Network.post("/config/update", configMap);
 const checkCaptcha = () => Network.post("/captcha/check");
 const CACHE_PREFIX = "vite_config_";
-const VERSION = "1.3.16";
+const VERSION = "1.3.17";
 const APP_VERSION = "1.0.3";
 const getInitialConfig = () => {
   if (typeof window === "undefined") {

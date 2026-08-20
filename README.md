@@ -105,6 +105,11 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 ## 更新日志
 
+### 2026-08-20 v1.3.17
+
+- GitHub Actions 构建发布包时增加了并发控制和远端检查，避免 release 文件自推送时重复失败。
+- 前端版本号同步更新到 `1.3.17`。
+
 ### 2026-08-20 v1.3.16
 
 - 节点心跳上报改为以最新公网 IP 为准，旧的 `serverIp` / `serverIpv4` / `serverIpv6` 会被立即清掉。
