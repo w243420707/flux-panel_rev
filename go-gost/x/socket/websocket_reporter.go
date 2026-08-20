@@ -357,10 +357,6 @@ func (w *WebSocketReporter) refreshPublicIPs(done <-chan struct{}) {
 			return
 		case <-ticker.C:
 			publicIPv4, publicIPv6 := detectPublicIPs()
-			if publicIPv4 == "" && publicIPv6 == "" {
-				continue
-			}
-
 			publicIP := publicIPv4
 			if publicIP == "" {
 				publicIP = publicIPv6
@@ -374,18 +370,15 @@ func (w *WebSocketReporter) setPublicIPs(publicIP, publicIPv4, publicIPv6 string
 	w.publicIPMutex.Lock()
 	defer w.publicIPMutex.Unlock()
 
-	if publicIPv4 != "" {
-		w.publicIPv4 = publicIPv4
-	}
-	if publicIPv6 != "" {
-		w.publicIPv6 = publicIPv6
-	}
-	if publicIP != "" {
-		w.publicIP = publicIP
-	} else if w.publicIPv4 != "" {
-		w.publicIP = w.publicIPv4
-	} else {
-		w.publicIP = w.publicIPv6
+	w.publicIPv4 = strings.TrimSpace(publicIPv4)
+	w.publicIPv6 = strings.TrimSpace(publicIPv6)
+	w.publicIP = strings.TrimSpace(publicIP)
+	if w.publicIP == "" {
+		if w.publicIPv4 != "" {
+			w.publicIP = w.publicIPv4
+		} else {
+			w.publicIP = w.publicIPv6
+		}
 	}
 }
 

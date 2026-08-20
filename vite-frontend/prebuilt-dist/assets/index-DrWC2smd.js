@@ -31408,7 +31408,7 @@ function useAriaButton$1(props, ref) {
     })
   };
 }
-var domAnimation$8 = () => __vitePreload(() => import("./index-Bcemasvp.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$8 = () => __vitePreload(() => import("./index-DSoTXVbU.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple$1 = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -35760,7 +35760,7 @@ function useAriaButton(props, ref) {
     })
   };
 }
-var domAnimation$7 = () => __vitePreload(() => import("./index-Bcemasvp.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$7 = () => __vitePreload(() => import("./index-DSoTXVbU.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -39832,7 +39832,7 @@ const getConfigByName = (name) => Network.post("/config/get", { name });
 const updateConfigs = (configMap) => Network.post("/config/update", configMap);
 const checkCaptcha = () => Network.post("/captcha/check");
 const CACHE_PREFIX = "vite_config_";
-const VERSION = "1.3.15";
+const VERSION = "1.3.16";
 const APP_VERSION = "1.0.3";
 const getInitialConfig = () => {
   if (typeof window === "undefined") {
@@ -40142,7 +40142,7 @@ var menuVariants = {
     }
   }
 };
-var domAnimation$6 = () => __vitePreload(() => import("./index-Bcemasvp.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$6 = () => __vitePreload(() => import("./index-DSoTXVbU.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var NavbarMenu = forwardRef$1((props, ref) => {
   var _a, _b;
   const { className, children, portalContainer, motionProps, style, ...otherProps } = props;
@@ -40476,7 +40476,7 @@ function useNavbar(originalProps) {
     getWrapperProps
   };
 }
-var domAnimation$5 = () => __vitePreload(() => import("./index-Bcemasvp.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$5 = () => __vitePreload(() => import("./index-DSoTXVbU.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Navbar$1 = forwardRef$1((props, ref) => {
   const { children, ...otherProps } = props;
   const context = useNavbar({ ...otherProps, ref });
@@ -43523,7 +43523,7 @@ function getViewportSize() {
     height: visualViewport && (visualViewport == null ? void 0 : visualViewport.height) || window.innerHeight
   };
 }
-var domAnimation$4 = () => __vitePreload(() => import("./index-Bcemasvp.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$4 = () => __vitePreload(() => import("./index-DSoTXVbU.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var ModalContent = (props) => {
   const { as, children, role = "dialog", ...otherProps } = props;
   const {
@@ -73483,7 +73483,7 @@ function usePopover$1(originalProps) {
     getContentProps
   };
 }
-var domAnimation$3 = () => __vitePreload(() => import("./index-Bcemasvp.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$3 = () => __vitePreload(() => import("./index-DSoTXVbU.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var FreeSoloPopoverWrapper = forwardRef$1(
   ({
     children,
@@ -75191,7 +75191,7 @@ function useAccordionItem(props) {
     getSubtitleProps
   };
 }
-var domAnimation$2 = () => __vitePreload(() => import("./index-Bcemasvp.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$2 = () => __vitePreload(() => import("./index-DSoTXVbU.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var AccordionItem = forwardRef$1((props, ref) => {
   const {
     Component,
@@ -82435,10 +82435,11 @@ function NodePage() {
   const websocketRef = reactExports.useRef(null);
   const reconnectTimerRef = reactExports.useRef(null);
   const reconnectAttemptsRef = reactExports.useRef(0);
+  const runtimeIpCacheRef = reactExports.useRef(/* @__PURE__ */ new Map());
   const maxReconnectAttempts = 5;
   reactExports.useEffect(() => {
-    loadNodes();
     initWebSocket();
+    loadNodes();
     return () => {
       closeWebSocket();
     };
@@ -82448,13 +82449,23 @@ function NodePage() {
     try {
       const res2 = await getNodeList();
       if (res2.code === 0) {
-        setNodeList(res2.data.map((node) => ({
+        const nextNodes = res2.data.map((node) => ({
           ...node,
           connectionStatus: node.status === 1 ? "online" : "offline",
           systemInfo: null,
           copyLoading: false,
           wallMonitorChecking: false
-        })));
+        }));
+        const nodeIds = new Set(nextNodes.map((node) => node.id));
+        runtimeIpCacheRef.current.forEach((_2, nodeId) => {
+          if (!nodeIds.has(nodeId)) {
+            runtimeIpCacheRef.current.delete(nodeId);
+          }
+        });
+        setNodeList(nextNodes.map((node) => {
+          const cachedRuntime = runtimeIpCacheRef.current.get(node.id);
+          return cachedRuntime ? { ...node, ...cachedRuntime } : node;
+        }));
       } else {
         zt.error(res2.msg || "加载节点列表失败");
       }
@@ -82498,11 +82509,19 @@ function NodePage() {
   const handleWebSocketMessage = (data) => {
     const { id: id2, type, data: messageData } = data;
     if (type === "status") {
+      const nextConnectionStatus = messageData === 1 ? "online" : "offline";
+      const cachedRuntime = runtimeIpCacheRef.current.get(Number(id2));
+      if (cachedRuntime) {
+        runtimeIpCacheRef.current.set(Number(id2), {
+          ...cachedRuntime,
+          connectionStatus: nextConnectionStatus
+        });
+      }
       setNodeList((prev) => prev.map((node) => {
         if (node.id == id2) {
           return {
             ...node,
-            connectionStatus: messageData === 1 ? "online" : "offline",
+            connectionStatus: nextConnectionStatus,
             systemInfo: messageData === 0 ? null : node.systemInfo
           };
         }
@@ -82543,14 +82562,22 @@ function NodePage() {
             const publicIpv6 = getRuntimeIp("public_ipv6", "publicIpv6");
             const hasRuntimeIp = Boolean(publicIp || publicIpv4 || publicIpv6);
             const nextServerIp = publicIp || publicIpv4 || publicIpv6 || node.serverIp;
+            const isIpv4Literal = (value) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value.trim());
+            const isIpv6Literal = (value) => value.includes(":");
             const currentRuntimeIps = [node.serverIp, node.serverIpv4, node.serverIpv6].filter(Boolean);
             const entryFollowsRuntimeIp = !node.ip || currentRuntimeIps.includes(node.ip);
             const runtimeIpPatch = hasRuntimeIp ? {
               ip: entryFollowsRuntimeIp ? nextServerIp : node.ip,
               serverIp: nextServerIp,
-              serverIpv4: publicIpv4 || node.serverIpv4,
-              serverIpv6: publicIpv6 || node.serverIpv6
+              serverIpv4: publicIpv4 || (isIpv4Literal(nextServerIp) ? nextServerIp : ""),
+              serverIpv6: publicIpv6 || (isIpv6Literal(nextServerIp) ? nextServerIp : "")
             } : {};
+            if (hasRuntimeIp) {
+              runtimeIpCacheRef.current.set(Number(id2), {
+                ...runtimeIpPatch,
+                connectionStatus: "online"
+              });
+            }
             const hasSystemMetrics = systemInfo && (Object.prototype.hasOwnProperty.call(systemInfo, "memory_usage") || Object.prototype.hasOwnProperty.call(systemInfo, "cpu_usage") || Object.prototype.hasOwnProperty.call(systemInfo, "bytes_received") || Object.prototype.hasOwnProperty.call(systemInfo, "bytes_transmitted") || Object.prototype.hasOwnProperty.call(systemInfo, "uptime"));
             if (!hasSystemMetrics) {
               return hasRuntimeIp ? {
@@ -96598,7 +96625,7 @@ function CalendarPicker(props) {
     }
   );
 }
-var domAnimation$1 = () => __vitePreload(() => import("./index-Bcemasvp.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$1 = () => __vitePreload(() => import("./index-DSoTXVbU.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopLayoutWrapper = reactExports.forwardRef(
   (props, ref) => {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref, ...props });
@@ -100602,7 +100629,7 @@ var [PopoverProvider, usePopoverContext] = createContext2$1({
   name: "PopoverContext",
   errorMessage: "usePopoverContext: `context` is undefined. Seems you forgot to wrap all popover components within `<Popover />`"
 });
-var domAnimation = () => __vitePreload(() => import("./index-Bcemasvp.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation = () => __vitePreload(() => import("./index-DSoTXVbU.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopoverContent = (props) => {
   const { as, children, className, ...otherProps } = props;
   const {

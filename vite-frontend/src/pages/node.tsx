@@ -93,11 +93,12 @@ export default function NodePage() {
   const websocketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const runtimeIpCacheRef = useRef<Map<number, Partial<Node>>>(new Map());
   const maxReconnectAttempts = 5;
 
   useEffect(() => {
-    loadNodes();
     initWebSocket();
+    loadNodes();
     
     return () => {
       closeWebSocket();
@@ -110,13 +111,23 @@ export default function NodePage() {
     try {
       const res = await getNodeList();
       if (res.code === 0) {
-        setNodeList(res.data.map((node: any) => ({
+        const nextNodes = res.data.map((node: any) => ({
           ...node,
           connectionStatus: node.status === 1 ? 'online' : 'offline',
           systemInfo: null,
           copyLoading: false,
           wallMonitorChecking: false
-        })));
+        }));
+        const nodeIds = new Set(nextNodes.map((node: Node) => node.id));
+        runtimeIpCacheRef.current.forEach((_, nodeId) => {
+          if (!nodeIds.has(nodeId)) {
+            runtimeIpCacheRef.current.delete(nodeId);
+          }
+        });
+        setNodeList(nextNodes.map((node: Node) => {
+          const cachedRuntime = runtimeIpCacheRef.current.get(node.id);
+          return cachedRuntime ? { ...node, ...cachedRuntime } : node;
+        }));
       } else {
         toast.error(res.msg || '加载节点列表失败');
       }
@@ -177,11 +188,19 @@ export default function NodePage() {
     const { id, type, data: messageData } = data;
     
     if (type === 'status') {
+      const nextConnectionStatus = messageData === 1 ? 'online' : 'offline';
+      const cachedRuntime = runtimeIpCacheRef.current.get(Number(id));
+      if (cachedRuntime) {
+        runtimeIpCacheRef.current.set(Number(id), {
+          ...cachedRuntime,
+          connectionStatus: nextConnectionStatus,
+        });
+      }
       setNodeList(prev => prev.map(node => {
         if (node.id == id) {
           return {
             ...node,
-            connectionStatus: messageData === 1 ? 'online' : 'offline',
+            connectionStatus: nextConnectionStatus,
             systemInfo: messageData === 0 ? null : node.systemInfo
           };
         }
@@ -223,14 +242,22 @@ export default function NodePage() {
             const publicIpv6 = getRuntimeIp("public_ipv6", "publicIpv6");
             const hasRuntimeIp = Boolean(publicIp || publicIpv4 || publicIpv6);
             const nextServerIp = publicIp || publicIpv4 || publicIpv6 || node.serverIp;
+            const isIpv4Literal = (value: string) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value.trim());
+            const isIpv6Literal = (value: string) => value.includes(':');
             const currentRuntimeIps = [node.serverIp, node.serverIpv4, node.serverIpv6].filter(Boolean);
             const entryFollowsRuntimeIp = !node.ip || currentRuntimeIps.includes(node.ip);
             const runtimeIpPatch = hasRuntimeIp ? {
               ip: entryFollowsRuntimeIp ? nextServerIp : node.ip,
               serverIp: nextServerIp,
-              serverIpv4: publicIpv4 || node.serverIpv4,
-              serverIpv6: publicIpv6 || node.serverIpv6,
+              serverIpv4: publicIpv4 || (isIpv4Literal(nextServerIp) ? nextServerIp : ''),
+              serverIpv6: publicIpv6 || (isIpv6Literal(nextServerIp) ? nextServerIp : ''),
             } : {};
+            if (hasRuntimeIp) {
+              runtimeIpCacheRef.current.set(Number(id), {
+                ...runtimeIpPatch,
+                connectionStatus: 'online',
+              });
+            }
 
             const hasSystemMetrics =
               systemInfo &&

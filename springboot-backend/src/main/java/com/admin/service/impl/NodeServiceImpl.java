@@ -365,21 +365,27 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
                 || Objects.equals(oldEntryIp, oldServerIp)
                 || Objects.equals(oldEntryIp, oldServerIpv4)
                 || Objects.equals(oldEntryIp, oldServerIpv6);
+        String nextServerIp = normalizeNodeAddress(normalizedIp);
+        String nextServerIpv4 = normalizeNodeAddress(normalizedIpv4);
+        String nextServerIpv6 = normalizeNodeAddress(normalizedIpv6);
+        String nextServerIpStorage = normalizeNodeAddressForStorage(nextServerIp);
+        String nextServerIpv4Storage = normalizeNodeAddressForStorage(nextServerIpv4);
+        String nextServerIpv6Storage = normalizeNodeAddressForStorage(nextServerIpv6);
         boolean changed = false;
-        if (StrUtil.isNotBlank(normalizedIpv4) && !Objects.equals(normalizedIpv4, oldServerIpv4)) {
-            node.setServerIpv4(normalizedIpv4);
+        if (!Objects.equals(nextServerIpv4, oldServerIpv4)) {
+            node.setServerIpv4(nextServerIpv4Storage);
             changed = true;
         }
-        if (StrUtil.isNotBlank(normalizedIpv6) && !Objects.equals(normalizedIpv6, oldServerIpv6)) {
-            node.setServerIpv6(normalizedIpv6);
+        if (!Objects.equals(nextServerIpv6, oldServerIpv6)) {
+            node.setServerIpv6(nextServerIpv6Storage);
             changed = true;
         }
-        if (!Objects.equals(normalizedIp, oldServerIp)) {
-            node.setServerIp(normalizedIp);
+        if (!Objects.equals(nextServerIp, oldServerIp)) {
+            node.setServerIp(nextServerIpStorage);
             changed = true;
         }
-        if (entryIpFollowsServer && !Objects.equals(normalizedIp, oldEntryIp)) {
-            node.setIp(normalizedIp);
+        if (entryIpFollowsServer && !Objects.equals(nextServerIp, oldEntryIp)) {
+            node.setIp(nextServerIpStorage);
             changed = true;
         }
         if (!changed) {
@@ -544,6 +550,8 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
     private void syncLiteralServerIpFamilyFields(Node node) {
         String serverIp = normalizeNodeAddress(node.getServerIp());
+        node.setServerIpv4("");
+        node.setServerIpv6("");
         if (StrUtil.isBlank(serverIp)) {
             return;
         }

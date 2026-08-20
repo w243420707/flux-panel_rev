@@ -105,6 +105,13 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 ## 更新日志
 
+### 2026-08-20 v1.3.16
+
+- 节点心跳上报改为以最新公网 IP 为准，旧的 `serverIp` / `serverIpv4` / `serverIpv6` 会被立即清掉。
+- Cloudflare DNS 同步改为按域名和记录类型全量收敛，历史遗留的旧 A / AAAA 记录会一起清理。
+- 节点列表刷新时会保留 websocket 里收到的最新运行时 IP，避免页面短暂回退到旧值。
+- 节点端版本更新到 `3.1.1`，不再保留检测失败或不存在的旧公网 IP。
+
 ### 2026-08-20 v1.3.15
 
 - 修复批量删除优化里的后端编译问题，`tunnelId` 缓存改为按实际 `Long` 主键转换。

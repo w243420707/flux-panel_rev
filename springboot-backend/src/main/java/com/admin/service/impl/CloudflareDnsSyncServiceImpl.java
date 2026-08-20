@@ -290,7 +290,8 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
             List<CloudflareDnsRecord> primaryExistingRecords = fetchManagedRecords(setting, binding, primaryDomain);
             deleteRecordsByType(setting, primaryExistingRecords, RECORD_TYPE_CNAME);
-            primaryExistingRecords = filterManagedRecords(primaryExistingRecords, record -> !RECORD_TYPE_CNAME.equalsIgnoreCase(record.getType()));
+            primaryExistingRecords = filterManagedRecords(primaryExistingRecords, record ->
+                    RECORD_TYPE_A.equalsIgnoreCase(record.getType()) || RECORD_TYPE_AAAA.equalsIgnoreCase(record.getType()));
 
             Set<String> desiredRecordKeys = new HashSet<>();
             for (CloudflareDnsTarget target : desiredTargets) {
@@ -312,7 +313,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                         + "，排除 " + smartPoolPlan.excludedCount;
             }
             if (!unresolvedNodeIds.isEmpty()) {
-                message += "，" + unresolvedNodeIds.size() + " 个活跃节点解析失败已保留旧记录";
+                message += "，" + unresolvedNodeIds.size() + " 个活跃节点解析失败，旧 IP 已清理";
             }
             markBinding(binding, SYNC_SUCCESS, message, desiredTargets);
             updateSettingSyncStatus(setting, SYNC_SUCCESS, "最近由 " + trigger + " 触发: " + String.join(", ", domains));
@@ -591,22 +592,23 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                                  String primaryDomain) {
         List<CloudflareDnsRecord> aliasRecords = fetchManagedRecords(setting, binding, aliasDomain);
         CloudflareDnsRecord desiredRecord = buildAliasRecord(setting, binding, aliasDomain, primaryDomain);
-        CloudflareDnsRecord existingCname = aliasRecords.stream()
-                .filter(record -> RECORD_TYPE_CNAME.equalsIgnoreCase(record.getType()))
-                .findFirst()
-                .orElse(null);
-        boolean hasConflict = aliasRecords.stream()
-                .anyMatch(record -> !RECORD_TYPE_CNAME.equalsIgnoreCase(record.getType()));
+        List<CloudflareDnsRecord> aliasAddressRecords = filterManagedRecords(aliasRecords,
+                record -> RECORD_TYPE_A.equalsIgnoreCase(record.getType()) || RECORD_TYPE_AAAA.equalsIgnoreCase(record.getType()));
+        List<CloudflareDnsRecord> cnameRecords = filterManagedRecords(aliasRecords,
+                record -> RECORD_TYPE_CNAME.equalsIgnoreCase(record.getType()));
+        if (!aliasAddressRecords.isEmpty()) {
+            deleteManagedRecords(setting, aliasAddressRecords);
+        }
 
-        if (!hasConflict && existingCname != null) {
+        CloudflareDnsRecord existingCname = cnameRecords.isEmpty() ? null : cnameRecords.get(0);
+        if (existingCname != null) {
             if (shouldUpdateRecord(existingCname, desiredRecord)) {
                 cloudflareApiClient.updateDnsRecord(setting.getZoneId(), setting.getApiToken(), existingCname.getId(), desiredRecord);
             }
+            if (cnameRecords.size() > 1) {
+                deleteManagedRecords(setting, cnameRecords.subList(1, cnameRecords.size()));
+            }
             return;
-        }
-
-        if (!aliasRecords.isEmpty()) {
-            deleteManagedRecords(setting, aliasRecords);
         }
         cloudflareApiClient.createDnsRecord(setting.getZoneId(), setting.getApiToken(), desiredRecord);
     }
@@ -617,8 +619,9 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                                     Set<Long> unresolvedNodeIds,
                                     Set<String> desiredRecordKeys) {
         for (CloudflareDnsRecord record : existingRecords) {
-            Long nodeId = extractCommentLong(record.getComment(), "node");
-            if (nodeId != null && unresolvedNodeIds.contains(nodeId)) {
+            if (record == null
+                    || (!RECORD_TYPE_A.equalsIgnoreCase(record.getType())
+                    && !RECORD_TYPE_AAAA.equalsIgnoreCase(record.getType()))) {
                 continue;
             }
             if (desiredRecordKeys.contains(recordContentKey(record))) {
@@ -684,7 +687,6 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             for (String type : MANAGED_RECORD_TYPES) {
                 records.addAll(cloudflareApiClient.listDnsRecords(setting.getZoneId(), setting.getApiToken(), domain, type)
                         .stream()
-                        .filter(record -> isManagedRecord(binding, record))
                         .collect(Collectors.toList()));
             }
         }
@@ -762,54 +764,59 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         }
 
         LinkedHashSet<String> targets = new LinkedHashSet<>();
+        boolean collectedRuntimeAddress = false;
         if (RECORD_TYPE_AUTO.equals(recordType) || RECORD_TYPE_A.equals(recordType)) {
-            collectAddressTargets(node, targets, node.getServerIpv4(), RECORD_TYPE_A);
+            collectedRuntimeAddress |= collectAddressTargets(node, targets, node.getServerIpv4(), RECORD_TYPE_A);
         }
         if (RECORD_TYPE_AUTO.equals(recordType) || RECORD_TYPE_AAAA.equals(recordType)) {
-            collectAddressTargets(node, targets, node.getServerIpv6(), RECORD_TYPE_AAAA);
+            collectedRuntimeAddress |= collectAddressTargets(node, targets, node.getServerIpv6(), RECORD_TYPE_AAAA);
         }
-        collectAddressTargets(node, targets, node.getServerIp(), recordType);
+        if (!collectedRuntimeAddress) {
+            collectAddressTargets(node, targets, node.getServerIp(), recordType);
+        }
         return toTargets(node.getId(), targets);
     }
 
-    private void collectAddressTargets(Node node, LinkedHashSet<String> targets, String value, String recordType) {
+    private boolean collectAddressTargets(Node node, LinkedHashSet<String> targets, String value, String recordType) {
         if (!StringUtils.hasText(value)) {
-            return;
+            return false;
         }
 
         String host = normalizeHost(value);
+        boolean added = false;
         try {
             if (isIpv4Literal(host)) {
                 if (RECORD_TYPE_AUTO.equals(recordType) || RECORD_TYPE_A.equals(recordType)) {
-                    addPublicTarget(targets, RECORD_TYPE_A, InetAddress.getByName(host));
+                    added = addPublicTarget(targets, RECORD_TYPE_A, InetAddress.getByName(host)) || added;
                 }
-                return;
+                return added;
             }
             if (isIpv6Literal(host)) {
                 if (RECORD_TYPE_AUTO.equals(recordType) || RECORD_TYPE_AAAA.equals(recordType)) {
-                    addPublicTarget(targets, RECORD_TYPE_AAAA, InetAddress.getByName(host));
+                    added = addPublicTarget(targets, RECORD_TYPE_AAAA, InetAddress.getByName(host)) || added;
                 }
-                return;
+                return added;
             }
 
             InetAddress[] addresses = InetAddress.getAllByName(host);
             for (InetAddress address : addresses) {
                 if (address instanceof Inet4Address && (RECORD_TYPE_AUTO.equals(recordType) || RECORD_TYPE_A.equals(recordType))) {
-                    addPublicTarget(targets, RECORD_TYPE_A, address);
+                    added = addPublicTarget(targets, RECORD_TYPE_A, address) || added;
                 } else if (address instanceof Inet6Address && (RECORD_TYPE_AUTO.equals(recordType) || RECORD_TYPE_AAAA.equals(recordType))) {
-                    addPublicTarget(targets, RECORD_TYPE_AAAA, address);
+                    added = addPublicTarget(targets, RECORD_TYPE_AAAA, address) || added;
                 }
             }
         } catch (Exception e) {
             log.warn("Resolve node target failed, nodeId={}, host={}, error={}", node.getId(), host, e.getMessage());
         }
+        return added;
     }
 
-    private void addPublicTarget(LinkedHashSet<String> targets, String recordType, InetAddress address) {
+    private boolean addPublicTarget(LinkedHashSet<String> targets, String recordType, InetAddress address) {
         if (!isPublicAddress(address)) {
-            return;
+            return false;
         }
-        targets.add(recordType + "|" + stripIpv6Scope(address.getHostAddress()));
+        return targets.add(recordType + "|" + stripIpv6Scope(address.getHostAddress()));
     }
 
     private boolean isPublicAddress(InetAddress address) {

@@ -153,17 +153,21 @@ public class WebSocketServer extends TextWebSocketHandler {
             String publicIp = firstNonBlank(info.getString("public_ip"), info.getString("publicIp"), info.getString("host_ip"));
             String publicIpv4 = firstNonBlank(info.getString("public_ipv4"), info.getString("publicIpv4"));
             String publicIpv6 = firstNonBlank(info.getString("public_ipv6"), info.getString("publicIpv6"));
-            if (StringUtils.isBlank(publicIp) && StringUtils.isBlank(publicIpv4) && StringUtils.isBlank(publicIpv6)) {
+            String clientIp = (String) session.getAttributes().get("clientIp");
+            if (StringUtils.isBlank(publicIp)
+                    && StringUtils.isBlank(publicIpv4)
+                    && StringUtils.isBlank(publicIpv6)
+                    && StringUtils.isBlank(clientIp)) {
                 return;
             }
-            if (!runtimeIpsChanged(session, publicIp, publicIpv4, publicIpv6)) {
+            String effectivePublicIp = firstNonBlank(publicIp, publicIpv4, publicIpv6, clientIp);
+            if (!runtimeIpsChanged(session, effectivePublicIp, publicIpv4, publicIpv6)) {
                 return;
             }
 
             Long nodeId = Long.valueOf(id);
-            String clientIp = (String) session.getAttributes().get("clientIp");
-            nodeService.refreshRuntimeNodeServerIp(nodeId, publicIp, publicIpv4, publicIpv6, clientIp);
-            rememberRuntimeIps(session, publicIp, publicIpv4, publicIpv6);
+            nodeService.refreshRuntimeNodeServerIp(nodeId, effectivePublicIp, publicIpv4, publicIpv6, clientIp);
+            rememberRuntimeIps(session, effectivePublicIp, publicIpv4, publicIpv6);
         } catch (Exception e) {
             log.info("刷新节点公网IP失败: {}", e.getMessage());
         }
