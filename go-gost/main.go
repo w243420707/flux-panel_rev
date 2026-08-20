@@ -120,7 +120,7 @@ func main() {
 	log := xlogger.NewLogger()
 	logger.SetDefault(log)
 
-	wsReporter := socket.StartWebSocketReporterWithConfig(config.Addr, config.Secret, "1.3.13")
+	wsReporter := socket.StartWebSocketReporterWithConfig(config.Addr, config.Secret, version)
 	defer wsReporter.Stop()
 	service.SetHTTPReportURL(config.Addr, config.Secret)
 

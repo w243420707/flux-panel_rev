@@ -8,12 +8,56 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-gost/core/logger"
 	"github.com/go-gost/core/service"
 	"github.com/go-gost/x/config"
 	parser "github.com/go-gost/x/config/parsing/service"
 	kill "github.com/go-gost/x/internal/util/port"
 	"github.com/go-gost/x/registry"
 )
+
+const serviceStartupProbeDelay = 250 * time.Millisecond
+
+// startService starts a dynamic service and reports errors that happen during
+// the initial listener setup. Serve blocks while a service is healthy, so a
+// short probe window lets us distinguish a running listener from an immediate
+// bind/configuration failure without blocking the WebSocket command handler.
+func startService(name string, svc service.Service) error {
+	if svc == nil {
+		return errors.New("service " + name + " is nil")
+	}
+
+	addr := "<unknown>"
+	if serviceAddr := svc.Addr(); serviceAddr != nil {
+		addr = serviceAddr.String()
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.Serve()
+	}()
+
+	timer := time.NewTimer(serviceStartupProbeDelay)
+	defer timer.Stop()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("start service %s on %s failed: %w", name, addr, err)
+		}
+		return nil
+	case <-timer.C:
+		logger.Default().Debugf("service %s listening on %s", name, addr)
+		go func() {
+			if err := <-errCh; err != nil {
+				logger.Default().Errorf("service %s on %s stopped with error: %v", name, addr, err)
+			} else {
+				logger.Default().Warnf("service %s on %s stopped unexpectedly", name, addr)
+			}
+		}()
+		return nil
+	}
+}
 
 func createServices(req createServicesRequest) error {
 
@@ -72,7 +116,15 @@ func createServices(req createServicesRequest) error {
 	// 第三阶段：启动所有服务
 	for _, ps := range parsedServices {
 		if svc := registry.ServiceRegistry().Get(ps.config.Name); svc != nil {
-			go svc.Serve()
+			if err := startService(ps.config.Name, svc); err != nil {
+				for _, registeredName := range registeredServices {
+					if registeredService := registry.ServiceRegistry().Get(registeredName); registeredService != nil {
+						registry.ServiceRegistry().Unregister(registeredName)
+						_ = registeredService.Close()
+					}
+				}
+				return err
+			}
 		}
 	}
 
@@ -150,7 +202,14 @@ func updateServices(req updateServicesRequest) error {
 		}
 
 		// 6. 启动新服务
-		go svc.Serve()
+		if err := startService(name, svc); err != nil {
+			registry.ServiceRegistry().Unregister(name)
+			_ = svc.Close()
+			if restoreErr := restoreServiceConfig(name, oldConfig); restoreErr != nil {
+				return fmt.Errorf("%v; restore old service failed: %w", err, restoreErr)
+			}
+			return err
+		}
 	}
 
 	// 第三阶段：更新配置
@@ -211,7 +270,11 @@ func restoreServiceConfig(name string, serviceConfig *config.ServiceConfig) erro
 			svc.Close()
 			return err
 		}
-		go svc.Serve()
+		if err := startService(name, svc); err != nil {
+			registry.ServiceRegistry().Unregister(name)
+			_ = svc.Close()
+			return err
+		}
 	}
 	return nil
 }
@@ -540,7 +603,12 @@ func resumeServices(req resumeServicesRequest) error {
 			return errors.New(fmt.Sprintf("service %s already exists", str.name))
 		}
 
-		go svc.Serve()
+		if err := startService(str.name, svc); err != nil {
+			svc.Close()
+			registry.ServiceRegistry().Unregister(str.name)
+			rollbackResumedServices(resumedServices)
+			return errors.New(fmt.Sprintf("resume service %s failed: %s", str.name, err.Error()))
+		}
 
 		// 记录已成功恢复的服务
 		resumedServices = append(resumedServices, str)
@@ -591,7 +659,12 @@ func rollbackPausedServices(pausedServices []struct {
 			continue // 回滚失败，记录日志但继续处理其他服务
 		}
 
-		go svc.Serve()
+		if err := startService(pss.name, svc); err != nil {
+			logger.Default().Errorf("rollback paused service %s failed: %v", pss.name, err)
+			registry.ServiceRegistry().Unregister(pss.name)
+			_ = svc.Close()
+			continue
+		}
 
 		// 移除暂停状态标记
 		config.OnUpdate(func(c *config.Config) error {

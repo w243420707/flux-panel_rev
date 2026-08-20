@@ -17,6 +17,7 @@ import javax.servlet.http.HttpServletRequest;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 @Component
@@ -81,8 +82,8 @@ public class LogAspect {
             "【请求日志】用户ID:[%s], IP地址:[%s], 请求方式:[%s], 控制器方法:[%s], 请求参数:[%s], 返回参数:[%s]", user_id, ipAddr, requestMethod, controllerMethod, requestParams, responseParams
         );
         
-        // 打印单条完整日志
-        log.info(logMessage);
+        // 成功请求改为 DEBUG，避免高频节点上报刷屏；异常仍单独保留。
+        log.debug(logMessage);
     }
 
 
@@ -136,10 +137,10 @@ public class LogAspect {
                 "【异常日志】用户ID:[%s], IP地址:[%s], 请求方式:[%s], 控制器方法:[%s], 请求参数:[%s], 异常信息:[%s]", user_id, ipAddr, requestMethod, controllerMethod, requestParams, exceptionMsg
             );
             
-            // 打印单条完整异常日志
-            log.info(errorMessage, ex);
+            // 异常请求保留 ERROR，便于定位实际失败原因。
+            log.error(errorMessage, ex);
         } catch (Exception e) {
-            log.info("记录异常日志时出错: {}", e.getMessage());
+            log.warn("记录异常日志时出错: {}", e.getMessage());
         }
     }
     
@@ -154,8 +155,14 @@ public class LogAspect {
             } else if (args[0] != null && args[0].toString().contains("SecurityContextHolderAwareRequestWrapper")) {
                 return JSON.toJSONString(Arrays.toString(ArrayUtil.remove(args, 0)));
             } else {
+                String[] names = ((CodeSignature) joinPoint.getSignature()).getParameterNames();
+
                 // 检查是否只有一个参数且已经是JSON字符串格式
                 if (args.length == 1 && args[0] != null) {
+                    if (names != null && names.length > 0 && isSensitiveParameter(names[0])) {
+                        return "[已隐藏]";
+                    }
+
                     // 如果参数本身就是字符串且是JSON格式，直接返回
                     if (args[0] instanceof String && ((String) args[0]).startsWith("{") && ((String) args[0]).endsWith("}")) {
                         return (String) args[0];
@@ -167,9 +174,8 @@ public class LogAspect {
                     } catch (Exception e) {
                         // 如果序列化失败，再尝试使用参数名映射
                         Map<String, Object> map = new HashMap<>();
-                        String[] names = ((CodeSignature) joinPoint.getSignature()).getParameterNames();
                         if (names != null) {
-                            map.put(names[0], args[0]);
+                            map.put(names[0], isSensitiveParameter(names[0]) ? "[已隐藏]" : args[0]);
                             return JSON.toJSONString(map);
                         }
                         return JSON.toJSONString(args[0]);
@@ -177,10 +183,9 @@ public class LogAspect {
                 } else {
                     // 多个参数时，使用参数名映射
                     Map<String, Object> map = new HashMap<>();
-                    String[] names = ((CodeSignature) joinPoint.getSignature()).getParameterNames();
                     if (names != null) {
                         for (int i = 0; i < names.length; i++) {
-                            map.put(names[i], args[i]);
+                            map.put(names[i], isSensitiveParameter(names[i]) ? "[已隐藏]" : args[i]);
                         }
                     }
                     return JSON.toJSONString(map);
@@ -189,5 +194,18 @@ public class LogAspect {
         } catch (Exception e) {
             return "获取参数失败: " + e.getMessage();
         }
+    }
+
+    private boolean isSensitiveParameter(String name) {
+        if (name == null) {
+            return false;
+        }
+        String normalized = name.toLowerCase(Locale.ROOT);
+        return normalized.equals("secret")
+                || normalized.equals("rawdata")
+                || normalized.contains("password")
+                || normalized.equals("pwd")
+                || normalized.contains("token")
+                || normalized.equals("authorization");
     }
 }

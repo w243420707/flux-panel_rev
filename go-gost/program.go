@@ -87,10 +87,12 @@ func (p *program) Start() error {
 }
 
 func (p *program) run(cfg *config.Config) error {
-	for _, svc := range registry.ServiceRegistry().GetAll() {
-		svc := svc
+	for name, svc := range registry.ServiceRegistry().GetAll() {
+		name, svc := name, svc
 		go func() {
-			svc.Serve()
+			if err := svc.Serve(); err != nil {
+				logger.Default().Errorf("service %s on %v stopped with error: %v", name, svc.Addr(), err)
+			}
 		}()
 	}
 

@@ -14,6 +14,7 @@ import (
 	"sync" // 新增：用于管理连接状态的互斥锁
 	"time"
 
+	"github.com/go-gost/core/logger"
 	"github.com/go-gost/x/config"
 	"github.com/go-gost/x/internal/util/crypto"
 	"github.com/gorilla/websocket"
@@ -567,13 +568,12 @@ func (w *WebSocketReporter) handleReceivedMessage(messageType int, message []byt
 
 // routeCommand 路由命令到对应的处理函数
 func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
-	jsonBytes, errs := json.Marshal(cmd)
-	if errs != nil {
-		fmt.Println("Error marshaling JSON:", errs)
+	if cmd.Type == "" {
+		logger.Default().Warnf("收到空命令类型 requestId=%s", cmd.RequestId)
 		return
 	}
 
-	fmt.Println("🔔 收到命令: ", string(jsonBytes))
+	logger.Default().Debugf("收到面板命令 type=%s requestId=%s", cmd.Type, cmd.RequestId)
 	var err error
 	var response CommandResponse
 
@@ -647,10 +647,12 @@ func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
 		saveConfig()
 		response.Success = false
 		response.Message = err.Error()
+		logger.Default().Errorf("面板命令执行失败 type=%s requestId=%s: %v", cmd.Type, cmd.RequestId, err)
 	} else {
 		saveConfig()
 		response.Success = true
 		response.Message = "OK"
+		logger.Default().Debugf("面板命令执行成功 type=%s requestId=%s", cmd.Type, cmd.RequestId)
 	}
 
 	w.sendResponse(response)

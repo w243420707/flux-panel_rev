@@ -8,7 +8,6 @@ import com.admin.entity.Node;
 import com.admin.service.NodeService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.web.socket.CloseStatus;
@@ -84,14 +83,22 @@ public class WebSocketServer extends TextWebSocketHandler {
                     // 先发送确认消息
                     sendToUser(session, "{\"type\":\"call\"}", nodeSecret);
                 }else if (decryptedPayload.contains("requestId")) {
-                    log.info("收到消息: {}", decryptedPayload);
                     // 处理命令响应消息
                     try {
                         JSONObject responseJson = JSONObject.parseObject(decryptedPayload);
                         String requestId = responseJson.getString("requestId");
                         String responseMessage = responseJson.getString("message");
                         String responseType = responseJson.getString("type");
+                        boolean responseSuccess = responseJson.getBooleanValue("success");
                         JSONObject responseData = responseJson.getJSONObject("data");
+
+                        if (!responseSuccess || !"OK".equals(responseMessage)) {
+                            log.warn("节点命令执行失败 [nodeId={}, type={}, requestId={}, responseType={}]: {}",
+                                    id, responseType, requestId, responseType, responseMessage);
+                        } else {
+                            log.debug("收到节点响应 [nodeId={}, type={}, requestId={}, success={}, message={}]",
+                                    id, responseType, requestId, responseSuccess, responseMessage);
+                        }
                         
                         if (requestId != null) {
                             CompletableFuture<GostDto> future = pendingRequests.remove(requestId);
@@ -119,7 +126,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                         log.info("处理响应消息失败: {}", e.getMessage(), e);
                     }
                 } else {
-                    log.info("收到消息: {}", decryptedPayload);
+                    log.debug("收到节点消息 [nodeId={}]: {}", id, decryptedPayload);
                 }
 
                 // 如果是节点类型，转发消息给其他会话
@@ -143,7 +150,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                 }
             }
         } catch (Exception e) {
-            log.info("处理WebSocket消息时发生异常: {}", e.getMessage(), e);
+            log.error("处理WebSocket消息时发生异常: {}", e.getMessage(), e);
         }
     }
 
@@ -432,14 +439,12 @@ public class WebSocketServer extends TextWebSocketHandler {
     }
 
     // 点对点发送消息
-    @SneakyThrows
-    public static void sendToUser(WebSocketSession socketSession, String message) {
-        sendToUser(socketSession, message, null);
+    public static boolean sendToUser(WebSocketSession socketSession, String message) {
+        return sendToUser(socketSession, message, null);
     }
 
     // 点对点发送消息（支持加密）
-    @SneakyThrows
-    public static void sendToUser(WebSocketSession socketSession, String message, String nodeSecret) {
+    public static boolean sendToUser(WebSocketSession socketSession, String message, String nodeSecret) {
         if (socketSession != null && socketSession.isOpen()) {
             String sessionId = socketSession.getId();
             Object lock = sessionLocks.computeIfAbsent(sessionId, k -> new Object());
@@ -456,15 +461,18 @@ public class WebSocketServer extends TextWebSocketHandler {
                             }
                         }
                         socketSession.sendMessage(new TextMessage(finalMessage));
+                        return true;
                     }
                 } catch (Exception e) {
-                    log.info("发送WebSocket消息失败 [sessionId={}]: {}", sessionId, e.getMessage());
+                    log.warn("发送WebSocket消息失败 [sessionId={}]: {}", sessionId, e.getMessage());
                     cleanupSession(socketSession);
+                    return false;
                 }
             }
         } else {
             cleanupSession(socketSession);
         }
+        return false;
     }
     
     /**
@@ -503,14 +511,14 @@ public class WebSocketServer extends TextWebSocketHandler {
         WebSocketSession nodeSession = nodeSessions.get(node_id);
 
         if (nodeSession == null) {
-            log.info("发送消息失败：节点 {} 不在线或会话不存在", node_id);
+            log.warn("发送节点命令失败 [nodeId={}, type={}]: 节点不在线或会话不存在", node_id, type);
             GostDto result = new GostDto();
             result.setMsg("节点不在线");
             return result;
         }
 
         if (!nodeSession.isOpen()) {
-            log.info("发送消息失败：节点 {} 连接已断开，清理会话", node_id);
+            log.warn("发送节点命令失败 [nodeId={}, type={}]: 连接已断开，清理会话", node_id, type);
             nodeSessions.remove(node_id);
             sessionLocks.remove(nodeSession.getId());
             GostDto result = new GostDto();
@@ -524,6 +532,7 @@ public class WebSocketServer extends TextWebSocketHandler {
         // 创建CompletableFuture用于等待响应
         CompletableFuture<GostDto> future = new CompletableFuture<>();
         pendingRequests.put(requestId, future);
+        long startedAt = System.nanoTime();
         
         // 获取节点密钥用于加密
         String nodeSecret = (String) nodeSession.getAttributes().get("nodeSecret");
@@ -533,22 +542,33 @@ public class WebSocketServer extends TextWebSocketHandler {
             data.put("type", type);
             data.put("data", msg);
             data.put("requestId", requestId);
-            sendToUser(nodeSession, data.toJSONString(), nodeSecret);
+            if (!sendToUser(nodeSession, data.toJSONString(), nodeSecret)) {
+                pendingRequests.remove(requestId);
+                GostDto result = new GostDto();
+                result.setMsg("发送命令失败：WebSocket 写入失败");
+                log.error("发送节点命令失败 [nodeId={}, type={}, requestId={}, sessionId={}]: WebSocket 写入失败",
+                        node_id, type, requestId, nodeSession.getId());
+                return result;
+            }
             try {
                 GostDto result = future.get(10, TimeUnit.SECONDS);
-                log.info("成功发送消息到节点 {} 并收到响应: {}", node_id, result.getMsg());
+                log.debug("节点命令完成 [nodeId={}, type={}, requestId={}, elapsedMs={}, message={}]",
+                        node_id, type, requestId, elapsedMillis(startedAt), result.getMsg());
                 return result;
             } catch (java.util.concurrent.TimeoutException firstTimeout) {
-                log.info("节点 {} 首次等待响应超时，自动再等 5 秒", node_id);
+                log.warn("节点命令首次等待响应超时 [nodeId={}, type={}, requestId={}，自动再等 5 秒]",
+                        node_id, type, requestId);
                 try {
                     GostDto result = future.get(5, TimeUnit.SECONDS);
-                    log.info("节点 {} 在自动重试后收到响应: {}", node_id, result.getMsg());
+                    log.debug("节点命令在延迟等待后完成 [nodeId={}, type={}, requestId={}, elapsedMs={}, message={}]",
+                            node_id, type, requestId, elapsedMillis(startedAt), result.getMsg());
                     return result;
                 } catch (java.util.concurrent.TimeoutException secondTimeout) {
                     pendingRequests.remove(requestId);
                     GostDto result = new GostDto();
                     result.setMsg("等待响应超时（已自动再等一次）");
-                    log.info("节点 {} 两次等待均超时，可能存在连接问题", node_id);
+                    log.error("节点命令两次等待均超时 [nodeId={}, type={}, requestId={}, elapsedMs={}]: 可能存在连接问题",
+                            node_id, type, requestId, elapsedMillis(startedAt));
                     return result;
                 }
             }
@@ -561,13 +581,19 @@ public class WebSocketServer extends TextWebSocketHandler {
                 result.setMsg("发送消息失败: 线程被中断");
             } else if (e instanceof java.util.concurrent.TimeoutException) {
                 result.setMsg("等待响应超时");
-                log.info("节点 {} 响应超时，可能存在连接问题", node_id);
+                log.error("节点命令响应超时 [nodeId={}, type={}, requestId={}, elapsedMs={}]",
+                        node_id, type, requestId, elapsedMillis(startedAt));
             } else {
                 result.setMsg("发送消息失败: " + e.getMessage());
-                log.info("发送消息到节点 {} 失败: {}", node_id, e.getMessage(), e);
+                log.error("发送节点命令失败 [nodeId={}, type={}, requestId={}]: {}",
+                        node_id, type, requestId, e.getMessage(), e);
             }
             return result;
         }
+    }
+
+    private static long elapsedMillis(long startedAt) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
     }
 
     

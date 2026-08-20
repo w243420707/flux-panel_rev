@@ -153,8 +153,8 @@ public class FlowController extends BaseController {
             return SUCCESS_RESPONSE;
         }
 
-        // 记录日志
-        log.info("节点上报流量数据{}", flowDataList);
+        // 流量上报频率很高，默认只在 DEBUG 级别记录，避免刷屏。
+        log.debug("节点上报流量: service={}, upload={}, download={}", flowDataList.getN(), flowDataList.getU(), flowDataList.getD());
         // 4. 处理流量数据
         return processFlowData(flowDataList);
     }
