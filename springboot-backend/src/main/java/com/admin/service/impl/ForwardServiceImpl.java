@@ -214,7 +214,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                     }
 
                     // 检查原用户的流量和转发数量限制
-                    R quotaCheckResult = checkForwardQuota(existForward.getUserId(), tunnel.getId().intValue(), userTunnel, originalUser, forwardUpdateDto.getId());
+                    R quotaCheckResult = checkForwardQuota(existForward.getUserId(), originalUser, forwardUpdateDto.getId());
                     if (quotaCheckResult.getCode() != 0) {
                         return R.err("用户" + quotaCheckResult.getMsg());
                     }
@@ -1162,8 +1162,8 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             return UserPermissionResult.error("该隧道流量已用完");
         }
 
-        // 转发数量限制检查
-        R quotaCheckResult = checkForwardQuota(currentUser.getUserId(), tunnel.getId().intValue(), userTunnel, userInfo, excludeForwardId);
+        // 仅检查账号总转发数量，不再限制单个隧道的转发数量
+        R quotaCheckResult = checkForwardQuota(currentUser.getUserId(), userInfo, excludeForwardId);
         if (quotaCheckResult.getCode() != 0) {
             return UserPermissionResult.error(quotaCheckResult.getMsg());
         }
@@ -1174,25 +1174,15 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     /**
      * 检查用户转发数量限制
      */
-    private R checkForwardQuota(Integer userId, Integer tunnelId, UserTunnel userTunnel, User userInfo, Long excludeForwardId) {
+    private R checkForwardQuota(Integer userId, User userInfo, Long excludeForwardId) {
         // 检查用户总转发数量限制
-        long userForwardCount = this.count(new QueryWrapper<Forward>().eq("user_id", userId));
+        QueryWrapper<Forward> userQuery = new QueryWrapper<Forward>().eq("user_id", userId);
+        if (excludeForwardId != null) {
+            userQuery.ne("id", excludeForwardId);
+        }
+        long userForwardCount = this.count(userQuery);
         if (userForwardCount >= userInfo.getNum()) {
             return R.err("用户总转发数量已达上限，当前限制：" + userInfo.getNum() + "个");
-        }
-
-        // 检查用户在该隧道的转发数量限制
-        QueryWrapper<Forward> tunnelQuery = new QueryWrapper<Forward>()
-                .eq("user_id", userId)
-                .eq("tunnel_id", tunnelId);
-
-        if (excludeForwardId != null) {
-            tunnelQuery.ne("id", excludeForwardId);
-        }
-
-        long tunnelForwardCount = this.count(tunnelQuery);
-        if (tunnelForwardCount >= userTunnel.getNum()) {
-            return R.err("该隧道转发数量已达上限，当前限制：" + userTunnel.getNum() + "个");
         }
 
         return R.ok();
