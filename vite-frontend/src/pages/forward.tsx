@@ -207,6 +207,7 @@ export default function ForwardPage() {
   const [importResults, setImportResults] = useState<Array<{
     line: string;
     success: boolean;
+    pending?: boolean;
     message: string;
     forwardName?: string;
   }>>([]);
@@ -1020,6 +1021,12 @@ export default function ForwardPage() {
   };
 
   // 导入转发数据
+  const isLikelyTimeoutMessage = (message?: string) => {
+    if (!message) return false;
+    const normalized = message.toLowerCase();
+    return normalized.includes('timeout') || normalized.includes('timed out') || normalized.includes('超时');
+  };
+
   const handleImport = () => {
     setImportData('');
     setImportResults([]);
@@ -1155,6 +1162,14 @@ export default function ForwardPage() {
               message: '创建成功',
               forwardName: name.trim()
             }, ...prev]);
+          } else if (isLikelyTimeoutMessage(response.msg)) {
+            setImportResults(prev => [{
+              line,
+              success: false,
+              pending: true,
+              message: '请求已超时，后端可能仍在处理，请稍后刷新确认',
+              forwardName: name.trim()
+            }, ...prev]);
           } else {
             setImportResults(prev => [{
               line,
@@ -1172,7 +1187,7 @@ export default function ForwardPage() {
       }
       
       
-      toast.success(`导入执行完成`);
+      toast('导入执行完成');
       
       // 导入完成后刷新转发列表
       await loadData(false);
@@ -2272,7 +2287,9 @@ export default function ForwardPage() {
                           className={`p-2 rounded border ${
                             result.success 
                               ? 'bg-success-50 dark:bg-success-100/10 border-success-200 dark:border-success-300/20' 
-                              : 'bg-danger-50 dark:bg-danger-100/10 border-danger-200 dark:border-danger-300/20'
+                              : result.pending
+                                ? 'bg-warning-50 dark:bg-warning-100/10 border-warning-200 dark:border-warning-300/20'
+                                : 'bg-danger-50 dark:bg-danger-100/10 border-danger-200 dark:border-danger-300/20'
                           }`}
                         >
                           <div className="flex items-center gap-2">
@@ -2280,6 +2297,8 @@ export default function ForwardPage() {
                               <svg className="w-3 h-3 text-success-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                               </svg>
+                            ) : result.pending ? (
+                              <span className="w-3 h-3 flex-shrink-0 text-center text-xs font-bold text-warning-600">?</span>
                             ) : (
                               <svg className="w-3 h-3 text-danger-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                 <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -2288,15 +2307,15 @@ export default function ForwardPage() {
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-0.5">
                                 <span className={`text-xs font-medium ${
-                                  result.success ? 'text-success-700 dark:text-success-300' : 'text-danger-700 dark:text-danger-300'
+                                  result.success ? 'text-success-700 dark:text-success-300' : result.pending ? 'text-warning-700 dark:text-warning-300' : 'text-danger-700 dark:text-danger-300'
                                 }`}>
-                                  {result.success ? '成功' : '失败'}
+                                  {result.success ? '成功' : result.pending ? '待确认' : '失败'}
                                 </span>
                                 <span className="text-xs text-default-500">|</span>
                                 <code className="text-xs font-mono text-default-600 truncate">{result.line}</code>
                               </div>
                               <div className={`text-xs ${
-                                result.success ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'
+                                result.success ? 'text-success-600 dark:text-success-400' : result.pending ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400'
                               }`}>
                                 {result.message}
                               </div>

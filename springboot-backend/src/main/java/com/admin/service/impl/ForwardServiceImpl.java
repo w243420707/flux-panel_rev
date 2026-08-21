@@ -114,7 +114,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         // 6. 获取所需的节点信息
         NodeInfo nodeInfo = getRequiredNodes(tunnel);
         if (nodeInfo.isHasError()) {
-            this.removeById(forward.getId());
+            updateForwardStatusToError(forward);
             return R.err(nodeInfo.getErrorMessage());
         }
 
@@ -122,7 +122,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         if (Boolean.TRUE.equals(forwardDto.getForceClearPort())) {
             R releaseResult = forceReleaseForwardPorts(nodeInfo, forward, tunnel);
             if (releaseResult.getCode() != 0) {
-                this.removeById(forward.getId());
+                updateForwardStatusToError(forward);
                 return releaseResult;
             }
         }
@@ -130,7 +130,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         R gostResult = createGostServices(forward, tunnel, permissionResult.getLimiter(), nodeInfo, permissionResult.getUserTunnel());
 
         if (gostResult.getCode() != 0) {
-            this.removeById(forward.getId());
+            updateForwardStatusToError(forward);
             return buildGostFailureResponse(gostResult.getMsg(), forward);
         }
 
@@ -1838,6 +1838,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             return;
         }
         forward.setStatus(FORWARD_STATUS_ERROR);
+        forward.setUpdatedTime(System.currentTimeMillis());
         this.updateById(forward);
     }
 
