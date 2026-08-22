@@ -63,6 +63,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       LOG_DIR: /app/logs
+      NODE_ASSETS_DIR: /opt/flux-panel/node-assets
       JAVA_OPTS: "${BACKEND_JAVA_OPTS:--Xms64m -Xmx256m -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai}"
       DB_MAX_POOL_SIZE: ${DB_MAX_POOL_SIZE:-8}
       DB_MIN_IDLE: ${DB_MIN_IDLE:-1}
@@ -74,6 +75,8 @@ services:
       - "127.0.0.1:${BACKEND_PORT:-6365}:6365"
     volumes:
       - backend_logs:/app/logs
+      - ./install.sh:/opt/flux-panel/node-assets/install.sh:ro
+      - ./go-gost/releases:/opt/flux-panel/node-assets/releases:ro
     depends_on:
       mysql:
         condition: service_healthy

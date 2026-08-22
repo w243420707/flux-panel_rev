@@ -8,9 +8,8 @@ LOG_DIR="/var/log/gost"
 LOG_FILE="${LOG_DIR}/gost.log"
 SERVICE_FILE="/etc/systemd/system/gost.service"
 LOGROTATE_FILE="/etc/logrotate.d/gost"
-REPO_OWNER="w243420707"
-REPO_NAME="flux-panel_rev"
-RAW_BINARY_BASE_URL="${GOST_BINARY_BASE_URL:-https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/refs/heads/main/go-gost/releases}"
+BINARY_SOURCE_FILE="${INSTALL_DIR}/source.conf"
+BINARY_BASE_URL="${GOST_BINARY_BASE_URL:-}"
 
 ACTION=""
 SERVER_ADDR=""
@@ -48,11 +47,13 @@ Actions:
 Options:
   -a, --addr ADDR    Panel/server address
   -s, --secret KEY   Node secret
+  -b, --binary-base-url URL
+                     Panel URL serving node releases
   -y, --yes         Non-interactive yes for confirmations
   -h, --help        Show this help
 
 Binary source:
-  ${RAW_BINARY_BASE_URL}/gost-linux-\${ARCH}
+  ${BINARY_BASE_URL:-not configured}/gost-linux-\${ARCH}
 
 Supported Linux architectures:
   amd64, arm64, armv7, armv6
@@ -184,7 +185,95 @@ binary_url() {
     printf '%s' "${GOST_BINARY_URL}"
     return 0
   fi
-  printf '%s/%s' "${RAW_BINARY_BASE_URL}" "$(binary_name)"
+  [[ -n "${BINARY_BASE_URL}" ]] || die "No node binary source configured. Use -b/--binary-base-url or run the installer from the panel."
+  printf '%s/%s' "${BINARY_BASE_URL%/}" "$(binary_name)"
+}
+
+trim_whitespace() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "${value}"
+}
+
+normalize_base_url() {
+  local source
+  source="$(trim_whitespace "${1:-}")"
+  if [[ -z "${source}" ]]; then
+    printf ''
+    return 0
+  fi
+
+  case "${source}" in
+    http://*|https://*)
+      printf '%s' "${source%/}"
+      ;;
+    ws://*)
+      printf 'http://%s' "${source#ws://}"
+      ;;
+    wss://*)
+      printf 'https://%s' "${source#wss://}"
+      ;;
+    *)
+      printf 'https://%s' "${source#/}"
+      ;;
+  esac
+}
+
+derive_binary_base_url() {
+  local source
+  source="$(normalize_base_url "${1:-}")"
+  [[ -n "${source}" ]] || return 1
+  printf '%s/node/releases' "${source%/}"
+}
+
+load_binary_source() {
+  if [[ -n "${GOST_BINARY_BASE_URL:-}" ]]; then
+    BINARY_BASE_URL="${GOST_BINARY_BASE_URL}"
+  elif [[ -z "${BINARY_BASE_URL}" && -f "${BINARY_SOURCE_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    . "${BINARY_SOURCE_FILE}"
+  fi
+  BINARY_BASE_URL="$(normalize_base_url "${BINARY_BASE_URL}")"
+}
+
+read_config_value() {
+  local key="$1" file="$2"
+  [[ -f "${file}" ]] || return 1
+  sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "${file}" | head -n 1
+}
+
+resolve_binary_source() {
+  if [[ -n "${GOST_BINARY_URL:-}" ]]; then
+    return 0
+  fi
+
+  if [[ -z "${BINARY_BASE_URL}" ]]; then
+    load_binary_source
+  fi
+
+  if [[ -z "${BINARY_BASE_URL}" && -n "${SERVER_ADDR:-}" ]]; then
+    BINARY_BASE_URL="$(derive_binary_base_url "${SERVER_ADDR}")"
+  fi
+
+  if [[ -z "${BINARY_BASE_URL}" ]]; then
+    local saved_addr
+    saved_addr="$(read_config_value "addr" "${INSTALL_DIR}/config.json" 2>/dev/null || true)"
+    if [[ -n "${saved_addr}" ]]; then
+      BINARY_BASE_URL="$(derive_binary_base_url "${saved_addr}")"
+    fi
+  fi
+
+  [[ -n "${BINARY_BASE_URL}" ]] || die "No node binary source configured. Use -b/--binary-base-url or install from the panel."
+  BINARY_BASE_URL="$(normalize_base_url "${BINARY_BASE_URL}")"
+  write_binary_source
+}
+
+write_binary_source() {
+  [[ -n "${BINARY_BASE_URL}" ]] || return 0
+  mkdir -p "${INSTALL_DIR}"
+  printf 'BINARY_BASE_URL=%q\n' "${BINARY_BASE_URL%/}" > "${BINARY_SOURCE_FILE}"
+  chmod 600 "${BINARY_SOURCE_FILE}"
 }
 
 prompt_config() {
@@ -230,7 +319,7 @@ download_binary() {
   log "Downloading node binary from: ${url}"
   curl -fsSL --retry 3 --retry-delay 2 "${url}" -o "${tmp_file}" || {
     rm -f "${tmp_file}"
-    die "Download failed. Make sure the repository contains $(binary_name) under go-gost/releases/."
+    die "Download failed. Make sure the panel is updated and serves $(binary_name) under /node/releases/."
   }
 
   chmod 755 "${tmp_file}"
@@ -253,7 +342,8 @@ verify_binary_checksum() {
     return 0
   fi
 
-  manifest_url="${RAW_BINARY_BASE_URL}/SHA256SUMS"
+  [[ -n "${BINARY_BASE_URL}" ]] || die "No node binary source configured."
+  manifest_url="${BINARY_BASE_URL%/}/SHA256SUMS"
   manifest_file="$(mktemp)"
   if ! curl -fsSL --retry 3 --retry-delay 2 "${manifest_url}" -o "${manifest_file}"; then
     rm -f "${manifest_file}"
@@ -370,6 +460,7 @@ install_flow() {
   detect_os
   install_packages
   prompt_config
+  resolve_binary_source
 
   if systemctl list-unit-files --type=service | grep -Fq "${APP_NAME}.service"; then
     stop_service
@@ -400,6 +491,8 @@ update_flow() {
     prompt_config
     write_config
   fi
+
+  resolve_binary_source
 
   setup_logging
   stop_service
@@ -479,6 +572,11 @@ parse_args() {
       -s|--secret)
         [[ $# -ge 2 ]] || die "$1 requires a value."
         SECRET="${2:-}"
+        shift 2
+        ;;
+      -b|--binary-base-url)
+        [[ $# -ge 2 ]] || die "$1 requires a value."
+        BINARY_BASE_URL="${2:-}"
         shift 2
         ;;
       -y|--yes)

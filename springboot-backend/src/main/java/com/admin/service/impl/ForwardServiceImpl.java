@@ -48,6 +48,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     private static final int TUNNEL_TYPE_TUNNEL_FORWARD = 2;
     private static final int FORWARD_STATUS_ACTIVE = 1;
     private static final int FORWARD_STATUS_PAUSED = 0;
+    private static final int FORWARD_STATUS_PENDING = 2;
     private static final int FORWARD_STATUS_ERROR = -1;
     private static final int TUNNEL_STATUS_ACTIVE = 1;
     private static final int PORT_CONFLICT_CODE = -409;
@@ -130,7 +131,11 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         R gostResult = createGostServices(forward, tunnel, permissionResult.getLimiter(), nodeInfo, permissionResult.getUserTunnel());
 
         if (gostResult.getCode() != 0) {
-            updateForwardStatusToError(forward);
+            if (isLikelyTimeoutMessage(gostResult.getMsg())) {
+                updateForwardStatusToPending(forward);
+            } else {
+                updateForwardStatusToError(forward);
+            }
             return buildGostFailureResponse(gostResult.getMsg(), forward);
         }
 
@@ -1833,6 +1838,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         updateForwardStatusToError(forward, true);
     }
 
+    private void updateForwardStatusToPending(Forward forward) {
+        updateForwardStatusToPending(forward, true);
+    }
+
     private void updateForwardStatusToError(Forward forward, boolean markForwardError) {
         if (!markForwardError) {
             return;
@@ -1840,6 +1849,25 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         forward.setStatus(FORWARD_STATUS_ERROR);
         forward.setUpdatedTime(System.currentTimeMillis());
         this.updateById(forward);
+    }
+
+    private void updateForwardStatusToPending(Forward forward, boolean markForwardPending) {
+        if (!markForwardPending) {
+            return;
+        }
+        forward.setStatus(FORWARD_STATUS_PENDING);
+        forward.setUpdatedTime(System.currentTimeMillis());
+        this.updateById(forward);
+    }
+
+    private boolean isLikelyTimeoutMessage(String message) {
+        if (message == null) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("timeout")
+                || normalized.contains("timed out")
+                || normalized.contains("超时");
     }
 
     /**

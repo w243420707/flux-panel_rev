@@ -64,7 +64,10 @@ public class NodeController extends BaseController {
     @PostMapping("/install")
     public R getInstallCommand(@RequestBody Map<String, Object> params) {
         Long id = Long.valueOf(params.get("id").toString());
-        return nodeService.getInstallCommand(id);
+        String publicBaseUrl = params.get("publicBaseUrl") == null
+                ? null
+                : params.get("publicBaseUrl").toString();
+        return nodeService.getInstallCommand(id, publicBaseUrl);
     }
 
     @LogAnnotation

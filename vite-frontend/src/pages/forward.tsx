@@ -61,6 +61,7 @@ interface Forward {
   inFlow: number;
   outFlow: number;
   serviceRunning: boolean;
+  pending?: boolean;
   createdTime: string;
   userName?: string;
   userId?: number;
@@ -306,7 +307,8 @@ export default function ForwardPage() {
       if (forwardsRes.code === 0) {
         const forwardsData = forwardsRes.data?.map((forward: any) => ({
           ...forward,
-          serviceRunning: forward.status === 1
+          serviceRunning: forward.status === 1,
+          pending: forward.status === 2
         })) || [];
         setForwards(forwardsData);
         
@@ -1206,6 +1208,8 @@ export default function ForwardPage() {
         return { color: 'success', text: '正常' };
       case 0:
         return { color: 'warning', text: '暂停' };
+      case 2:
+        return { color: 'warning', text: '待确认' };
       case -1:
         return { color: 'danger', text: '异常' };
       default:

@@ -682,6 +682,11 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
      */
     @Override
     public R getInstallCommand(Long id) {
+        return getInstallCommand(id, null);
+    }
+
+    @Override
+    public R getInstallCommand(Long id, String publicBaseUrl) {
         // 1. 验证节点是否存在
         Node node = this.getById(id);
         if (node == null) {
@@ -689,7 +694,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
 
         // 2. 构建安装命令
-        return buildInstallCommand(node);
+        return buildInstallCommand(node, publicBaseUrl);
     }
 
     /**
@@ -698,59 +703,94 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
      * @param node 节点对象
      * @return 格式化的安装命令
      */
-    private R buildInstallCommand(Node node) {
+    private R buildInstallCommand(Node node, String publicBaseUrl) {
         ViteConfig viteConfig = viteConfigService.getOne(new QueryWrapper<ViteConfig>().eq("name", "ip"));
         if (viteConfig == null) return R.err("请先前往网站配置中设置ip");
 
+        String panelAddress = normalizePanelAddress(viteConfig.getValue());
+        String panelBaseUrl = buildPanelBaseUrl(publicBaseUrl, viteConfig.getValue());
         StringBuilder command = new StringBuilder();
-        
-        // 第一部分：下载安装脚本  
-        command.append("curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/main/install.sh")
+
+        // 第一部分：下载安装脚本
+        command.append("curl -fsSL ").append(shellQuote(panelBaseUrl + "/node/install.sh"))
                .append(" -o ./install.sh && chmod +x ./install.sh && ");
-        
-        // 处理服务器地址，如果是IPv6需要添加方括号
-        String processedServerAddr = processServerAddress(viteConfig.getValue());
-        
+
         // 第二部分：执行安装脚本（去掉-u参数）
         command.append("./install.sh")
-               .append(" -a ").append(processedServerAddr)  // 服务器地址
-               .append(" -s ").append(node.getSecret());    // 节点密钥
-        
+               .append(" -a ").append(shellQuote(panelAddress))  // 服务器地址
+               .append(" -s ").append(shellQuote(node.getSecret()))    // 节点密钥
+               .append(" -b ").append(shellQuote(panelBaseUrl + "/node/releases"));
+
         return R.ok(command.toString());
     }
 
+    private String shellQuote(String value) {
+        if (value == null) {
+            return "''";
+        }
+        return "'" + value.replace("'", "'\"'\"'") + "'";
+    }
+
     /**
-     * 处理服务器地址，确保IPv6地址被方括号包裹
-     * 
+     * 规范化节点连接地址，确保IPv6地址被方括号包裹，并保留已有协议前缀
+     *
      * @param serverAddr 原始服务器地址，格式可能为 host:port
      * @return 处理后的服务器地址
      */
-    private String processServerAddress(String serverAddr) {
+    private String normalizePanelAddress(String serverAddr) {
         if (StrUtil.isBlank(serverAddr)) {
             return serverAddr;
         }
-        
-        // 如果已经被方括号包裹，直接返回
-        if (serverAddr.startsWith("[")) {
-            return serverAddr;
+
+        String trimmed = serverAddr.trim();
+
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")
+                || trimmed.startsWith("ws://") || trimmed.startsWith("wss://")) {
+            return trimmed;
         }
-        
+
+        // 如果已经被方括号包裹，直接返回
+        if (trimmed.startsWith("[")) {
+            return trimmed;
+        }
+
         // 查找最后一个冒号，分离主机和端口
-        int lastColonIndex = serverAddr.lastIndexOf(':');
+        int lastColonIndex = trimmed.lastIndexOf(':');
         if (lastColonIndex == -1) {
             // 没有端口号，直接检查是否需要包裹
-            return isIPv6Address(serverAddr) ? "[" + serverAddr + "]" : serverAddr;
+            return isIPv6Address(trimmed) ? "[" + trimmed + "]" : trimmed;
         }
-        
-        String host = serverAddr.substring(0, lastColonIndex);
-        String port = serverAddr.substring(lastColonIndex);
-        
+
+        String host = trimmed.substring(0, lastColonIndex);
+        String port = trimmed.substring(lastColonIndex);
+
         // 检查主机部分是否为IPv6地址
         if (isIPv6Address(host)) {
             return "[" + host + "]" + port;
         }
-        
-        return serverAddr;
+
+        return trimmed;
+    }
+
+    /**
+     * 构建面板公共基础地址
+     */
+    private String buildPanelBaseUrl(String publicBaseUrl, String fallbackAddress) {
+        String source = StrUtil.isBlank(publicBaseUrl) ? fallbackAddress : publicBaseUrl;
+        if (StrUtil.isBlank(source)) {
+            return source;
+        }
+
+        String trimmed = source.trim();
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            return StrUtil.removeSuffix(trimmed, "/");
+        }
+
+        if (trimmed.startsWith("ws://") || trimmed.startsWith("wss://")) {
+            return StrUtil.removeSuffix(trimmed.replaceFirst("^ws", "http"), "/");
+        }
+
+        return "https://" + StrUtil.removeSuffix(trimmed, "/");
     }
 
     /**

@@ -582,7 +582,7 @@ export default function NodePage() {
     ));
     
     try {
-      const res = await getNodeInstallCommand(node.id);
+      const res = await getNodeInstallCommand(node.id, window.location.origin);
       if (res.code === 0 && res.data) {
         try {
           await navigator.clipboard.writeText(res.data);

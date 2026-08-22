@@ -31408,7 +31408,7 @@ function useAriaButton$1(props, ref) {
     })
   };
 }
-var domAnimation$8 = () => __vitePreload(() => import("./index-B6Ci8KRe.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$8 = () => __vitePreload(() => import("./index-Cf-oJA-j.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple$1 = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -35760,7 +35760,7 @@ function useAriaButton(props, ref) {
     })
   };
 }
-var domAnimation$7 = () => __vitePreload(() => import("./index-B6Ci8KRe.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$7 = () => __vitePreload(() => import("./index-Cf-oJA-j.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -39791,7 +39791,7 @@ const createNode = (data) => Network.post("/node/create", data);
 const getNodeList = () => Network.post("/node/list");
 const updateNode = (data) => Network.post("/node/update", data);
 const deleteNode = (id2) => Network.post("/node/delete", { id: id2 });
-const getNodeInstallCommand = (id2) => Network.post("/node/install", { id: id2 });
+const getNodeInstallCommand = (id2, publicBaseUrl) => Network.post("/node/install", { id: id2, publicBaseUrl });
 const checkNodeWallMonitor = (id2) => Network.post("/node/wall-check", { id: id2 });
 const createTunnel = (data) => Network.post("/tunnel/create", data);
 const getTunnelList = () => Network.post("/tunnel/list");
@@ -39832,7 +39832,7 @@ const getConfigByName = (name) => Network.post("/config/get", { name });
 const updateConfigs = (configMap) => Network.post("/config/update", configMap);
 const checkCaptcha = () => Network.post("/captcha/check");
 const CACHE_PREFIX = "vite_config_";
-const VERSION = "1.3.21";
+const VERSION = "1.3.22";
 const APP_VERSION = "1.0.3";
 const getInitialConfig = () => {
   if (typeof window === "undefined") {
@@ -40142,7 +40142,7 @@ var menuVariants = {
     }
   }
 };
-var domAnimation$6 = () => __vitePreload(() => import("./index-B6Ci8KRe.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$6 = () => __vitePreload(() => import("./index-Cf-oJA-j.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var NavbarMenu = forwardRef$1((props, ref) => {
   var _a, _b;
   const { className, children, portalContainer, motionProps, style, ...otherProps } = props;
@@ -40476,7 +40476,7 @@ function useNavbar(originalProps) {
     getWrapperProps
   };
 }
-var domAnimation$5 = () => __vitePreload(() => import("./index-B6Ci8KRe.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$5 = () => __vitePreload(() => import("./index-Cf-oJA-j.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Navbar$1 = forwardRef$1((props, ref) => {
   const { children, ...otherProps } = props;
   const context = useNavbar({ ...otherProps, ref });
@@ -43523,7 +43523,7 @@ function getViewportSize() {
     height: visualViewport && (visualViewport == null ? void 0 : visualViewport.height) || window.innerHeight
   };
 }
-var domAnimation$4 = () => __vitePreload(() => import("./index-B6Ci8KRe.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$4 = () => __vitePreload(() => import("./index-Cf-oJA-j.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var ModalContent = (props) => {
   const { as, children, role = "dialog", ...otherProps } = props;
   const {
@@ -73483,7 +73483,7 @@ function usePopover$1(originalProps) {
     getContentProps
   };
 }
-var domAnimation$3 = () => __vitePreload(() => import("./index-B6Ci8KRe.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$3 = () => __vitePreload(() => import("./index-Cf-oJA-j.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var FreeSoloPopoverWrapper = forwardRef$1(
   ({
     children,
@@ -75191,7 +75191,7 @@ function useAccordionItem(props) {
     getSubtitleProps
   };
 }
-var domAnimation$2 = () => __vitePreload(() => import("./index-B6Ci8KRe.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$2 = () => __vitePreload(() => import("./index-Cf-oJA-j.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var AccordionItem = forwardRef$1((props, ref) => {
   const {
     Component,
@@ -79668,7 +79668,8 @@ function ForwardPage() {
       if (forwardsRes.code === 0) {
         const forwardsData = ((_a = forwardsRes.data) == null ? void 0 : _a.map((forward) => ({
           ...forward,
-          serviceRunning: forward.status === 1
+          serviceRunning: forward.status === 1,
+          pending: forward.status === 2
         }))) || [];
         setForwards(forwardsData);
         if (viewMode === "direct") {
@@ -80410,6 +80411,8 @@ ${failedPreview}${payload.failures.length > 5 ? "\n..." : ""}
         return { color: "success", text: "正常" };
       case 0:
         return { color: "warning", text: "暂停" };
+      case 2:
+        return { color: "warning", text: "待确认" };
       case -1:
         return { color: "danger", text: "异常" };
       default:
@@ -82836,7 +82839,7 @@ function NodePage() {
       (n2) => n2.id === node.id ? { ...n2, copyLoading: true } : n2
     ));
     try {
-      const res2 = await getNodeInstallCommand(node.id);
+      const res2 = await getNodeInstallCommand(node.id, window.location.origin);
       if (res2.code === 0 && res2.data) {
         try {
           await navigator.clipboard.writeText(res2.data);
@@ -96638,7 +96641,7 @@ function CalendarPicker(props) {
     }
   );
 }
-var domAnimation$1 = () => __vitePreload(() => import("./index-B6Ci8KRe.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$1 = () => __vitePreload(() => import("./index-Cf-oJA-j.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopLayoutWrapper = reactExports.forwardRef(
   (props, ref) => {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref, ...props });
@@ -100642,7 +100645,7 @@ var [PopoverProvider, usePopoverContext] = createContext2$1({
   name: "PopoverContext",
   errorMessage: "usePopoverContext: `context` is undefined. Seems you forgot to wrap all popover components within `<Popover />`"
 });
-var domAnimation = () => __vitePreload(() => import("./index-B6Ci8KRe.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation = () => __vitePreload(() => import("./index-Cf-oJA-j.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopoverContent = (props) => {
   const { as, children, className, ...otherProps } = props;
   const {

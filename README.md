@@ -86,6 +86,8 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 推荐在面板中创建节点后，从“节点管理”页面复制自动生成的节点安装命令执行。
 
+节点安装命令会从当前面板域名下载 `install.sh`、校验文件和对应架构的节点程序，不需要把 GitHub 仓库设为公开。节点执行 `update` 时会沿用安装时保存的面板资源地址。
+
 节点安装脚本会自动：
 
 - 自动识别 Linux CPU 架构，并从本仓库 `go-gost/releases/` 下载对应节点端 `gost` 程序。
@@ -104,6 +106,13 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - TCP 和 UDP 服务会同时创建，使用 UDP 场景时请确认 VPS 防火墙和安全组已放行对应 UDP 端口。
 
 ## 更新日志
+
+### 2026-08-22 v1.3.22
+
+- 节点安装脚本、校验文件和 amd64/arm64/armv7/armv6 二进制改由面板站点托管，节点安装和后续更新不再依赖 GitHub 匿名下载。
+- 节点安装命令自动使用当前面板域名，并保存资源地址到 `/etc/gost/source.conf`，更新时沿用已保存地址。
+- 部署配置增加节点资源只读挂载，Nginx 增加 `/node/` 代理，并关闭该路径访问日志，减少敏感信息和下载日志占用。
+- 前端版本号同步更新到 `1.3.22`。
 
 ### 2026-08-21 v1.3.21
 
