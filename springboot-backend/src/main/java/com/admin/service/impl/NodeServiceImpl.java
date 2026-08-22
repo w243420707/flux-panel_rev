@@ -688,6 +688,11 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
     @Override
     public R getInstallCommand(Long id, String publicBaseUrl) {
+        return getInstallCommand(id, publicBaseUrl, "github");
+    }
+
+    @Override
+    public R getInstallCommand(Long id, String publicBaseUrl, String assetMode) {
         // 1. 验证节点是否存在
         Node node = this.getById(id);
         if (node == null) {
@@ -695,7 +700,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
 
         // 2. 构建安装命令
-        return buildInstallCommand(node, publicBaseUrl);
+        return buildInstallCommand(node, publicBaseUrl, assetMode);
     }
 
     /**
@@ -704,33 +709,26 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
      * @param node 节点对象
      * @return 格式化的安装命令
      */
-    private R buildInstallCommand(Node node, String publicBaseUrl) {
+    private R buildInstallCommand(Node node, String publicBaseUrl, String assetMode) {
         ViteConfig viteConfig = viteConfigService.getOne(new QueryWrapper<ViteConfig>().eq("name", "ip"));
         if (viteConfig == null) return R.err("请先前往网站配置中设置ip");
 
         String panelAddress = normalizePanelAddress(viteConfig.getValue());
         String panelBaseUrl = buildPanelBaseUrl(publicBaseUrl, viteConfig.getValue());
-        String assetBaseUrl = buildNodeAssetBaseUrl();
+        boolean localAssets = "local".equalsIgnoreCase(assetMode);
+        String assetBaseUrl = localAssets ? panelBaseUrl + "/node" : buildNodeAssetBaseUrl();
         StringBuilder command = new StringBuilder();
 
-        command.append("(curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 ")
+        command.append("curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 ")
                .append(shellQuote(assetBaseUrl + "/install.sh"))
-               .append(" -o ./install.sh || ")
-               .append("curl -4 -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 ")
-               .append(shellQuote(assetBaseUrl + "/install.sh"))
-               .append(" -o ./install.sh || ")
-               .append("curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 ")
-               .append(shellQuote(panelBaseUrl + "/node/install.sh"))
-               .append(" -o ./install.sh || ")
-               .append("curl -4 -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 ")
-               .append(shellQuote(panelBaseUrl + "/node/install.sh"))
-               .append(" -o ./install.sh) && chmod +x ./install.sh && ");
+               .append(" -o ./install.sh && chmod +x ./install.sh && ");
 
         command.append("./install.sh")
                .append(" -a ").append(shellQuote(panelAddress))
-               .append(" -s ").append(shellQuote(node.getSecret()))
-               .append(" -b ").append(shellQuote(assetBaseUrl + "/releases"))
-               .append(" -f ").append(shellQuote(panelBaseUrl + "/node/releases"));
+               .append(" -s ").append(shellQuote(node.getSecret()));
+        if (localAssets) {
+            command.append(" -m local");
+        }
 
         return R.ok(command.toString());
     }

@@ -12,6 +12,7 @@ BINARY_SOURCE_FILE="${INSTALL_DIR}/source.conf"
 DEFAULT_BINARY_BASE_URL="${GOST_DEFAULT_BINARY_BASE_URL:-https://raw.githubusercontent.com/w243420707/flux-panel-node-assets/refs/heads/main/releases}"
 BINARY_BASE_URL="${GOST_BINARY_BASE_URL:-}"
 BINARY_FALLBACK_BASE_URL="${GOST_BINARY_FALLBACK_BASE_URL:-}"
+BINARY_SOURCE_MODE="${GOST_BINARY_SOURCE_MODE:-}"
 
 ACTION=""
 SERVER_ADDR=""
@@ -53,6 +54,8 @@ Options:
                      Primary URL serving node releases
   -f, --fallback-binary-base-url URL
                      Fallback URL serving node releases
+  -m, --source-mode MODE
+                     Asset source mode: github or local
   -y, --yes         Non-interactive yes for confirmations
   -h, --help        Show this help
 
@@ -242,9 +245,10 @@ derive_binary_base_url() {
 }
 
 load_binary_source() {
-  if [[ -n "${GOST_BINARY_BASE_URL:-}" ]]; then
-    BINARY_BASE_URL="${GOST_BINARY_BASE_URL}"
+  if [[ -n "${GOST_BINARY_BASE_URL:-}" || -n "${GOST_BINARY_FALLBACK_BASE_URL:-}" || -n "${GOST_BINARY_SOURCE_MODE:-}" ]]; then
+    BINARY_BASE_URL="${GOST_BINARY_BASE_URL:-${BINARY_BASE_URL}}"
     BINARY_FALLBACK_BASE_URL="${GOST_BINARY_FALLBACK_BASE_URL:-${BINARY_FALLBACK_BASE_URL}}"
+    BINARY_SOURCE_MODE="${GOST_BINARY_SOURCE_MODE:-${BINARY_SOURCE_MODE}}"
   elif [[ -z "${BINARY_BASE_URL}" && -f "${BINARY_SOURCE_FILE}" ]]; then
     # shellcheck disable=SC1090
     . "${BINARY_SOURCE_FILE}"
@@ -267,6 +271,14 @@ resolve_binary_source() {
     load_binary_source
   fi
 
+  if [[ -z "${BINARY_SOURCE_MODE}" ]]; then
+    BINARY_SOURCE_MODE="github"
+  fi
+  case "${BINARY_SOURCE_MODE}" in
+    github|local) ;;
+    *) die "Invalid asset source mode: ${BINARY_SOURCE_MODE}. Use github or local." ;;
+  esac
+
   if [[ -z "${BINARY_BASE_URL}" && -n "${SERVER_ADDR:-}" ]]; then
     BINARY_BASE_URL="$(derive_binary_base_url "${SERVER_ADDR}")"
   fi
@@ -281,7 +293,7 @@ resolve_binary_source() {
 
   # Older installations saved the panel URL. Promote them to the public asset
   # repository while keeping the panel URL as a fallback for this update.
-  if [[ -n "${BINARY_BASE_URL}" && -z "${BINARY_FALLBACK_BASE_URL}" && "${BINARY_BASE_URL}" == */node/releases ]]; then
+  if [[ "${BINARY_SOURCE_MODE}" != "local" && -n "${BINARY_BASE_URL}" && -z "${BINARY_FALLBACK_BASE_URL}" && "${BINARY_BASE_URL}" == */node/releases ]]; then
     BINARY_FALLBACK_BASE_URL="${BINARY_BASE_URL}"
     BINARY_BASE_URL="${DEFAULT_BINARY_BASE_URL}"
   fi
@@ -300,6 +312,7 @@ write_binary_source() {
   {
     printf 'BINARY_BASE_URL=%q\n' "${BINARY_BASE_URL%/}"
     printf 'BINARY_FALLBACK_BASE_URL=%q\n' "${BINARY_FALLBACK_BASE_URL%/}"
+    printf 'BINARY_SOURCE_MODE=%q\n' "${BINARY_SOURCE_MODE:-github}"
   } > "${BINARY_SOURCE_FILE}"
   chmod 600 "${BINARY_SOURCE_FILE}"
 }
@@ -658,6 +671,11 @@ parse_args() {
       -f|--fallback-binary-base-url)
         [[ $# -ge 2 ]] || die "$1 requires a value."
         BINARY_FALLBACK_BASE_URL="${2:-}"
+        shift 2
+        ;;
+      -m|--source-mode)
+        [[ $# -ge 2 ]] || die "$1 requires a value."
+        BINARY_SOURCE_MODE="${2:-}"
         shift 2
         ;;
       -y|--yes)

@@ -67,7 +67,10 @@ public class NodeController extends BaseController {
         String publicBaseUrl = params.get("publicBaseUrl") == null
                 ? null
                 : params.get("publicBaseUrl").toString();
-        return nodeService.getInstallCommand(id, publicBaseUrl);
+        String assetMode = params.get("assetMode") == null
+                ? null
+                : params.get("assetMode").toString();
+        return nodeService.getInstallCommand(id, publicBaseUrl, assetMode);
     }
 
     @LogAnnotation

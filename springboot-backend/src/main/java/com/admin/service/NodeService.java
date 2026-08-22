@@ -30,6 +30,8 @@ public interface NodeService extends IService<Node> {
 
     R getInstallCommand(Long id, String publicBaseUrl);
 
+    R getInstallCommand(Long id, String publicBaseUrl, String assetMode);
+
     boolean refreshRuntimeNodeServerIp(Long id,
                                        String reportedPublicIp,
                                        String reportedPublicIpv4,

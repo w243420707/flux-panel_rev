@@ -31408,7 +31408,7 @@ function useAriaButton$1(props, ref) {
     })
   };
 }
-var domAnimation$8 = () => __vitePreload(() => import("./index-CSb5RFlv.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$8 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple$1 = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -35760,7 +35760,7 @@ function useAriaButton(props, ref) {
     })
   };
 }
-var domAnimation$7 = () => __vitePreload(() => import("./index-CSb5RFlv.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$7 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -39791,7 +39791,7 @@ const createNode = (data) => Network.post("/node/create", data);
 const getNodeList = () => Network.post("/node/list");
 const updateNode = (data) => Network.post("/node/update", data);
 const deleteNode = (id2) => Network.post("/node/delete", { id: id2 });
-const getNodeInstallCommand = (id2, publicBaseUrl) => Network.post("/node/install", { id: id2, publicBaseUrl });
+const getNodeInstallCommand = (id2, publicBaseUrl, assetMode = "github") => Network.post("/node/install", { id: id2, publicBaseUrl, assetMode });
 const checkNodeWallMonitor = (id2) => Network.post("/node/wall-check", { id: id2 });
 const createTunnel = (data) => Network.post("/tunnel/create", data);
 const getTunnelList = () => Network.post("/tunnel/list");
@@ -39832,7 +39832,7 @@ const getConfigByName = (name) => Network.post("/config/get", { name });
 const updateConfigs = (configMap) => Network.post("/config/update", configMap);
 const checkCaptcha = () => Network.post("/captcha/check");
 const CACHE_PREFIX = "vite_config_";
-const VERSION = "1.3.26";
+const VERSION = "1.3.27";
 const APP_VERSION = "1.0.3";
 const getInitialConfig = () => {
   if (typeof window === "undefined") {
@@ -40142,7 +40142,7 @@ var menuVariants = {
     }
   }
 };
-var domAnimation$6 = () => __vitePreload(() => import("./index-CSb5RFlv.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$6 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var NavbarMenu = forwardRef$1((props, ref) => {
   var _a, _b;
   const { className, children, portalContainer, motionProps, style, ...otherProps } = props;
@@ -40476,7 +40476,7 @@ function useNavbar(originalProps) {
     getWrapperProps
   };
 }
-var domAnimation$5 = () => __vitePreload(() => import("./index-CSb5RFlv.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$5 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Navbar$1 = forwardRef$1((props, ref) => {
   const { children, ...otherProps } = props;
   const context = useNavbar({ ...otherProps, ref });
@@ -43523,7 +43523,7 @@ function getViewportSize() {
     height: visualViewport && (visualViewport == null ? void 0 : visualViewport.height) || window.innerHeight
   };
 }
-var domAnimation$4 = () => __vitePreload(() => import("./index-CSb5RFlv.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$4 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var ModalContent = (props) => {
   const { as, children, role = "dialog", ...otherProps } = props;
   const {
@@ -73483,7 +73483,7 @@ function usePopover$1(originalProps) {
     getContentProps
   };
 }
-var domAnimation$3 = () => __vitePreload(() => import("./index-CSb5RFlv.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$3 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var FreeSoloPopoverWrapper = forwardRef$1(
   ({
     children,
@@ -75191,7 +75191,7 @@ function useAccordionItem(props) {
     getSubtitleProps
   };
 }
-var domAnimation$2 = () => __vitePreload(() => import("./index-CSb5RFlv.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$2 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var AccordionItem = forwardRef$1((props, ref) => {
   const {
     Component,
@@ -82448,6 +82448,7 @@ function NodePage() {
   const [installCommandModal, setInstallCommandModal] = reactExports.useState(false);
   const [installCommand, setInstallCommand] = reactExports.useState("");
   const [currentNodeName, setCurrentNodeName] = reactExports.useState("");
+  const [installCommandSource, setInstallCommandSource] = reactExports.useState("github");
   const websocketRef = reactExports.useRef(null);
   const reconnectTimerRef = reactExports.useRef(null);
   const reconnectAttemptsRef = reactExports.useRef(0);
@@ -82834,19 +82835,20 @@ function NodePage() {
       setDeleteLoading(false);
     }
   };
-  const handleCopyInstallCommand = async (node) => {
+  const handleCopyInstallCommand = async (node, assetMode) => {
     setNodeList((prev) => prev.map(
       (n2) => n2.id === node.id ? { ...n2, copyLoading: true } : n2
     ));
     try {
-      const res2 = await getNodeInstallCommand(node.id, window.location.origin);
+      const res2 = await getNodeInstallCommand(node.id, window.location.origin, assetMode);
       if (res2.code === 0 && res2.data) {
         try {
           await navigator.clipboard.writeText(res2.data);
-          zt.success("安装命令已复制到剪贴板");
+          zt.success(`${assetMode === "local" ? "本地" : "GitHub"}安装命令已复制`);
         } catch (copyError) {
           setInstallCommand(res2.data);
           setCurrentNodeName(node.name);
+          setInstallCommandSource(assetMode);
           setInstallCommandModal(true);
         }
       } else {
@@ -83131,17 +83133,29 @@ function NodePage() {
               ] })
             ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-1.5", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-1.5", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-1.5", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx(
                   button_default$1,
                   {
                     size: "sm",
                     variant: "flat",
                     color: "success",
-                    onPress: () => handleCopyInstallCommand(node),
+                    onPress: () => handleCopyInstallCommand(node, "github"),
                     isLoading: node.copyLoading,
                     className: "flex-1 min-h-8",
-                    children: "安装"
+                    children: "GitHub 安装"
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  button_default$1,
+                  {
+                    size: "sm",
+                    variant: "flat",
+                    color: "secondary",
+                    onPress: () => handleCopyInstallCommand(node, "local"),
+                    isLoading: node.copyLoading,
+                    className: "flex-1 min-h-8",
+                    children: "本地安装"
                   }
                 ),
                 /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -83351,7 +83365,8 @@ function NodePage() {
         placement: "center",
         children: /* @__PURE__ */ jsxRuntimeExports.jsxs(modal_content_default, { children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs(modal_header_default, { children: [
-            "安装命令 - ",
+            installCommandSource === "local" ? "本地安装命令" : "GitHub 安装命令",
+            " - ",
             currentNodeName
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(modal_body_default, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
@@ -96641,7 +96656,7 @@ function CalendarPicker(props) {
     }
   );
 }
-var domAnimation$1 = () => __vitePreload(() => import("./index-CSb5RFlv.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$1 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopLayoutWrapper = reactExports.forwardRef(
   (props, ref) => {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref, ...props });
@@ -100645,7 +100660,7 @@ var [PopoverProvider, usePopoverContext] = createContext2$1({
   name: "PopoverContext",
   errorMessage: "usePopoverContext: `context` is undefined. Seems you forgot to wrap all popover components within `<Popover />`"
 });
-var domAnimation = () => __vitePreload(() => import("./index-CSb5RFlv.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopoverContent = (props) => {
   const { as, children, className, ...otherProps } = props;
   const {

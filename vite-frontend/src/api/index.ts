@@ -28,8 +28,12 @@ export const createNode = (data: any) => Network.post("/node/create", data);
 export const getNodeList = () => Network.post("/node/list");
 export const updateNode = (data: any) => Network.post("/node/update", data);
 export const deleteNode = (id: number) => Network.post("/node/delete", { id });
-export const getNodeInstallCommand = (id: number, publicBaseUrl?: string) =>
-  Network.post("/node/install", { id, publicBaseUrl });
+export type NodeInstallSource = 'github' | 'local';
+export const getNodeInstallCommand = (
+  id: number,
+  publicBaseUrl?: string,
+  assetMode: NodeInstallSource = 'github'
+) => Network.post("/node/install", { id, publicBaseUrl, assetMode });
 export const checkNodeWallMonitor = (id: number) => Network.post("/node/wall-check", { id });
 export const checkNodeStatus = (nodeId?: number) => {
   const params = nodeId ? { nodeId } : {};
