@@ -25,7 +25,9 @@ import org.springframework.stereotype.Service;
 import javax.annotation.Resource;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -56,6 +58,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     private static final long BYTES_TO_GB = 1024L * 1024L * 1024L;
     private final Object forwardConfigLock = new Object();
+    private final ConcurrentHashMap<Long, Object> nodeConfigLocks = new ConcurrentHashMap<>();
 
     @Resource
     @Lazy
@@ -72,6 +75,9 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Resource(name = "diagnosisExecutor")
     private Executor diagnosisExecutor;
+
+    @Resource(name = "forwardConfigExecutor")
+    private Executor forwardConfigExecutor;
 
 
     @Override
@@ -311,26 +317,35 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             return R.err("端口清理失败：转发或隧道信息不完整");
         }
 
-        String lastError = null;
-        for (Node inNode : nodeInfo.getInNodes()) {
-            GostDto result = GostUtil.ReleasePort(inNode.getId(), forward.getInPort());
-            if (!isGostOperationSuccess(result)) {
-                lastError = result == null ? "节点无响应" : result.getMsg();
-                log.info("Release input port {} failed on node {}: {}", forward.getInPort(), inNode.getId(), lastError);
-            }
-        }
+        R inputResult = executeNodeOperations("release-input-port", nodeInfo.getInNodes(), node -> {
+            GostDto result = GostUtil.ReleasePort(node.getId(), forward.getInPort());
+            return isGostOperationSuccess(result)
+                    ? R.ok()
+                    : R.err(result == null ? "节点无响应" : result.getMsg());
+        });
 
+        R outputResult = R.ok();
         if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD && forward.getOutPort() != null) {
-            for (Node outNode : nodeInfo.getOutNodes()) {
-                GostDto result = GostUtil.ReleasePort(outNode.getId(), forward.getOutPort());
-                if (!isGostOperationSuccess(result)) {
-                    lastError = result == null ? "节点无响应" : result.getMsg();
-                    log.info("Release output port {} failed on node {}: {}", forward.getOutPort(), outNode.getId(), lastError);
-                }
-            }
+            outputResult = executeNodeOperations("release-output-port", nodeInfo.getOutNodes(), node -> {
+                GostDto result = GostUtil.ReleasePort(node.getId(), forward.getOutPort());
+                return isGostOperationSuccess(result)
+                        ? R.ok()
+                        : R.err(result == null ? "节点无响应" : result.getMsg());
+            });
         }
 
-        return lastError == null ? R.ok() : R.err("端口清理失败：" + lastError);
+        if (inputResult.getCode() == 0 && outputResult.getCode() == 0) {
+            return R.ok();
+        }
+
+        List<String> errors = new ArrayList<>();
+        if (inputResult.getCode() != 0) {
+            errors.add(inputResult.getMsg());
+        }
+        if (outputResult.getCode() != 0) {
+            errors.add(outputResult.getMsg());
+        }
+        return R.err("端口清理失败：" + String.join("；", errors));
     }
 
     private String normalizeGostError(String message, Forward forward) {
@@ -1617,102 +1632,217 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     /**
-     * 创建链服务
+     * 在一个下发阶段内并行处理不同节点，同时保证同一节点上的配置命令串行执行。
      */
-    private R createRemoteServices(List<Node> outNodes, String serviceName, Forward forward, String protocol, String interfaceName) {
-        for (Node outNode : outNodes) {
-            R result = createRemoteService(outNode, serviceName, forward, protocol, interfaceName);
-            if (result.getCode() != 0) {
-                return result;
+    private R executeNodeOperations(String phase, List<Node> nodes, NodeConfigOperation operation) {
+        if (nodes == null || nodes.isEmpty()) {
+            return R.ok();
+        }
+
+        Map<Long, Node> uniqueNodes = new LinkedHashMap<>();
+        for (Node node : nodes) {
+            if (node != null && node.getId() != null) {
+                uniqueNodes.putIfAbsent(node.getId(), node);
             }
+        }
+        if (uniqueNodes.isEmpty()) {
+            return R.ok();
+        }
+
+        long startedAt = System.nanoTime();
+        List<CompletableFuture<NodeOperationResult>> futures = new ArrayList<>();
+        for (Node node : uniqueNodes.values()) {
+            futures.add(CompletableFuture.supplyAsync(() -> executeNodeOperation(phase, node, operation), forwardConfigExecutor));
+        }
+
+        int successCount = 0;
+        List<String> failures = new ArrayList<>();
+        for (CompletableFuture<NodeOperationResult> future : futures) {
+            NodeOperationResult result;
+            try {
+                result = future.join();
+            } catch (Exception e) {
+                failures.add("未知节点: " + safeExceptionMessage(e));
+                continue;
+            }
+
+            if (result.isSuccess()) {
+                successCount++;
+            } else {
+                failures.add(formatNode(result.getNode()) + ": " + result.getMessage());
+            }
+        }
+
+        long elapsedMs = elapsedMillis(startedAt);
+        log.debug("转发节点配置阶段完成 [phase={}, total={}, success={}, failed={}, elapsedMs={}]",
+                phase, uniqueNodes.size(), successCount, failures.size(), elapsedMs);
+        if (!failures.isEmpty()) {
+            log.warn("转发节点配置阶段存在失败 [phase={}, failedNodes={}]", phase, failures);
+            return R.err("节点下发失败（" + phase + "）：" + String.join("；", failures));
         }
         return R.ok();
     }
 
-    private R updateRemoteServices(List<Node> outNodes, String serviceName, Forward forward, String protocol, String interfaceName) {
-        for (Node outNode : outNodes) {
-            R result = updateRemoteService(outNode, serviceName, forward, protocol, interfaceName);
-            if (result.getCode() != 0) {
-                return result;
+    private NodeOperationResult executeNodeOperation(String phase, Node node, NodeConfigOperation operation) {
+        long startedAt = System.nanoTime();
+        try {
+            Object nodeLock = nodeConfigLocks.computeIfAbsent(node.getId(), ignored -> new Object());
+            R result;
+            synchronized (nodeLock) {
+                result = operation.execute(node);
             }
+            if (result == null) {
+                return NodeOperationResult.failure(node, "节点未返回结果");
+            }
+            if (result.getCode() != 0) {
+                return NodeOperationResult.failure(node, operationMessage(result));
+            }
+            log.debug("转发节点配置完成 [phase={}, nodeId={}, elapsedMs={}]", phase, node.getId(), elapsedMillis(startedAt));
+            return NodeOperationResult.success(node);
+        } catch (Exception e) {
+            return NodeOperationResult.failure(node, safeExceptionMessage(e));
         }
-        return R.ok();
+    }
+
+    private String operationMessage(GostDto result) {
+        if (result == null || result.getMsg() == null || result.getMsg().trim().isEmpty()) {
+            return "节点无响应";
+        }
+        return result.getMsg();
+    }
+
+    private String operationMessage(R result) {
+        if (result == null || result.getMsg() == null || result.getMsg().trim().isEmpty()) {
+            return "节点无响应";
+        }
+        return result.getMsg();
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+    }
+
+    private String safeExceptionMessage(Exception exception) {
+        Throwable cause = exception;
+        while (cause.getCause() != null && cause.getCause() != cause) {
+            cause = cause.getCause();
+        }
+        String message = cause.getMessage();
+        return message == null || message.trim().isEmpty() ? cause.getClass().getSimpleName() : message;
+    }
+
+    private String formatNode(Node node) {
+        if (node == null) {
+            return "未知节点";
+        }
+        String name = node.getName();
+        return name == null || name.trim().isEmpty()
+                ? "节点#" + node.getId()
+                : name + "(#" + node.getId() + ")";
+    }
+
+    @FunctionalInterface
+    private interface NodeConfigOperation {
+        R execute(Node node);
+    }
+
+    @Data
+    private static class NodeOperationResult {
+        private final Node node;
+        private final boolean success;
+        private final String message;
+
+        private NodeOperationResult(Node node, boolean success, String message) {
+            this.node = node;
+            this.success = success;
+            this.message = message;
+        }
+
+        private static NodeOperationResult success(Node node) {
+            return new NodeOperationResult(node, true, null);
+        }
+
+        private static NodeOperationResult failure(Node node, String message) {
+            return new NodeOperationResult(node, false, message);
+        }
+    }
+
+    /**
+     * 创建链服务
+     */
+    private R createRemoteServices(List<Node> outNodes, String serviceName, Forward forward, String protocol, String interfaceName) {
+        return executeNodeOperations("create-remote-service", outNodes,
+                node -> createRemoteService(node, serviceName, forward, protocol, interfaceName));
+    }
+
+    private R updateRemoteServices(List<Node> outNodes, String serviceName, Forward forward, String protocol, String interfaceName) {
+        return executeNodeOperations("update-remote-service", outNodes,
+                node -> updateRemoteService(node, serviceName, forward, protocol, interfaceName));
     }
 
     private R createChainServices(List<Node> inNodes, String serviceName, List<String> outAddresses, String protocol, String interfaceName, String strategy) {
         if (outAddresses == null || outAddresses.isEmpty()) {
             return R.err("出口节点没有可用服务器 IP，请等待节点上线自动识别，或手动填写服务器 IP");
         }
-        for (Node inNode : inNodes) {
-            R result = createChainService(inNode, serviceName, outAddresses, protocol, interfaceName, strategy);
-            if (result.getCode() != 0) {
-                return result;
-            }
-        }
-        return R.ok();
+        return executeNodeOperations("create-chain-service", inNodes,
+                node -> createChainService(node, serviceName, outAddresses, protocol, interfaceName, strategy));
     }
 
     private R updateChainServices(List<Node> inNodes, String serviceName, List<String> outAddresses, String protocol, String interfaceName, String strategy) {
         if (outAddresses == null || outAddresses.isEmpty()) {
             return R.err("出口节点没有可用服务器 IP，请等待节点上线自动识别，或手动填写服务器 IP");
         }
-        for (Node inNode : inNodes) {
-            R result = updateChainService(inNode, serviceName, outAddresses, protocol, interfaceName, strategy);
-            if (result.getCode() != 0) {
-                return result;
-            }
-        }
-        return R.ok();
+        return executeNodeOperations("update-chain-service", inNodes,
+                node -> updateChainService(node, serviceName, outAddresses, protocol, interfaceName, strategy));
     }
 
     private R createMainServices(List<Node> inNodes, String serviceName, Forward forward, Integer limiter, Integer tunnelType, Tunnel tunnel, String strategy, String interfaceName) {
-        for (Node inNode : inNodes) {
-            R result = createMainService(inNode, serviceName, forward, limiter, tunnelType, tunnel, strategy, interfaceName);
-            if (result.getCode() != 0) {
-                return result;
-            }
-        }
-        return R.ok();
+        return executeNodeOperations("create-main-service", inNodes,
+                node -> createMainService(node, serviceName, forward, limiter, tunnelType, tunnel, strategy, interfaceName));
     }
 
     private R updateMainServices(List<Node> inNodes, String serviceName, Forward forward, Integer limiter, Integer tunnelType, Tunnel tunnel, String strategy, String interfaceName) {
-        for (Node inNode : inNodes) {
-            R result = updateMainService(inNode, serviceName, forward, limiter, tunnelType, tunnel, strategy, interfaceName);
-            if (result.getCode() != 0) {
-                return result;
-            }
-        }
-        return R.ok();
+        return executeNodeOperations("update-main-service", inNodes,
+                node -> updateMainService(node, serviceName, forward, limiter, tunnelType, tunnel, strategy, interfaceName));
     }
 
     private R cleanupGostServices(NodeInfo nodeInfo, String serviceName, Integer tunnelType) {
-        String lastError = null;
-        for (Node inNode : nodeInfo.getInNodes()) {
-            GostDto serviceResult = GostUtil.DeleteService(inNode.getId(), serviceName);
+        R inputResult = executeNodeOperations("cleanup-input-service", nodeInfo.getInNodes(), node -> {
+            List<String> errors = new ArrayList<>();
+            GostDto serviceResult = GostUtil.DeleteService(node.getId(), serviceName);
             if (!isGostOperationSuccess(serviceResult)) {
-                lastError = serviceResult.getMsg();
-                log.info("Delete service failed on node {}: {}", inNode.getId(), serviceResult.getMsg());
+                errors.add("主服务: " + operationMessage(serviceResult));
             }
             if (tunnelType == TUNNEL_TYPE_TUNNEL_FORWARD) {
-                GostDto chainResult = GostUtil.DeleteChains(inNode.getId(), serviceName);
+                GostDto chainResult = GostUtil.DeleteChains(node.getId(), serviceName);
                 if (!isGostOperationSuccess(chainResult)) {
-                    lastError = chainResult.getMsg();
-                    log.info("Delete chain failed on node {}: {}", inNode.getId(), chainResult.getMsg());
+                    errors.add("链服务: " + operationMessage(chainResult));
                 }
             }
-        }
+            return errors.isEmpty() ? R.ok() : R.err(String.join("，", errors));
+        });
 
+        R outputResult = R.ok();
         if (tunnelType == TUNNEL_TYPE_TUNNEL_FORWARD) {
-            for (Node outNode : nodeInfo.getOutNodes()) {
-                GostDto remoteResult = GostUtil.DeleteRemoteService(outNode.getId(), serviceName);
-                if (!isGostOperationSuccess(remoteResult)) {
-                    lastError = remoteResult.getMsg();
-                    log.info("Delete remote service failed on node {}: {}", outNode.getId(), remoteResult.getMsg());
-                }
-            }
+            outputResult = executeNodeOperations("cleanup-remote-service", nodeInfo.getOutNodes(), node -> {
+                GostDto remoteResult = GostUtil.DeleteRemoteService(node.getId(), serviceName);
+                return isGostOperationSuccess(remoteResult)
+                        ? R.ok()
+                        : R.err("远程服务: " + operationMessage(remoteResult));
+            });
         }
 
-        return lastError == null ? R.ok() : R.err(lastError);
+        if (inputResult.getCode() == 0 && outputResult.getCode() == 0) {
+            return R.ok();
+        }
+        List<String> errors = new ArrayList<>();
+        if (inputResult.getCode() != 0) {
+            errors.add(inputResult.getMsg());
+        }
+        if (outputResult.getCode() != 0) {
+            errors.add(outputResult.getMsg());
+        }
+        return R.err(String.join("；", errors));
     }
 
     private List<String> buildOutNodeAddresses(List<Node> outNodes, Integer outPort) {
