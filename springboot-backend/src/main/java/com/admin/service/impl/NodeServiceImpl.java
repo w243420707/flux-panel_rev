@@ -50,6 +50,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     /** 节点默认状态：启用 */
     private static final int NODE_STATUS_ACTIVE = 0;
     private static final int FORWARD_STATUS_ACTIVE = 1;
+    private static final String DEFAULT_NODE_ASSET_BASE_URL = "https://raw.githubusercontent.com/w243420707/flux-panel-node-assets/refs/heads/main";
     
     /** 成功响应消息 */
     private static final String SUCCESS_CREATE_MSG = "节点创建成功";
@@ -709,17 +710,27 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
         String panelAddress = normalizePanelAddress(viteConfig.getValue());
         String panelBaseUrl = buildPanelBaseUrl(publicBaseUrl, viteConfig.getValue());
+        String assetBaseUrl = buildNodeAssetBaseUrl();
         StringBuilder command = new StringBuilder();
 
-        // 第一部分：下载安装脚本
-        command.append("curl -fsSL ").append(shellQuote(panelBaseUrl + "/node/install.sh"))
-               .append(" -o ./install.sh && chmod +x ./install.sh && ");
+        command.append("(curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 ")
+               .append(shellQuote(assetBaseUrl + "/install.sh"))
+               .append(" -o ./install.sh || ")
+               .append("curl -4 -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 ")
+               .append(shellQuote(assetBaseUrl + "/install.sh"))
+               .append(" -o ./install.sh || ")
+               .append("curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 ")
+               .append(shellQuote(panelBaseUrl + "/node/install.sh"))
+               .append(" -o ./install.sh || ")
+               .append("curl -4 -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 ")
+               .append(shellQuote(panelBaseUrl + "/node/install.sh"))
+               .append(" -o ./install.sh) && chmod +x ./install.sh && ");
 
-        // 第二部分：执行安装脚本（去掉-u参数）
         command.append("./install.sh")
-               .append(" -a ").append(shellQuote(panelAddress))  // 服务器地址
-               .append(" -s ").append(shellQuote(node.getSecret()))    // 节点密钥
-               .append(" -b ").append(shellQuote(panelBaseUrl + "/node/releases"));
+               .append(" -a ").append(shellQuote(panelAddress))
+               .append(" -s ").append(shellQuote(node.getSecret()))
+               .append(" -b ").append(shellQuote(assetBaseUrl + "/releases"))
+               .append(" -f ").append(shellQuote(panelBaseUrl + "/node/releases"));
 
         return R.ok(command.toString());
     }
@@ -791,6 +802,17 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
 
         return "https://" + StrUtil.removeSuffix(trimmed, "/");
+    }
+
+    private String buildNodeAssetBaseUrl() {
+        String configured = System.getenv("NODE_ASSET_BASE_URL");
+        if (StrUtil.isNotBlank(configured)) {
+            String normalized = buildPanelBaseUrl(configured, configured);
+            if (StrUtil.isNotBlank(normalized)) {
+                return normalized;
+            }
+        }
+        return DEFAULT_NODE_ASSET_BASE_URL;
     }
 
     /**

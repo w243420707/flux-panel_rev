@@ -64,6 +64,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       LOG_DIR: /app/logs
       NODE_ASSETS_DIR: /opt/flux-panel/node-assets
+      NODE_ASSET_BASE_URL: ${NODE_ASSET_BASE_URL:-https://raw.githubusercontent.com/w243420707/flux-panel-node-assets/refs/heads/main}
       JAVA_OPTS: "${BACKEND_JAVA_OPTS:--Xms64m -Xmx256m -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai}"
       DB_MAX_POOL_SIZE: ${DB_MAX_POOL_SIZE:-8}
       DB_MIN_IDLE: ${DB_MIN_IDLE:-1}

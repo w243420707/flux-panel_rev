@@ -9,7 +9,9 @@ LOG_FILE="${LOG_DIR}/gost.log"
 SERVICE_FILE="/etc/systemd/system/gost.service"
 LOGROTATE_FILE="/etc/logrotate.d/gost"
 BINARY_SOURCE_FILE="${INSTALL_DIR}/source.conf"
+DEFAULT_BINARY_BASE_URL="${GOST_DEFAULT_BINARY_BASE_URL:-https://raw.githubusercontent.com/w243420707/flux-panel-node-assets/refs/heads/main/releases}"
 BINARY_BASE_URL="${GOST_BINARY_BASE_URL:-}"
+BINARY_FALLBACK_BASE_URL="${GOST_BINARY_FALLBACK_BASE_URL:-}"
 
 ACTION=""
 SERVER_ADDR=""
@@ -48,7 +50,9 @@ Options:
   -a, --addr ADDR    Panel/server address
   -s, --secret KEY   Node secret
   -b, --binary-base-url URL
-                     Panel URL serving node releases
+                     Primary URL serving node releases
+  -f, --fallback-binary-base-url URL
+                     Fallback URL serving node releases
   -y, --yes         Non-interactive yes for confirmations
   -h, --help        Show this help
 
@@ -189,6 +193,16 @@ binary_url() {
   printf '%s/%s' "${BINARY_BASE_URL%/}" "$(binary_name)"
 }
 
+binary_url_for_base() {
+  local base_url="${1:-}"
+  if [[ -n "${GOST_BINARY_URL:-}" ]]; then
+    printf '%s' "${GOST_BINARY_URL}"
+    return 0
+  fi
+  [[ -n "${base_url}" ]] || return 1
+  printf '%s/%s' "${base_url%/}" "$(binary_name)"
+}
+
 trim_whitespace() {
   local value="$1"
   value="${value#"${value%%[![:space:]]*}"}"
@@ -230,6 +244,7 @@ derive_binary_base_url() {
 load_binary_source() {
   if [[ -n "${GOST_BINARY_BASE_URL:-}" ]]; then
     BINARY_BASE_URL="${GOST_BINARY_BASE_URL}"
+    BINARY_FALLBACK_BASE_URL="${GOST_BINARY_FALLBACK_BASE_URL:-${BINARY_FALLBACK_BASE_URL}}"
   elif [[ -z "${BINARY_BASE_URL}" && -f "${BINARY_SOURCE_FILE}" ]]; then
     # shellcheck disable=SC1090
     . "${BINARY_SOURCE_FILE}"
@@ -264,15 +279,28 @@ resolve_binary_source() {
     fi
   fi
 
-  [[ -n "${BINARY_BASE_URL}" ]] || die "No node binary source configured. Use -b/--binary-base-url or install from the panel."
+  # Older installations saved the panel URL. Promote them to the public asset
+  # repository while keeping the panel URL as a fallback for this update.
+  if [[ -n "${BINARY_BASE_URL}" && -z "${BINARY_FALLBACK_BASE_URL}" && "${BINARY_BASE_URL}" == */node/releases ]]; then
+    BINARY_FALLBACK_BASE_URL="${BINARY_BASE_URL}"
+    BINARY_BASE_URL="${DEFAULT_BINARY_BASE_URL}"
+  fi
+
+  if [[ -z "${BINARY_BASE_URL}" ]]; then
+    BINARY_BASE_URL="${DEFAULT_BINARY_BASE_URL}"
+  fi
   BINARY_BASE_URL="$(normalize_base_url "${BINARY_BASE_URL}")"
+  BINARY_FALLBACK_BASE_URL="$(normalize_base_url "${BINARY_FALLBACK_BASE_URL}")"
   write_binary_source
 }
 
 write_binary_source() {
   [[ -n "${BINARY_BASE_URL}" ]] || return 0
   mkdir -p "${INSTALL_DIR}"
-  printf 'BINARY_BASE_URL=%q\n' "${BINARY_BASE_URL%/}" > "${BINARY_SOURCE_FILE}"
+  {
+    printf 'BINARY_BASE_URL=%q\n' "${BINARY_BASE_URL%/}"
+    printf 'BINARY_FALLBACK_BASE_URL=%q\n' "${BINARY_FALLBACK_BASE_URL%/}"
+  } > "${BINARY_SOURCE_FILE}"
   chmod 600 "${BINARY_SOURCE_FILE}"
 }
 
@@ -312,25 +340,45 @@ EOF
 
 download_binary() {
   mkdir -p "${INSTALL_DIR}"
-  local url tmp_file
-  url="$(binary_url)"
+  local primary_url fallback_url tmp_file selected_base
   tmp_file="$(mktemp)"
 
-  log "Downloading node binary from: ${url}"
-  curl -fsSL --retry 3 --retry-delay 2 "${url}" -o "${tmp_file}" || {
+  primary_url="$(binary_url_for_base "${BINARY_BASE_URL}")"
+  fallback_url="$(binary_url_for_base "${BINARY_FALLBACK_BASE_URL}")"
+
+  log "Downloading node binary from: ${primary_url}"
+  if download_url_with_ipv4_fallback "${primary_url}" "${tmp_file}"; then
+    selected_base="${BINARY_BASE_URL}"
+  elif [[ -n "${BINARY_FALLBACK_BASE_URL}" && "${BINARY_FALLBACK_BASE_URL}" != "${BINARY_BASE_URL}" ]]; then
+    warn "Primary node asset source failed; trying fallback: ${fallback_url}"
     rm -f "${tmp_file}"
-    die "Download failed. Make sure the panel is updated and serves $(binary_name) under /node/releases/."
-  }
+    tmp_file="$(mktemp)"
+    download_url_with_ipv4_fallback "${fallback_url}" "${tmp_file}" || {
+      rm -f "${tmp_file}"
+      die "Download failed from both node asset sources."
+    }
+    selected_base="${BINARY_FALLBACK_BASE_URL}"
+  else
+    rm -f "${tmp_file}"
+    die "Download failed. Make sure the node asset repository or panel /node/releases/ is reachable."
+  fi
 
   chmod 755 "${tmp_file}"
-  verify_binary_checksum "${tmp_file}" "$(binary_name)"
-  verify_binary "${tmp_file}"
+  verify_binary_checksum "${tmp_file}" "$(binary_name)" "${selected_base}" || {
+    rm -f "${tmp_file}"
+    die "Checksum verification failed for $(binary_name)."
+  }
+  verify_binary "${tmp_file}" || {
+    rm -f "${tmp_file}"
+    die "Downloaded node binary failed validation."
+  }
   install -m 755 "${tmp_file}" "${INSTALL_DIR}/${APP_NAME}"
   rm -f "${tmp_file}"
 }
 
 verify_binary_checksum() {
-  local bin="$1" manifest_name="${2:-$(basename "$1")}" manifest_url manifest_file expected actual
+  local bin="$1" manifest_name="${2:-$(basename "$1")}" base_url="${3:-${BINARY_BASE_URL}}"
+  local manifest_url manifest_file expected actual
 
   if [[ -n "${GOST_BINARY_URL:-}" ]]; then
     warn "Custom binary URL detected; skipped repository checksum verification."
@@ -342,10 +390,10 @@ verify_binary_checksum() {
     return 0
   fi
 
-  [[ -n "${BINARY_BASE_URL}" ]] || die "No node binary source configured."
-  manifest_url="${BINARY_BASE_URL%/}/SHA256SUMS"
+  [[ -n "${base_url}" ]] || return 1
+  manifest_url="${base_url%/}/SHA256SUMS"
   manifest_file="$(mktemp)"
-  if ! curl -fsSL --retry 3 --retry-delay 2 "${manifest_url}" -o "${manifest_file}"; then
+  if ! download_url_with_ipv4_fallback "${manifest_url}" "${manifest_file}"; then
     rm -f "${manifest_file}"
     warn "Checksum manifest not found; skipped checksum verification."
     return 0
@@ -360,8 +408,36 @@ verify_binary_checksum() {
   fi
 
   actual="$(sha256sum "${bin}" | awk '{print $1}')"
-  [[ "${actual}" == "${expected}" ]] || die "Checksum verification failed for ${manifest_name}."
+  [[ "${actual}" == "${expected}" ]] || return 1
   log "Binary checksum verification passed."
+}
+
+download_url() {
+  local url="$1" destination="$2" force_ipv4="${3:-0}"
+  local -a curl_args=(
+    --fail
+    --silent
+    --show-error
+    --location
+    --retry 3
+    --retry-delay 2
+    --connect-timeout 10
+    --max-time 180
+  )
+  if [[ "${force_ipv4}" == "1" ]]; then
+    curl_args+=(--ipv4)
+  fi
+  curl "${curl_args[@]}" "${url}" -o "${destination}"
+}
+
+download_url_with_ipv4_fallback() {
+  local url="$1" destination="$2"
+  if download_url "${url}" "${destination}" 0; then
+    return 0
+  fi
+
+  warn "Default network path failed; retrying over IPv4: ${url}"
+  download_url "${url}" "${destination}" 1
 }
 
 verify_binary() {
@@ -577,6 +653,11 @@ parse_args() {
       -b|--binary-base-url)
         [[ $# -ge 2 ]] || die "$1 requires a value."
         BINARY_BASE_URL="${2:-}"
+        shift 2
+        ;;
+      -f|--fallback-binary-base-url)
+        [[ $# -ge 2 ]] || die "$1 requires a value."
+        BINARY_FALLBACK_BASE_URL="${2:-}"
         shift 2
         ;;
       -y|--yes)
