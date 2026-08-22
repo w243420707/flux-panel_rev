@@ -33,11 +33,23 @@ MYSQL_IMAGE="mysql:5.7"
 PREVIOUS_COMMIT=""
 CURRENT_COMMIT=""
 BUILD_SERVICES=()
+DOCKER_IPV4_HOSTS_TOKEN="flux-panel-rev-docker-ipv4-fallback"
+DOCKER_IPV4_HOSTS_ACTIVE=0
 
 log() { printf '\033[1;32m[INFO]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }
 err() { printf '\033[1;31m[ERR ]\033[0m %s\n' "$*" >&2; }
 die() { err "$*"; exit 1; }
+
+cleanup_docker_ipv4_fallback() {
+  if [[ "${DOCKER_IPV4_HOSTS_ACTIVE}" -eq 1 && -f /etc/hosts ]]; then
+    sed -i "/${DOCKER_IPV4_HOSTS_TOKEN}/d" /etc/hosts 2>/dev/null || true
+    DOCKER_IPV4_HOSTS_ACTIVE=0
+    log "Removed temporary Docker IPv4 fallback entries."
+  fi
+}
+
+trap cleanup_docker_ipv4_fallback EXIT
 
 usage() {
   cat <<EOF
@@ -290,6 +302,81 @@ install_docker() {
   fi
 
   docker compose version >/dev/null 2>&1 || die "Docker Compose is still unavailable after installation."
+  configure_docker_ipv4_fallback
+}
+
+docker_endpoint_reachable() {
+  local family="$1"
+  local host="$2"
+  curl -sS "-${family}" --connect-timeout 4 --max-time 8 -o /dev/null "https://${host}/" >/dev/null 2>&1
+}
+
+resolve_ipv4() {
+  local host="$1"
+  local address=""
+
+  if command -v dig >/dev/null 2>&1; then
+    address="$(dig +short A "${host}" 2>/dev/null | awk '/^[0-9.]+$/ { print; exit }')"
+  fi
+  if [[ -z "${address}" ]] && command -v getent >/dev/null 2>&1; then
+    address="$(getent ahostsv4 "${host}" 2>/dev/null | awk '$1 ~ /^[0-9.]+$/ { print $1; exit }')"
+  fi
+  printf '%s' "${address}"
+}
+
+docker_ipv4_fallback_needed() {
+  local host
+  local ipv4_ok=0
+  local ipv6_failed=0
+  local docker_hosts=(
+    "registry-1.docker.io"
+    "auth.docker.io"
+    "production.cloudflare.docker.com"
+    "production.cloudfront.docker.com"
+  )
+
+  for host in "${docker_hosts[@]}"; do
+    docker_endpoint_reachable 4 "${host}" && ipv4_ok=1 || true
+    docker_endpoint_reachable 6 "${host}" || ipv6_failed=1
+  done
+
+  [[ "${ipv4_ok}" -eq 1 && "${ipv6_failed}" -eq 1 ]]
+}
+
+configure_docker_ipv4_fallback() {
+  [[ "${DOCKER_IPV4_HOSTS_ACTIVE}" -eq 1 ]] && return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  [[ -f /etc/hosts ]] || return 0
+
+  if ! docker_ipv4_fallback_needed; then
+    return 0
+  fi
+
+  local host address
+  local docker_hosts=(
+    "registry-1.docker.io"
+    "auth.docker.io"
+    "production.cloudflare.docker.com"
+    "production.cloudfront.docker.com"
+  )
+
+  warn "VPS IPv6 route is unavailable but Docker registry IPv4 is reachable."
+  warn "Temporarily preferring IPv4 for Docker registry downloads; no domestic mirror will be used."
+
+  for host in "${docker_hosts[@]}"; do
+    address="$(resolve_ipv4 "${host}")"
+    if [[ -n "${address}" ]]; then
+      printf '%s %s %s\n' "${address}" "${host}" "${DOCKER_IPV4_HOSTS_TOKEN}" >> /etc/hosts
+      log "Docker IPv4 fallback: ${host} -> ${address}"
+      DOCKER_IPV4_HOSTS_ACTIVE=1
+    else
+      warn "Could not resolve an IPv4 address for ${host}; leaving normal DNS resolution unchanged."
+    fi
+  done
+
+  if [[ "${DOCKER_IPV4_HOSTS_ACTIVE}" -eq 0 ]]; then
+    warn "Docker IPv4 fallback could not be configured."
+  fi
 }
 
 configure_firewall() {
@@ -648,7 +735,17 @@ build_panel_services() {
 
   for service in "${ordered_services[@]}"; do
     log "Building panel image: ${service}"
-    compose build "${service}"
+    if ! compose build "${service}"; then
+      if [[ "${DOCKER_IPV4_HOSTS_ACTIVE}" -eq 0 ]]; then
+        configure_docker_ipv4_fallback
+      fi
+      if [[ "${DOCKER_IPV4_HOSTS_ACTIVE}" -eq 1 ]]; then
+        warn "Docker image build failed once; retrying with the temporary IPv4 fallback."
+        compose build "${service}"
+      else
+        return 1
+      fi
+    fi
   done
 }
 

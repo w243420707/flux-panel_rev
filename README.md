@@ -107,6 +107,13 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 ## 更新日志
 
+### 2026-08-22 v1.3.24
+
+- 部署脚本增加 Docker 官方镜像 IPv4 兜底：检测到 VPS IPv6 路由不可用但 IPv4 可用时，构建期间临时优先使用 Docker Hub/官方 CDN 的 IPv4 地址。
+- IPv4 兜底只在脚本运行期间生效，脚本结束会自动清理 `/etc/hosts` 临时记录，不关闭 VPS IPv6，也不切换国内镜像。
+- Docker 镜像首次构建失败且检测到 IPv4 兜底条件时会自动重试一次，减少因 CloudFront IPv6 不可达导致的更新失败。
+- 前端版本号同步更新到 `1.3.24`。
+
 ### 2026-08-22 v1.3.23
 
 - 转发配置下发改为按阶段并行处理不同节点，同时保留同一节点内的串行锁，降低多入口、多出口转发的等待时间。
