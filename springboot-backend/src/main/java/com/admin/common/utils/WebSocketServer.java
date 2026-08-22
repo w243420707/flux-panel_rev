@@ -35,6 +35,9 @@ public class WebSocketServer extends TextWebSocketHandler {
     
     // 存储节点ID和对应的WebSocket session映射
     private static final ConcurrentHashMap<Long, WebSocketSession> nodeSessions = new ConcurrentHashMap<>();
+
+    // 保存每个节点最近一次系统指标，管理员页面重新连接时立即回放，避免等待下一次心跳。
+    private static final ConcurrentHashMap<Long, String> latestSystemInfo = new ConcurrentHashMap<>();
     
     // 为每个session提供锁对象，防止并发发送消息
     private static final ConcurrentHashMap<String, Object> sessionLocks = new ConcurrentHashMap<>();
@@ -157,6 +160,8 @@ public class WebSocketServer extends TextWebSocketHandler {
     private void handleNodeSystemInfo(String id, WebSocketSession session, String payload) {
         try {
             JSONObject info = JSONObject.parseObject(payload);
+            Long nodeId = Long.valueOf(id);
+            cacheLatestSystemInfo(nodeId, info);
             String publicIp = firstNonBlank(info.getString("public_ip"), info.getString("publicIp"), info.getString("host_ip"));
             String publicIpv4 = firstNonBlank(info.getString("public_ipv4"), info.getString("publicIpv4"));
             String publicIpv6 = firstNonBlank(info.getString("public_ipv6"), info.getString("publicIpv6"));
@@ -172,7 +177,6 @@ public class WebSocketServer extends TextWebSocketHandler {
                 return;
             }
 
-            Long nodeId = Long.valueOf(id);
             nodeService.refreshRuntimeNodeServerIp(nodeId, effectivePublicIp, publicIpv4, publicIpv6, clientIp);
             rememberRuntimeIps(session, effectivePublicIp, publicIpv4, publicIpv6);
         } catch (Exception e) {
@@ -212,6 +216,46 @@ public class WebSocketServer extends TextWebSocketHandler {
             }
         }
         return null;
+    }
+
+    /**
+     * 缓存最近一次系统指标。公网 IP 不放入回放缓存，避免页面重连时用旧心跳覆盖刚更新的 IP。
+     */
+    private void cacheLatestSystemInfo(Long nodeId, JSONObject info) {
+        if (nodeId == null || info == null) {
+            return;
+        }
+        JSONObject metrics = JSONObject.parseObject(info.toJSONString());
+        metrics.remove("public_ip");
+        metrics.remove("publicIp");
+        metrics.remove("host_ip");
+        metrics.remove("public_ipv4");
+        metrics.remove("publicIpv4");
+        metrics.remove("public_ipv6");
+        metrics.remove("publicIpv6");
+        latestSystemInfo.put(nodeId, metrics.toJSONString());
+    }
+
+    /**
+     * 管理员 WebSocket 建立后立即补发最近指标，避免页面必须等待下一条节点心跳。
+     */
+    private void sendLatestSystemInfo(WebSocketSession session) {
+        latestSystemInfo.forEach((nodeId, payload) -> {
+            JSONObject message = new JSONObject();
+            message.put("id", nodeId);
+            message.put("type", "info");
+            message.put("data", payload);
+            sendToUser(session, message.toJSONString());
+        });
+    }
+
+    /**
+     * 删除节点时同步清理内存中的最近指标。
+     */
+    public static void clearLatestSystemInfo(Long nodeId) {
+        if (nodeId != null) {
+            latestSystemInfo.remove(nodeId);
+        }
     }
 
     /**
@@ -295,6 +339,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                 // 网页管理员连接
                 activeSessions.add(session);
                 log.info("管理员连接建立，sessionId: {}", session.getId());
+                sendLatestSystemInfo(session);
             } else {
                 // 客户端节点连接
                 Long nodeId = Long.valueOf(id);

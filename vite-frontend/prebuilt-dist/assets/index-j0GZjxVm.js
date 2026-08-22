@@ -31408,7 +31408,7 @@ function useAriaButton$1(props, ref) {
     })
   };
 }
-var domAnimation$8 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$8 = () => __vitePreload(() => import("./index-D2NLBlan.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple$1 = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -35760,7 +35760,7 @@ function useAriaButton(props, ref) {
     })
   };
 }
-var domAnimation$7 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$7 = () => __vitePreload(() => import("./index-D2NLBlan.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -39832,7 +39832,7 @@ const getConfigByName = (name) => Network.post("/config/get", { name });
 const updateConfigs = (configMap) => Network.post("/config/update", configMap);
 const checkCaptcha = () => Network.post("/captcha/check");
 const CACHE_PREFIX = "vite_config_";
-const VERSION = "1.3.27";
+const VERSION = "1.3.28";
 const APP_VERSION = "1.0.3";
 const getInitialConfig = () => {
   if (typeof window === "undefined") {
@@ -40142,7 +40142,7 @@ var menuVariants = {
     }
   }
 };
-var domAnimation$6 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$6 = () => __vitePreload(() => import("./index-D2NLBlan.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var NavbarMenu = forwardRef$1((props, ref) => {
   var _a, _b;
   const { className, children, portalContainer, motionProps, style, ...otherProps } = props;
@@ -40476,7 +40476,7 @@ function useNavbar(originalProps) {
     getWrapperProps
   };
 }
-var domAnimation$5 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$5 = () => __vitePreload(() => import("./index-D2NLBlan.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Navbar$1 = forwardRef$1((props, ref) => {
   const { children, ...otherProps } = props;
   const context = useNavbar({ ...otherProps, ref });
@@ -43523,7 +43523,7 @@ function getViewportSize() {
     height: visualViewport && (visualViewport == null ? void 0 : visualViewport.height) || window.innerHeight
   };
 }
-var domAnimation$4 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$4 = () => __vitePreload(() => import("./index-D2NLBlan.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var ModalContent = (props) => {
   const { as, children, role = "dialog", ...otherProps } = props;
   const {
@@ -73483,7 +73483,7 @@ function usePopover$1(originalProps) {
     getContentProps
   };
 }
-var domAnimation$3 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$3 = () => __vitePreload(() => import("./index-D2NLBlan.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var FreeSoloPopoverWrapper = forwardRef$1(
   ({
     children,
@@ -75191,7 +75191,7 @@ function useAccordionItem(props) {
     getSubtitleProps
   };
 }
-var domAnimation$2 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$2 = () => __vitePreload(() => import("./index-D2NLBlan.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var AccordionItem = forwardRef$1((props, ref) => {
   const {
     Component,
@@ -82453,6 +82453,7 @@ function NodePage() {
   const reconnectTimerRef = reactExports.useRef(null);
   const reconnectAttemptsRef = reactExports.useRef(0);
   const runtimeIpCacheRef = reactExports.useRef(/* @__PURE__ */ new Map());
+  const systemInfoCacheRef = reactExports.useRef(/* @__PURE__ */ new Map());
   const maxReconnectAttempts = 5;
   reactExports.useEffect(() => {
     initWebSocket();
@@ -82469,7 +82470,7 @@ function NodePage() {
         const nextNodes = res2.data.map((node) => ({
           ...node,
           connectionStatus: node.status === 1 ? "online" : "offline",
-          systemInfo: null,
+          systemInfo: systemInfoCacheRef.current.get(node.id) || null,
           copyLoading: false,
           wallMonitorChecking: false
         }));
@@ -82477,6 +82478,11 @@ function NodePage() {
         runtimeIpCacheRef.current.forEach((_2, nodeId) => {
           if (!nodeIds.has(nodeId)) {
             runtimeIpCacheRef.current.delete(nodeId);
+          }
+        });
+        systemInfoCacheRef.current.forEach((_2, nodeId) => {
+          if (!nodeIds.has(nodeId)) {
+            systemInfoCacheRef.current.delete(nodeId);
           }
         });
         setNodeList(nextNodes.map((node) => {
@@ -82539,7 +82545,7 @@ function NodePage() {
           return {
             ...node,
             connectionStatus: nextConnectionStatus,
-            systemInfo: messageData === 0 ? null : node.systemInfo
+            systemInfo: node.systemInfo
           };
         }
         return node;
@@ -82556,95 +82562,94 @@ function NodePage() {
         return node;
       }));
     } else if (type === "info") {
-      setNodeList((prev) => prev.map((node) => {
-        if (node.id == id2) {
-          try {
-            let systemInfo;
-            if (typeof messageData === "string") {
-              systemInfo = JSON.parse(messageData);
-            } else {
-              systemInfo = messageData;
+      try {
+        const systemInfo = typeof messageData === "string" ? JSON.parse(messageData) : messageData;
+        const nodeId = Number(id2);
+        const getRuntimeIp = (...keys) => {
+          for (const key of keys) {
+            const value = systemInfo == null ? void 0 : systemInfo[key];
+            if (typeof value === "string" && value.trim()) {
+              return value.trim();
             }
-            const getRuntimeIp = (...keys) => {
-              for (const key of keys) {
-                const value = systemInfo == null ? void 0 : systemInfo[key];
-                if (typeof value === "string" && value.trim()) {
-                  return value.trim();
-                }
+          }
+          return "";
+        };
+        const publicIp = getRuntimeIp("public_ip", "publicIp", "host_ip");
+        const publicIpv4 = getRuntimeIp("public_ipv4", "publicIpv4");
+        const publicIpv6 = getRuntimeIp("public_ipv6", "publicIpv6");
+        const hasRuntimeIp = Boolean(publicIp || publicIpv4 || publicIpv6);
+        const nextServerIp = publicIp || publicIpv4 || publicIpv6;
+        const isIpv4Literal = (value) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value.trim());
+        const isIpv6Literal = (value) => value.includes(":");
+        const baseRuntimeIpPatch = hasRuntimeIp ? {
+          serverIp: nextServerIp,
+          serverIpv4: publicIpv4 || (isIpv4Literal(nextServerIp) ? nextServerIp : ""),
+          serverIpv6: publicIpv6 || (isIpv6Literal(nextServerIp) ? nextServerIp : "")
+        } : {};
+        if (hasRuntimeIp) {
+          runtimeIpCacheRef.current.set(nodeId, {
+            ...baseRuntimeIpPatch,
+            connectionStatus: "online"
+          });
+        }
+        const hasSystemMetrics = systemInfo && (Object.prototype.hasOwnProperty.call(systemInfo, "memory_usage") || Object.prototype.hasOwnProperty.call(systemInfo, "cpu_usage") || Object.prototype.hasOwnProperty.call(systemInfo, "bytes_received") || Object.prototype.hasOwnProperty.call(systemInfo, "bytes_transmitted") || Object.prototype.hasOwnProperty.call(systemInfo, "uptime"));
+        let nextSystemInfo = null;
+        if (hasSystemMetrics) {
+          const currentUpload = parseInt(systemInfo.bytes_transmitted) || 0;
+          const currentDownload = parseInt(systemInfo.bytes_received) || 0;
+          const currentUptime = parseInt(systemInfo.uptime) || 0;
+          const previousSystemInfo = systemInfoCacheRef.current.get(nodeId);
+          let uploadSpeed = 0;
+          let downloadSpeed = 0;
+          if (previousSystemInfo && previousSystemInfo.uptime) {
+            const timeDiff = currentUptime - previousSystemInfo.uptime;
+            if (timeDiff > 0 && timeDiff <= 10) {
+              const uploadDiff = currentUpload - previousSystemInfo.uploadTraffic;
+              const downloadDiff = currentDownload - previousSystemInfo.downloadTraffic;
+              if (uploadDiff >= 0) {
+                uploadSpeed = uploadDiff / timeDiff;
               }
-              return "";
-            };
-            const publicIp = getRuntimeIp("public_ip", "publicIp", "host_ip");
-            const publicIpv4 = getRuntimeIp("public_ipv4", "publicIpv4");
-            const publicIpv6 = getRuntimeIp("public_ipv6", "publicIpv6");
-            const hasRuntimeIp = Boolean(publicIp || publicIpv4 || publicIpv6);
-            const nextServerIp = publicIp || publicIpv4 || publicIpv6 || node.serverIp;
-            const isIpv4Literal = (value) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value.trim());
-            const isIpv6Literal = (value) => value.includes(":");
-            const currentRuntimeIps = [node.serverIp, node.serverIpv4, node.serverIpv6].filter(Boolean);
-            const entryFollowsRuntimeIp = !node.ip || currentRuntimeIps.includes(node.ip);
-            const runtimeIpPatch = hasRuntimeIp ? {
-              ip: entryFollowsRuntimeIp ? nextServerIp : node.ip,
-              serverIp: nextServerIp,
-              serverIpv4: publicIpv4 || (isIpv4Literal(nextServerIp) ? nextServerIp : ""),
-              serverIpv6: publicIpv6 || (isIpv6Literal(nextServerIp) ? nextServerIp : "")
-            } : {};
-            if (hasRuntimeIp) {
-              runtimeIpCacheRef.current.set(Number(id2), {
-                ...runtimeIpPatch,
-                connectionStatus: "online"
-              });
-            }
-            const hasSystemMetrics = systemInfo && (Object.prototype.hasOwnProperty.call(systemInfo, "memory_usage") || Object.prototype.hasOwnProperty.call(systemInfo, "cpu_usage") || Object.prototype.hasOwnProperty.call(systemInfo, "bytes_received") || Object.prototype.hasOwnProperty.call(systemInfo, "bytes_transmitted") || Object.prototype.hasOwnProperty.call(systemInfo, "uptime"));
-            if (!hasSystemMetrics) {
-              return hasRuntimeIp ? {
-                ...node,
-                ...runtimeIpPatch,
-                connectionStatus: "online"
-              } : node;
-            }
-            const currentUpload = parseInt(systemInfo.bytes_transmitted) || 0;
-            const currentDownload = parseInt(systemInfo.bytes_received) || 0;
-            const currentUptime = parseInt(systemInfo.uptime) || 0;
-            let uploadSpeed = 0;
-            let downloadSpeed = 0;
-            if (node.systemInfo && node.systemInfo.uptime) {
-              const timeDiff = currentUptime - node.systemInfo.uptime;
-              if (timeDiff > 0 && timeDiff <= 10) {
-                const lastUpload = node.systemInfo.uploadTraffic || 0;
-                const lastDownload = node.systemInfo.downloadTraffic || 0;
-                const uploadDiff = currentUpload - lastUpload;
-                const downloadDiff = currentDownload - lastDownload;
-                const uploadReset = currentUpload < lastUpload;
-                const downloadReset = currentDownload < lastDownload;
-                if (!uploadReset && uploadDiff >= 0) {
-                  uploadSpeed = uploadDiff / timeDiff;
-                }
-                if (!downloadReset && downloadDiff >= 0) {
-                  downloadSpeed = downloadDiff / timeDiff;
-                }
+              if (downloadDiff >= 0) {
+                downloadSpeed = downloadDiff / timeDiff;
               }
             }
-            return {
-              ...node,
-              ...runtimeIpPatch,
-              connectionStatus: "online",
-              systemInfo: {
-                cpuUsage: parseFloat(systemInfo.cpu_usage) || 0,
-                memoryUsage: parseFloat(systemInfo.memory_usage) || 0,
-                uploadTraffic: currentUpload,
-                downloadTraffic: currentDownload,
-                uploadSpeed,
-                downloadSpeed,
-                uptime: currentUptime
-              }
-            };
-          } catch (error) {
+          }
+          nextSystemInfo = {
+            cpuUsage: parseFloat(systemInfo.cpu_usage) || 0,
+            memoryUsage: parseFloat(systemInfo.memory_usage) || 0,
+            uploadTraffic: currentUpload,
+            downloadTraffic: currentDownload,
+            uploadSpeed,
+            downloadSpeed,
+            uptime: currentUptime
+          };
+          systemInfoCacheRef.current.set(nodeId, nextSystemInfo);
+        }
+        setNodeList((prev) => prev.map((node) => {
+          if (node.id != id2) {
             return node;
           }
-        }
-        return node;
-      }));
+          const currentRuntimeIps = [node.serverIp, node.serverIpv4, node.serverIpv6].filter(Boolean);
+          const entryFollowsRuntimeIp = !node.ip || currentRuntimeIps.includes(node.ip);
+          const runtimeIpPatch = hasRuntimeIp ? {
+            ip: entryFollowsRuntimeIp ? nextServerIp : node.ip,
+            ...baseRuntimeIpPatch
+          } : {};
+          if (hasRuntimeIp) {
+            runtimeIpCacheRef.current.set(nodeId, {
+              ...runtimeIpPatch,
+              connectionStatus: "online"
+            });
+          }
+          return {
+            ...node,
+            ...runtimeIpPatch,
+            connectionStatus: "online",
+            systemInfo: nextSystemInfo || node.systemInfo
+          };
+        }));
+      } catch (error) {
+      }
     }
   };
   const attemptReconnect = () => {
@@ -82673,8 +82678,7 @@ function NodePage() {
     }
     setNodeList((prev) => prev.map((node) => ({
       ...node,
-      connectionStatus: "offline",
-      systemInfo: null
+      connectionStatus: "offline"
     })));
   };
   const formatSpeed = (bytesPerSecond) => {
@@ -82823,6 +82827,8 @@ function NodePage() {
       const res2 = await deleteNode(nodeToDelete.id);
       if (res2.code === 0) {
         zt.success("删除成功");
+        systemInfoCacheRef.current.delete(nodeToDelete.id);
+        runtimeIpCacheRef.current.delete(nodeToDelete.id);
         setNodeList((prev) => prev.filter((n2) => n2.id !== nodeToDelete.id));
         setDeleteModalOpen(false);
         setNodeToDelete(null);
@@ -96656,7 +96662,7 @@ function CalendarPicker(props) {
     }
   );
 }
-var domAnimation$1 = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$1 = () => __vitePreload(() => import("./index-D2NLBlan.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopLayoutWrapper = reactExports.forwardRef(
   (props, ref) => {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref, ...props });
@@ -100660,7 +100666,7 @@ var [PopoverProvider, usePopoverContext] = createContext2$1({
   name: "PopoverContext",
   errorMessage: "usePopoverContext: `context` is undefined. Seems you forgot to wrap all popover components within `<Popover />`"
 });
-var domAnimation = () => __vitePreload(() => import("./index-DmHNe6y1.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation = () => __vitePreload(() => import("./index-D2NLBlan.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopoverContent = (props) => {
   const { as, children, className, ...otherProps } = props;
   const {

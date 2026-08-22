@@ -96,6 +96,7 @@ export default function NodePage() {
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const runtimeIpCacheRef = useRef<Map<number, Partial<Node>>>(new Map());
+  const systemInfoCacheRef = useRef<Map<number, NonNullable<Node['systemInfo']>>>(new Map());
   const maxReconnectAttempts = 5;
 
   useEffect(() => {
@@ -116,7 +117,7 @@ export default function NodePage() {
         const nextNodes = res.data.map((node: any) => ({
           ...node,
           connectionStatus: node.status === 1 ? 'online' : 'offline',
-          systemInfo: null,
+          systemInfo: systemInfoCacheRef.current.get(node.id) || null,
           copyLoading: false,
           wallMonitorChecking: false
         }));
@@ -124,6 +125,11 @@ export default function NodePage() {
         runtimeIpCacheRef.current.forEach((_, nodeId) => {
           if (!nodeIds.has(nodeId)) {
             runtimeIpCacheRef.current.delete(nodeId);
+          }
+        });
+        systemInfoCacheRef.current.forEach((_, nodeId) => {
+          if (!nodeIds.has(nodeId)) {
+            systemInfoCacheRef.current.delete(nodeId);
           }
         });
         setNodeList(nextNodes.map((node: Node) => {
@@ -203,7 +209,7 @@ export default function NodePage() {
           return {
             ...node,
             connectionStatus: nextConnectionStatus,
-            systemInfo: messageData === 0 ? null : node.systemInfo
+            systemInfo: node.systemInfo
           };
         }
         return node;
@@ -220,114 +226,110 @@ export default function NodePage() {
         return node;
       }));
     } else if (type === 'info') {
-      setNodeList(prev => prev.map(node => {
-        if (node.id == id) {
-          try {
-            let systemInfo;
-            if (typeof messageData === 'string') {
-              systemInfo = JSON.parse(messageData);
-            } else {
-              systemInfo = messageData;
+      try {
+        const systemInfo = typeof messageData === 'string'
+          ? JSON.parse(messageData)
+          : messageData;
+        const nodeId = Number(id);
+        const getRuntimeIp = (...keys: string[]) => {
+          for (const key of keys) {
+            const value = systemInfo?.[key];
+            if (typeof value === "string" && value.trim()) {
+              return value.trim();
             }
+          }
+          return "";
+        };
+        const publicIp = getRuntimeIp("public_ip", "publicIp", "host_ip");
+        const publicIpv4 = getRuntimeIp("public_ipv4", "publicIpv4");
+        const publicIpv6 = getRuntimeIp("public_ipv6", "publicIpv6");
+        const hasRuntimeIp = Boolean(publicIp || publicIpv4 || publicIpv6);
+        const nextServerIp = publicIp || publicIpv4 || publicIpv6;
+        const isIpv4Literal = (value: string) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value.trim());
+        const isIpv6Literal = (value: string) => value.includes(':');
 
-            const getRuntimeIp = (...keys: string[]) => {
-              for (const key of keys) {
-                const value = systemInfo?.[key];
-                if (typeof value === "string" && value.trim()) {
-                  return value.trim();
-                }
-              }
-              return "";
-            };
-            const publicIp = getRuntimeIp("public_ip", "publicIp", "host_ip");
-            const publicIpv4 = getRuntimeIp("public_ipv4", "publicIpv4");
-            const publicIpv6 = getRuntimeIp("public_ipv6", "publicIpv6");
-            const hasRuntimeIp = Boolean(publicIp || publicIpv4 || publicIpv6);
-            const nextServerIp = publicIp || publicIpv4 || publicIpv6 || node.serverIp;
-            const isIpv4Literal = (value: string) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value.trim());
-            const isIpv6Literal = (value: string) => value.includes(':');
-            const currentRuntimeIps = [node.serverIp, node.serverIpv4, node.serverIpv6].filter(Boolean);
-            const entryFollowsRuntimeIp = !node.ip || currentRuntimeIps.includes(node.ip);
-            const runtimeIpPatch = hasRuntimeIp ? {
-              ip: entryFollowsRuntimeIp ? nextServerIp : node.ip,
-              serverIp: nextServerIp,
-              serverIpv4: publicIpv4 || (isIpv4Literal(nextServerIp) ? nextServerIp : ''),
-              serverIpv6: publicIpv6 || (isIpv6Literal(nextServerIp) ? nextServerIp : ''),
-            } : {};
-            if (hasRuntimeIp) {
-              runtimeIpCacheRef.current.set(Number(id), {
-                ...runtimeIpPatch,
-                connectionStatus: 'online',
-              });
-            }
+        const baseRuntimeIpPatch = hasRuntimeIp ? {
+          serverIp: nextServerIp,
+          serverIpv4: publicIpv4 || (isIpv4Literal(nextServerIp) ? nextServerIp : ''),
+          serverIpv6: publicIpv6 || (isIpv6Literal(nextServerIp) ? nextServerIp : ''),
+        } : {};
+        if (hasRuntimeIp) {
+          runtimeIpCacheRef.current.set(nodeId, {
+            ...baseRuntimeIpPatch,
+            connectionStatus: 'online',
+          });
+        }
 
-            const hasSystemMetrics =
-              systemInfo &&
-              (
-                Object.prototype.hasOwnProperty.call(systemInfo, "memory_usage") ||
-                Object.prototype.hasOwnProperty.call(systemInfo, "cpu_usage") ||
-                Object.prototype.hasOwnProperty.call(systemInfo, "bytes_received") ||
-                Object.prototype.hasOwnProperty.call(systemInfo, "bytes_transmitted") ||
-                Object.prototype.hasOwnProperty.call(systemInfo, "uptime")
-              );
-            if (!hasSystemMetrics) {
-              return hasRuntimeIp ? {
-                ...node,
-                ...runtimeIpPatch,
-                connectionStatus: 'online'
-              } : node;
-            }
-            
-            const currentUpload = parseInt(systemInfo.bytes_transmitted) || 0;
-            const currentDownload = parseInt(systemInfo.bytes_received) || 0;
-            const currentUptime = parseInt(systemInfo.uptime) || 0;
-            
-            let uploadSpeed = 0;
-            let downloadSpeed = 0;
-            
-            if (node.systemInfo && node.systemInfo.uptime) {
-              const timeDiff = currentUptime - node.systemInfo.uptime;
-              
-              if (timeDiff > 0 && timeDiff <= 10) {
-                const lastUpload = node.systemInfo.uploadTraffic || 0;
-                const lastDownload = node.systemInfo.downloadTraffic || 0;
-                
-                const uploadDiff = currentUpload - lastUpload;
-                const downloadDiff = currentDownload - lastDownload;
-                
-                const uploadReset = currentUpload < lastUpload;
-                const downloadReset = currentDownload < lastDownload;
-                
-                if (!uploadReset && uploadDiff >= 0) {
-                  uploadSpeed = uploadDiff / timeDiff;
-                }
-                
-                if (!downloadReset && downloadDiff >= 0) {
-                  downloadSpeed = downloadDiff / timeDiff;
-                }
+        const hasSystemMetrics =
+          systemInfo &&
+          (
+            Object.prototype.hasOwnProperty.call(systemInfo, "memory_usage") ||
+            Object.prototype.hasOwnProperty.call(systemInfo, "cpu_usage") ||
+            Object.prototype.hasOwnProperty.call(systemInfo, "bytes_received") ||
+            Object.prototype.hasOwnProperty.call(systemInfo, "bytes_transmitted") ||
+            Object.prototype.hasOwnProperty.call(systemInfo, "uptime")
+          );
+        let nextSystemInfo: NonNullable<Node['systemInfo']> | null = null;
+        if (hasSystemMetrics) {
+          const currentUpload = parseInt(systemInfo.bytes_transmitted) || 0;
+          const currentDownload = parseInt(systemInfo.bytes_received) || 0;
+          const currentUptime = parseInt(systemInfo.uptime) || 0;
+          const previousSystemInfo = systemInfoCacheRef.current.get(nodeId);
+          let uploadSpeed = 0;
+          let downloadSpeed = 0;
+
+          if (previousSystemInfo && previousSystemInfo.uptime) {
+            const timeDiff = currentUptime - previousSystemInfo.uptime;
+            if (timeDiff > 0 && timeDiff <= 10) {
+              const uploadDiff = currentUpload - previousSystemInfo.uploadTraffic;
+              const downloadDiff = currentDownload - previousSystemInfo.downloadTraffic;
+              if (uploadDiff >= 0) {
+                uploadSpeed = uploadDiff / timeDiff;
+              }
+              if (downloadDiff >= 0) {
+                downloadSpeed = downloadDiff / timeDiff;
               }
             }
-            
-            return {
-              ...node,
-              ...runtimeIpPatch,
-              connectionStatus: 'online',
-              systemInfo: {
-                cpuUsage: parseFloat(systemInfo.cpu_usage) || 0,
-                memoryUsage: parseFloat(systemInfo.memory_usage) || 0,
-                uploadTraffic: currentUpload,
-                downloadTraffic: currentDownload,
-                uploadSpeed: uploadSpeed,
-                downloadSpeed: downloadSpeed,
-                uptime: currentUptime
-              }
-            };
-          } catch (error) {
+          }
+
+          nextSystemInfo = {
+            cpuUsage: parseFloat(systemInfo.cpu_usage) || 0,
+            memoryUsage: parseFloat(systemInfo.memory_usage) || 0,
+            uploadTraffic: currentUpload,
+            downloadTraffic: currentDownload,
+            uploadSpeed,
+            downloadSpeed,
+            uptime: currentUptime
+          };
+          systemInfoCacheRef.current.set(nodeId, nextSystemInfo);
+        }
+
+        setNodeList(prev => prev.map(node => {
+          if (node.id != id) {
             return node;
           }
-        }
-        return node;
-      }));
+          const currentRuntimeIps = [node.serverIp, node.serverIpv4, node.serverIpv6].filter(Boolean);
+          const entryFollowsRuntimeIp = !node.ip || currentRuntimeIps.includes(node.ip);
+          const runtimeIpPatch = hasRuntimeIp ? {
+            ip: entryFollowsRuntimeIp ? nextServerIp : node.ip,
+            ...baseRuntimeIpPatch,
+          } : {};
+          if (hasRuntimeIp) {
+            runtimeIpCacheRef.current.set(nodeId, {
+              ...runtimeIpPatch,
+              connectionStatus: 'online',
+            });
+          }
+          return {
+            ...node,
+            ...runtimeIpPatch,
+            connectionStatus: 'online',
+            systemInfo: nextSystemInfo || node.systemInfo
+          };
+        }));
+      } catch (error) {
+        // 忽略非系统信息或格式异常的 WebSocket 消息。
+      }
     }
   };
 
@@ -367,8 +369,7 @@ export default function NodePage() {
     
     setNodeList(prev => prev.map(node => ({
       ...node,
-      connectionStatus: 'offline',
-      systemInfo: null
+      connectionStatus: 'offline'
     })));
   };
 
@@ -564,6 +565,8 @@ export default function NodePage() {
       const res = await deleteNode(nodeToDelete.id);
       if (res.code === 0) {
         toast.success('删除成功');
+        systemInfoCacheRef.current.delete(nodeToDelete.id);
+        runtimeIpCacheRef.current.delete(nodeToDelete.id);
         setNodeList(prev => prev.filter(n => n.id !== nodeToDelete.id));
         setDeleteModalOpen(false);
         setNodeToDelete(null);
