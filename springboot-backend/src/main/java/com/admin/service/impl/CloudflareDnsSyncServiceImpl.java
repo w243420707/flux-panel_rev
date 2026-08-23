@@ -566,16 +566,14 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     }
 
     private boolean isNodeBlocked(Node node) {
-        return node != null
-                && (isCriticalWallStatus(node.getWallMonitorStatus())
-                || WALL_STATUS_SUSPECTED_BLOCKED.equals(normalizeWallStatus(node.getWallMonitorExternalStatus())));
+        return node != null && isCriticalWallStatus(resolveEffectiveWallStatus(node));
     }
 
     private int smartPoolHealthRank(NodeDnsState state) {
         if (state == null || state.node == null) {
             return 100;
         }
-        String status = normalizeWallStatus(state.node.getWallMonitorStatus());
+        String status = resolveEffectiveWallStatus(state.node);
         if (WALL_STATUS_OK.equals(status)) {
             return 0;
         }
@@ -586,6 +584,18 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             return 3;
         }
         return 1;
+    }
+
+    private String resolveEffectiveWallStatus(Node node) {
+        if (node == null) {
+            return "";
+        }
+        String externalStatus = normalizeWallStatus(node.getWallMonitorExternalStatus());
+        if (WALL_STATUS_OK.equals(externalStatus)
+                || WALL_STATUS_SUSPECTED_BLOCKED.equals(externalStatus)) {
+            return externalStatus;
+        }
+        return normalizeWallStatus(node.getWallMonitorStatus());
     }
 
     private boolean isCriticalWallStatus(String status) {

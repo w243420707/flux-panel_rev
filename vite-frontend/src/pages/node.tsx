@@ -54,6 +54,10 @@ interface Node {
   wallMonitorGlobalTotalCount?: number;
   wallMonitorLatencyMs?: number;
   wallMonitorMessage?: string;
+  wallMonitorExternalStatus?: string;
+  wallMonitorExternalLastCheckAt?: number;
+  wallMonitorExternalConsecutiveFailures?: number;
+  wallMonitorExternalMessage?: string;
   remoteChangeIpUrl?: string;
   wallMonitorChecking?: boolean;
 }
@@ -426,7 +430,7 @@ export default function NodePage() {
 
   const getWallMonitorColor = (node: Node): "default" | "primary" | "secondary" | "success" | "warning" | "danger" => {
     if (node.wallMonitorEnabled === 0) return "default";
-    switch (node.wallMonitorStatus) {
+    switch (getEffectiveWallMonitorStatus(node)) {
       case "OK":
         return "success";
       case "OBSERVING":
@@ -444,7 +448,7 @@ export default function NodePage() {
 
   const getWallMonitorLabel = (node: Node): string => {
     if (node.wallMonitorEnabled === 0) return "未开启";
-    switch (node.wallMonitorStatus) {
+    switch (getEffectiveWallMonitorStatus(node)) {
       case "OK":
         return "正常";
       case "OBSERVING":
@@ -458,6 +462,17 @@ export default function NodePage() {
       default:
         return "待检测";
     }
+  };
+
+  const hasExternalWallMonitor = (node: Node): boolean => {
+    return node.wallMonitorExternalStatus === "OK"
+      || node.wallMonitorExternalStatus === "SUSPECTED_BLOCKED";
+  };
+
+  const getEffectiveWallMonitorStatus = (node: Node): string => {
+    return hasExternalWallMonitor(node)
+      ? node.wallMonitorExternalStatus || ""
+      : node.wallMonitorStatus || "";
   };
 
   const formatMonitorTime = (timestamp?: number): string => {
@@ -873,17 +888,29 @@ export default function NodePage() {
                           {getWallMonitorLabel(node)}
                         </Chip>
                       </div>
-                      <div className="mt-1 truncate text-default-500" title={node.wallMonitorMessage || ""}>
-                        {node.wallMonitorMessage || "等待定时检测"}
+                      <div
+                        className="mt-1 truncate text-default-500"
+                        title={(hasExternalWallMonitor(node) ? node.wallMonitorExternalMessage : node.wallMonitorMessage) || ""}
+                      >
+                        {(hasExternalWallMonitor(node) ? node.wallMonitorExternalMessage : node.wallMonitorMessage) || "等待定时检测"}
                       </div>
-                      <div className="mt-1 flex items-center justify-between gap-2 text-default-400">
-                        <span>国内 {node.wallMonitorChinaSuccessCount || 0}/{node.wallMonitorChinaTotalCount || 0}</span>
-                        <span>国际 {node.wallMonitorGlobalSuccessCount || 0}/{node.wallMonitorGlobalTotalCount || 0}</span>
-                      </div>
-                      <div className="mt-1 flex items-center justify-between gap-2 text-default-400">
-                        <span>延迟 {node.wallMonitorLatencyMs ? `${node.wallMonitorLatencyMs.toFixed(0)}ms` : "-"}</span>
-                        <span>{formatMonitorTime(node.wallMonitorLastCheckAt)}</span>
-                      </div>
+                      {hasExternalWallMonitor(node) ? (
+                        <div className="mt-1 flex items-center justify-between gap-2 text-default-400">
+                          <span>来源：独立 APK</span>
+                          <span>{formatMonitorTime(node.wallMonitorExternalLastCheckAt)}</span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="mt-1 flex items-center justify-between gap-2 text-default-400">
+                            <span>国内 {node.wallMonitorChinaSuccessCount || 0}/{node.wallMonitorChinaTotalCount || 0}</span>
+                            <span>国际 {node.wallMonitorGlobalSuccessCount || 0}/{node.wallMonitorGlobalTotalCount || 0}</span>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between gap-2 text-default-400">
+                            <span>延迟 {node.wallMonitorLatencyMs ? `${node.wallMonitorLatencyMs.toFixed(0)}ms` : "-"}</span>
+                            <span>{formatMonitorTime(node.wallMonitorLastCheckAt)}</span>
+                          </div>
+                        </>
+                      )}
                       {node.remoteChangeIpUrl && (
                         <div className="mt-2 flex items-center gap-2">
                           <span className="min-w-0 flex-1 truncate text-default-500" title={node.remoteChangeIpUrl}>
@@ -1040,10 +1067,10 @@ export default function NodePage() {
                       color="warning"
                       onPress={() => handleWallMonitorCheck(node)}
                       isLoading={node.wallMonitorChecking}
-                      isDisabled={node.connectionStatus !== 'online'}
+                      isDisabled={node.connectionStatus !== 'online' || hasExternalWallMonitor(node)}
                       className="w-full min-h-8"
                     >
-                      立即检测
+                      {hasExternalWallMonitor(node) ? "由 APK 自动检测" : "立即检测"}
                     </Button>
                   </div>
                 </CardBody>

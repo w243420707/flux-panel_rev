@@ -79,7 +79,8 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         try {
             List<Node> nodes = nodeService.list(new QueryWrapper<Node>()
                     .select("id", "status", "wall_monitor_enabled", "wall_monitor_status",
-                            "wall_monitor_last_check_at", "wall_monitor_consecutive_failures"));
+                            "wall_monitor_last_check_at", "wall_monitor_consecutive_failures",
+                            "wall_monitor_external_status"));
             if (nodes == null || nodes.isEmpty()) {
                 return;
             }
@@ -117,6 +118,12 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
             return R.err("节点被墙监测未开启");
         }
 
+        if (hasExternalProbeResult(node)) {
+            node.setSecret(null);
+            node.setRemoteChangeIpToken(null);
+            return R.ok(node);
+        }
+
         try {
             checkAndStore(nodeId);
         } catch (Exception e) {
@@ -152,10 +159,12 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         update.setWallMonitorExternalStatus(STATUS_SUSPECTED_BLOCKED);
         update.setWallMonitorExternalLastCheckAt(now);
         update.setWallMonitorExternalConsecutiveFailures(nextFailures);
-        update.setWallMonitorExternalMessage(trimMessage(
+        String normalizedMessage = trimMessage(
                 message == null || message.trim().isEmpty()
                         ? "独立 Android 探针确认节点端口不可达"
-                        : message));
+                        : message);
+        applyExternalStatusAsPrimary(update, STATUS_SUSPECTED_BLOCKED, now, nextFailures, normalizedMessage);
+        update.setWallMonitorExternalMessage(normalizedMessage);
         nodeService.updateById(update);
         broadcastMonitorUpdate(update);
         syncCloudflareDnsIfExternalStatusChanged(nodeId, previousStatus, STATUS_SUSPECTED_BLOCKED);
@@ -183,10 +192,12 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         update.setWallMonitorExternalStatus(STATUS_OK);
         update.setWallMonitorExternalLastCheckAt(now);
         update.setWallMonitorExternalConsecutiveFailures(0);
-        update.setWallMonitorExternalMessage(trimMessage(
+        String normalizedMessage = trimMessage(
                 message == null || message.trim().isEmpty()
                         ? "独立 Android 探针确认节点端口可达"
-                        : message));
+                        : message);
+        applyExternalStatusAsPrimary(update, STATUS_OK, now, 0, normalizedMessage);
+        update.setWallMonitorExternalMessage(normalizedMessage);
         nodeService.updateById(update);
         broadcastMonitorUpdate(update);
         syncCloudflareDnsIfExternalStatusChanged(nodeId, previousStatus, STATUS_OK);
@@ -199,6 +210,9 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
 
     private void checkAndStore(Node node) {
         if (node == null || !isMonitorEnabled(node)) {
+            return;
+        }
+        if (hasExternalProbeResult(node)) {
             return;
         }
         String previousStatus = node.getWallMonitorStatus();
@@ -400,6 +414,25 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
 
     private boolean isMonitorEnabled(Node node) {
         return node != null && (node.getWallMonitorEnabled() == null || node.getWallMonitorEnabled() != MONITOR_DISABLED);
+    }
+
+    private boolean hasExternalProbeResult(Node node) {
+        if (node == null) {
+            return false;
+        }
+        String status = normalizeStatus(node.getWallMonitorExternalStatus());
+        return STATUS_OK.equals(status) || STATUS_SUSPECTED_BLOCKED.equals(status);
+    }
+
+    private void applyExternalStatusAsPrimary(Node update,
+                                               String status,
+                                               long checkedAt,
+                                               int consecutiveFailures,
+                                               String message) {
+        update.setWallMonitorStatus(status);
+        update.setWallMonitorLastCheckAt(checkedAt);
+        update.setWallMonitorConsecutiveFailures(Math.max(0, consecutiveFailures));
+        update.setWallMonitorMessage(message);
     }
 
     private int safeInt(Integer value) {
