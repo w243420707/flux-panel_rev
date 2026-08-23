@@ -82,18 +82,6 @@ public class AsyncExecutorConfig {
         return executor;
     }
 
-    @Bean(name = "wallMonitorExecutor")
-    public Executor wallMonitorExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(1);
-        executor.setMaxPoolSize(2);
-        executor.setQueueCapacity(100);
-        executor.setThreadNamePrefix("wall-monitor-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        executor.initialize();
-        return executor;
-    }
-
     @Bean(name = "cloudflareDnsExecutor")
     public Executor cloudflareDnsExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

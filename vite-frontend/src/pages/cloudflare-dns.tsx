@@ -734,9 +734,7 @@ export default function CloudflareDnsPage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {bindings.map((binding) => {
                 const nodeIds = getBindingNodeIds(binding);
-                const preferredPoolNodeIds = getPoolNodeIds(binding.smartPoolPreferredNodeIds);
                 const activePoolNodeIds = getPoolNodeIds(binding.smartPoolActiveNodeIds);
-                const backupPoolNodeIds = getPoolNodeIds(binding.smartPoolBackupNodeIds);
                 return (
                   <Card key={binding.id} className="shadow-sm border border-divider">
                     <CardHeader className="pb-2">
@@ -780,21 +778,9 @@ export default function CloudflareDnsPage() {
                       {binding.smartPoolEnabled === 1 && (
                         <div className="text-xs space-y-2">
                           <div className="flex items-center gap-2">
-                            <span className="text-default-500">智能池</span>
-                            <Chip size="sm" variant="flat" color="primary">已启用</Chip>
+                            <span className="text-default-500">智能解析池</span>
+                            <Chip size="sm" variant="flat" color="primary">按 APK 状态自动解析</Chip>
                           </div>
-                          {preferredPoolNodeIds.length > 0 && (
-                            <div>
-                              <div className="text-default-500 mb-1">优先活跃</div>
-                              <div className="flex flex-wrap gap-1">
-                                {preferredPoolNodeIds.map((nodeId) => (
-                                  <Chip key={nodeId} size="sm" variant="flat" color="primary">
-                                    {getNodeName(nodeId)}
-                                  </Chip>
-                                ))}
-                              </div>
-                            </div>
-                          )}
                           <div>
                             <div className="text-default-500 mb-1">活跃解析</div>
                             <div className="flex flex-wrap gap-1">
@@ -803,19 +789,7 @@ export default function CloudflareDnsPage() {
                                   {getNodeName(nodeId)}
                                 </Chip>
                               )) : (
-                                <Chip size="sm" variant="flat" color="warning">等待同步</Chip>
-                              )}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-default-500 mb-1">备用池</div>
-                            <div className="flex flex-wrap gap-1">
-                              {backupPoolNodeIds.length > 0 ? backupPoolNodeIds.map((nodeId) => (
-                                <Chip key={nodeId} size="sm" variant="flat">
-                                  {getNodeName(nodeId)}
-                                </Chip>
-                              )) : (
-                                <Chip size="sm" variant="flat" color="default">无备用</Chip>
+                                <Chip size="sm" variant="flat" color="warning">等待 APK 确认</Chip>
                               )}
                             </div>
                           </div>
@@ -984,7 +958,7 @@ export default function CloudflareDnsPage() {
                     onValueChange={(checked) => setBindingForm((prev) => ({ ...prev, smartPoolEnabled: checked }))}
                     color="primary"
                   >
-                    <span className="text-sm">智能备用池保护</span>
+                    <span className="text-sm">智能解析池（按 APK 状态自动切换）</span>
                   </Switch>
 
                   {!bindingForm.useTunnelNodes && (
@@ -1015,7 +989,7 @@ export default function CloudflareDnsPage() {
 
                   {bindingForm.smartPoolEnabled && getPriorityOptionNodes().length > 0 && (
                     <Select
-                      label="优先活跃节点"
+                      label="解析优先顺序（可选）"
                       selectionMode="multiple"
                       selectedKeys={nodeIdsToSelectedKeys(filterNodeIds(bindingForm.smartPoolPreferredNodeIds, getFormBindingNodeIds()))}
                       onSelectionChange={(keys) => {

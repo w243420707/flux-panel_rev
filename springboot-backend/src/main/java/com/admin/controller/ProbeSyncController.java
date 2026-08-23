@@ -92,7 +92,7 @@ public class ProbeSyncController {
         int accepted = 0;
         int ignored = 0;
         for (ProbeNodeReportDto result : report.getResults()) {
-            if (result == null || result.getNodeId() == null) {
+            if (result == null || result.getNodeId() == null || result.getReachable() == null) {
                 ignored++;
                 continue;
             }

@@ -43,13 +43,9 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     private static final String MANAGED_COMMENT_PREFIX = "flux-panel_rev";
     private static final List<String> MANAGED_RECORD_TYPES = Arrays.asList(RECORD_TYPE_A, RECORD_TYPE_AAAA, RECORD_TYPE_CNAME);
     private static final String WALL_STATUS_OK = "OK";
-    private static final String WALL_STATUS_OBSERVING = "OBSERVING";
     private static final String WALL_STATUS_SUSPECTED_BLOCKED = "SUSPECTED_BLOCKED";
     private static final String WALL_STATUS_NODE_OFFLINE = "NODE_OFFLINE";
-    private static final String WALL_STATUS_CHECK_FAILED = "CHECK_FAILED";
     private static final int NODE_ONLINE = 1;
-    private static final long SMART_POOL_SWITCH_COOLDOWN_MS = 5 * 60 * 1000L;
-    private static final long SMART_POOL_ROTATE_INTERVAL_MS = 6 * 60 * 60 * 1000L;
     private static final int MIN_DNS_TTL_SECONDS = 60;
 
     private static final ConcurrentHashMap<Long, Object> BINDING_LOCKS = new ConcurrentHashMap<>();
@@ -323,50 +319,81 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
             String recordType = resolveRecordType(binding.getRecordType(), setting.getRecordType());
             Map<Long, NodeDnsState> nodeStates = resolveNodeStates(nodeIds, recordType, nodeSnapshot);
-            SmartPoolPlan smartPoolPlan = null;
-            List<Long> effectiveNodeIds = nodeIds;
-            if (isEnabled(binding.getSmartPoolEnabled())) {
-                smartPoolPlan = selectSmartPoolNodes(binding, nodeIds, nodeStates);
-                effectiveNodeIds = smartPoolPlan.activeNodeIds;
-                applySmartPoolPlan(binding, smartPoolPlan);
-            } else {
-                effectiveNodeIds = nodeIds.stream()
-                        .filter(nodeId -> isDnsNodeUsable(nodeStates.get(nodeId)))
-                        .collect(Collectors.toList());
-            }
+            List<CloudflareDnsRecord> primaryExistingRecords = fetchManagedRecords(setting, binding, domains.get(0));
+            List<CloudflareDnsRecord> primaryAddressRecords = filterManagedRecords(primaryExistingRecords, record ->
+                    RECORD_TYPE_A.equalsIgnoreCase(record.getType()) || RECORD_TYPE_AAAA.equalsIgnoreCase(record.getType()));
+            deleteRecordsByType(setting, primaryExistingRecords, RECORD_TYPE_CNAME);
 
+            boolean smartPoolEnabled = isEnabled(binding.getSmartPoolEnabled());
             List<CloudflareDnsTarget> desiredTargets = new ArrayList<>();
+            Set<String> preservedRecordKeys = new HashSet<>();
+            Set<Long> preservedNodeIds = new LinkedHashSet<>();
             Set<Long> unresolvedNodeIds = new HashSet<>();
-            for (Long nodeId : effectiveNodeIds) {
+            Set<Long> blockedNodeIds = new HashSet<>();
+            List<Long> effectiveNodeIds = new ArrayList<>();
+
+            for (Long nodeId : nodeIds) {
                 NodeDnsState state = nodeStates.get(nodeId);
-                if (state == null || state.targets.isEmpty()) {
-                    unresolvedNodeIds.add(nodeId);
+                String wallStatus = resolveEffectiveWallStatus(state == null ? null : state.node);
+                boolean online = state != null && state.node != null
+                        && Objects.equals(state.node.getStatus(), NODE_ONLINE);
+                boolean hasTargets = state != null && !state.targets.isEmpty();
+                boolean probeOk = WALL_STATUS_OK.equals(wallStatus);
+                boolean blocked = WALL_STATUS_SUSPECTED_BLOCKED.equals(wallStatus);
+
+                if (blocked) {
+                    blockedNodeIds.add(nodeId);
                     continue;
                 }
-                desiredTargets.addAll(state.targets);
-            }
-            desiredTargets = deduplicateTargets(desiredTargets);
 
-            if (desiredTargets.isEmpty()) {
+                boolean usable = online && hasTargets && (smartPoolEnabled ? probeOk : !isCriticalWallStatus(wallStatus));
+                if (usable) {
+                    effectiveNodeIds.add(nodeId);
+                    desiredTargets.addAll(state.targets);
+                    continue;
+                }
+
+                unresolvedNodeIds.add(nodeId);
+                if (!online) {
+                    continue;
+                }
+                preserveExistingRecordsForUnresolvedNode(
+                        primaryAddressRecords,
+                        primaryDomain,
+                        state,
+                        preservedRecordKeys,
+                        preservedNodeIds
+                );
+            }
+
+            desiredTargets = deduplicateTargets(desiredTargets);
+            effectiveNodeIds.addAll(preservedNodeIds);
+            SmartPoolPlan smartPoolPlan = null;
+            if (smartPoolEnabled) {
+                smartPoolPlan = selectSmartPoolNodes(binding, effectiveNodeIds);
+                effectiveNodeIds = smartPoolPlan.activeNodeIds;
+                applySmartPoolPlan(binding, smartPoolPlan);
+            }
+
+            Set<String> desiredRecordKeys = new HashSet<>(preservedRecordKeys);
+            for (CloudflareDnsTarget target : desiredTargets) {
+                desiredRecordKeys.add(targetRecordKey(primaryDomain, target));
+            }
+
+            if (desiredTargets.isEmpty() && desiredRecordKeys.isEmpty() && blockedNodeIds.isEmpty()) {
                 String message = "未解析到任何可用公网 " + recordTypeLabel(recordType) + "，已保留旧 DNS 记录";
                 if (smartPoolPlan != null && smartPoolPlan.activeNodeIds.isEmpty()) {
                     message = "智能池没有可用活跃节点，已保留旧 DNS 记录";
                 }
-                markBinding(binding, SYNC_FAILED, message, null);
-                return R.err(message);
+                markBinding(binding, SYNC_SKIPPED, message, null);
+                updateSettingSyncStatus(setting, SYNC_SKIPPED, "Triggered by " + trigger + ": " + String.join(", ", domains));
+                return R.ok(message);
             }
 
-            List<CloudflareDnsRecord> primaryExistingRecords = fetchManagedRecords(setting, binding, primaryDomain);
-            deleteRecordsByType(setting, primaryExistingRecords, RECORD_TYPE_CNAME);
-            primaryExistingRecords = filterManagedRecords(primaryExistingRecords, record ->
-                    RECORD_TYPE_A.equalsIgnoreCase(record.getType()) || RECORD_TYPE_AAAA.equalsIgnoreCase(record.getType()));
+            // Primary records were loaded before node evaluation so unresolved nodes can be preserved.
 
-            Set<String> desiredRecordKeys = new HashSet<>();
-            for (CloudflareDnsTarget target : desiredTargets) {
-                desiredRecordKeys.add(targetRecordKey(primaryDomain, target));
-            }
-            upsertDesiredRecords(setting, binding, primaryDomain, desiredTargets, primaryExistingRecords);
-            deleteStaleRecords(setting, binding, primaryExistingRecords, unresolvedNodeIds, desiredRecordKeys);
+            upsertDesiredRecords(setting, binding, primaryDomain, desiredTargets, primaryAddressRecords);
+            deleteStaleRecords(setting, binding, primaryAddressRecords, desiredRecordKeys);
 
             for (String aliasDomain : aliasDomains) {
                 syncAliasDomain(setting, binding, aliasDomain, primaryDomain);
@@ -374,14 +401,11 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
             String message = "DNS 同步成功，主域名 1 个，别名 " + aliasDomains.size() + " 个，主记录 " + desiredTargets.size() + " 条";
             if (smartPoolPlan != null) {
-                message += "，智能池活跃 " + smartPoolPlan.activeNodeIds.size()
-                        + "/" + smartPoolPlan.desiredActiveCount
-                        + "，备用 " + smartPoolPlan.backupNodeIds.size()
-                        + "，优先 " + smartPoolPlan.preferredCount
-                        + "，排除 " + smartPoolPlan.excludedCount;
+                message += "，智能池当前解析 " + smartPoolPlan.activeNodeIds.size()
+                        + " 个，优先顺序应用于 " + smartPoolPlan.preferredCount + " 个节点";
             }
             if (!unresolvedNodeIds.isEmpty()) {
-                message += "，" + unresolvedNodeIds.size() + " 个活跃节点解析失败，旧 IP 已清理";
+                message += "，" + unresolvedNodeIds.size() + " 个节点等待 APK 或地址确认";
             }
             markBinding(binding, SYNC_SUCCESS, message, desiredTargets);
             updateSettingSyncStatus(setting, SYNC_SUCCESS, "最近由 " + trigger + " 触发: " + String.join(", ", domains));
@@ -432,170 +456,29 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         return new ArrayList<>(ids);
     }
 
-    private SmartPoolPlan selectSmartPoolNodes(CloudflareDnsBinding binding,
-                                               List<Long> nodeIds,
-                                               Map<Long, NodeDnsState> nodeStates) {
-        long now = System.currentTimeMillis();
-        List<Long> allNodeIds = normalizeNodeIdList(nodeIds);
+    private SmartPoolPlan selectSmartPoolNodes(CloudflareDnsBinding binding, List<Long> nodeIds) {
+        List<Long> activeNodeIds = normalizeNodeIdList(nodeIds);
         List<Long> preferredNodeIds = filterKnownNodeIds(
-                TunnelNodeUtil.parseNodeIds(binding.getSmartPoolPreferredNodeIds()), allNodeIds);
-        List<Long> previousActiveNodeIds = filterKnownNodeIds(
-                TunnelNodeUtil.parseNodeIds(binding.getSmartPoolActiveNodeIds()), allNodeIds);
-        int desiredActiveCount = calculateSmartPoolActiveCount(allNodeIds.size());
-
-        List<Long> preferredActiveNodeIds = chooseSmartPoolActiveNodeIds(binding, allNodeIds, preferredNodeIds, nodeStates, desiredActiveCount, now);
-        List<Long> activeNodeIds = preferredActiveNodeIds;
-        if (sameLongList(previousActiveNodeIds, preferredActiveNodeIds)
-                || (preferredNodeIds.isEmpty() && shouldKeepCurrentSmartPool(binding, previousActiveNodeIds, desiredActiveCount, nodeStates, now))) {
-            activeNodeIds = previousActiveNodeIds;
-        }
-
-        List<Long> backupNodeIds = chooseSmartPoolBackupNodeIds(binding, allNodeIds, preferredNodeIds, nodeStates, activeNodeIds, now);
-        SmartPoolPlan plan = new SmartPoolPlan();
-        plan.now = now;
-        plan.desiredActiveCount = desiredActiveCount;
-        plan.activeNodeIds = activeNodeIds;
-        plan.backupNodeIds = backupNodeIds;
-        plan.preferredCount = preferredNodeIds.size();
-        plan.excludedCount = Math.max(0, allNodeIds.size() - activeNodeIds.size() - backupNodeIds.size());
-        return plan;
-    }
-
-    private boolean shouldKeepCurrentSmartPool(CloudflareDnsBinding binding,
-                                               List<Long> currentActiveNodeIds,
-                                               int desiredActiveCount,
-                                               Map<Long, NodeDnsState> nodeStates,
-                                               long now) {
-        if (!isCurrentSmartPoolUsable(currentActiveNodeIds, desiredActiveCount, nodeStates)) {
-            return false;
-        }
-        Long lastSwitchAt = binding.getSmartPoolLastSwitchAt();
-        return lastSwitchAt != null && now - lastSwitchAt < SMART_POOL_SWITCH_COOLDOWN_MS;
-    }
-
-    private boolean isCurrentSmartPoolUsable(List<Long> currentActiveNodeIds,
-                                             int desiredActiveCount,
-                                             Map<Long, NodeDnsState> nodeStates) {
-        int usableCount = countSmartPoolUsableNodes(nodeStates.values());
-        int requiredCount = Math.min(desiredActiveCount, usableCount);
-        if (requiredCount <= 0 || currentActiveNodeIds.size() != requiredCount) {
-            return false;
-        }
-        for (Long nodeId : currentActiveNodeIds) {
-            if (!isSmartPoolUsable(nodeStates.get(nodeId))) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private int countSmartPoolUsableNodes(Collection<NodeDnsState> states) {
-        int count = 0;
-        for (NodeDnsState state : states) {
-            if (isSmartPoolUsable(state)) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    private List<Long> chooseSmartPoolActiveNodeIds(CloudflareDnsBinding binding,
-                                                    List<Long> allNodeIds,
-                                                    List<Long> preferredNodeIds,
-                                                    Map<Long, NodeDnsState> nodeStates,
-                                                    int desiredActiveCount,
-                                                    long now) {
-        List<NodeDnsState> candidates = orderSmartPoolCandidates(binding, allNodeIds, preferredNodeIds, nodeStates, now);
-        int limit = Math.min(desiredActiveCount, candidates.size());
-        List<Long> activeNodeIds = new ArrayList<>();
-        for (int i = 0; i < limit; i++) {
-            activeNodeIds.add(candidates.get(i).nodeId);
-        }
-        return activeNodeIds;
-    }
-
-    private List<Long> chooseSmartPoolBackupNodeIds(CloudflareDnsBinding binding,
-                                                    List<Long> allNodeIds,
-                                                    List<Long> preferredNodeIds,
-                                                    Map<Long, NodeDnsState> nodeStates,
-                                                    List<Long> activeNodeIds,
-                                                    long now) {
-        Set<Long> activeSet = new HashSet<>(activeNodeIds);
-        List<Long> backupNodeIds = new ArrayList<>();
-        for (NodeDnsState state : orderSmartPoolCandidates(binding, allNodeIds, preferredNodeIds, nodeStates, now)) {
-            if (!activeSet.contains(state.nodeId)) {
-                backupNodeIds.add(state.nodeId);
-            }
-        }
-        return backupNodeIds;
-    }
-
-    private List<NodeDnsState> orderSmartPoolCandidates(CloudflareDnsBinding binding,
-                                                        List<Long> allNodeIds,
-                                                        List<Long> preferredNodeIds,
-                                                        Map<Long, NodeDnsState> nodeStates,
-                                                        long now) {
-        long bucket = now / SMART_POOL_ROTATE_INTERVAL_MS;
+                TunnelNodeUtil.parseNodeIds(binding.getSmartPoolPreferredNodeIds()), activeNodeIds);
         Map<Long, Integer> preferredOrder = buildPreferredOrder(preferredNodeIds);
-        List<NodeDnsState> candidates = new ArrayList<>();
-        for (Long nodeId : allNodeIds) {
-            NodeDnsState state = nodeStates.get(nodeId);
-            if (isSmartPoolUsable(state)) {
-                candidates.add(state);
-            }
-        }
-        candidates.sort(Comparator
-                .comparingInt(this::smartPoolHealthRank)
-                .thenComparingInt(state -> preferredOrder.getOrDefault(state.nodeId, Integer.MAX_VALUE))
-                .thenComparingLong(state -> stableHash((binding.getId() == null ? 0 : binding.getId())
-                        + ":" + bucket + ":" + state.nodeId)));
-        return candidates;
-    }
+        activeNodeIds.sort(Comparator.comparingInt(id -> preferredOrder.getOrDefault(id, Integer.MAX_VALUE)));
 
-    private boolean isSmartPoolUsable(NodeDnsState state) {
-        return isDnsNodeUsable(state);
-    }
-
-    private boolean isDnsNodeUsable(NodeDnsState state) {
-        return state != null
-                && state.node != null
-                && state.node.getStatus() != null
-                && state.node.getStatus() == NODE_ONLINE
-                && !state.targets.isEmpty()
-                && !isNodeBlocked(state.node);
-    }
-
-    private boolean isNodeBlocked(Node node) {
-        return node != null && isCriticalWallStatus(resolveEffectiveWallStatus(node));
-    }
-
-    private int smartPoolHealthRank(NodeDnsState state) {
-        if (state == null || state.node == null) {
-            return 100;
-        }
-        String status = resolveEffectiveWallStatus(state.node);
-        if (WALL_STATUS_OK.equals(status)) {
-            return 0;
-        }
-        if (WALL_STATUS_OBSERVING.equals(status)) {
-            return 2;
-        }
-        if (WALL_STATUS_CHECK_FAILED.equals(status)) {
-            return 3;
-        }
-        return 1;
+        SmartPoolPlan plan = new SmartPoolPlan();
+        plan.now = System.currentTimeMillis();
+        plan.activeNodeIds = activeNodeIds;
+        plan.backupNodeIds = new ArrayList<>();
+        plan.desiredActiveCount = activeNodeIds.size();
+        plan.preferredCount = preferredNodeIds.size();
+        plan.excludedCount = 0;
+        return plan;
     }
 
     private String resolveEffectiveWallStatus(Node node) {
         if (node == null) {
-            return "";
+            return "UNKNOWN";
         }
         String externalStatus = normalizeWallStatus(node.getWallMonitorExternalStatus());
-        if (WALL_STATUS_OK.equals(externalStatus)
-                || WALL_STATUS_SUSPECTED_BLOCKED.equals(externalStatus)) {
-            return externalStatus;
-        }
-        return normalizeWallStatus(node.getWallMonitorStatus());
+        return StringUtils.hasText(externalStatus) ? externalStatus : "UNKNOWN";
     }
 
     private boolean isCriticalWallStatus(String status) {
@@ -607,34 +490,11 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         return StringUtils.hasText(status) ? status.trim().toUpperCase() : "";
     }
 
-    private int calculateSmartPoolActiveCount(int totalNodeCount) {
-        if (totalNodeCount <= 1) {
-            return Math.max(0, totalNodeCount);
-        }
-        if (totalNodeCount == 2) {
-            return 1;
-        }
-        if (totalNodeCount == 3) {
-            return 2;
-        }
-        if (totalNodeCount == 4) {
-            return 3;
-        }
-        return Math.min(totalNodeCount, Math.max(1, (int) Math.ceil(totalNodeCount * 0.70D)));
-    }
-
     private void applySmartPoolPlan(CloudflareDnsBinding binding, SmartPoolPlan plan) {
-        List<Long> previousActiveNodeIds = TunnelNodeUtil.parseNodeIds(binding.getSmartPoolActiveNodeIds());
-        if (!sameLongList(previousActiveNodeIds, plan.activeNodeIds)) {
-            binding.setSmartPoolLastSwitchAt(plan.now);
-        }
         binding.setSmartPoolActiveNodeIds(TunnelNodeUtil.toJsonArray(plan.activeNodeIds));
         binding.setSmartPoolBackupNodeIds(TunnelNodeUtil.toJsonArray(plan.backupNodeIds));
-        binding.setSmartPoolNextRotateAt(nextSmartPoolRotateAt(plan.now));
-    }
-
-    private long nextSmartPoolRotateAt(long now) {
-        return ((now / SMART_POOL_ROTATE_INTERVAL_MS) + 1) * SMART_POOL_ROTATE_INTERVAL_MS;
+        binding.setSmartPoolLastSwitchAt(null);
+        binding.setSmartPoolNextRotateAt(null);
     }
 
     private List<Long> normalizeNodeIdList(List<Long> rawIds) {
@@ -667,19 +527,6 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             order.putIfAbsent(nodeId, index++);
         }
         return order;
-    }
-
-    private boolean sameLongList(List<Long> left, List<Long> right) {
-        return Objects.equals(normalizeNodeIdList(left), normalizeNodeIdList(right));
-    }
-
-    private long stableHash(String value) {
-        long hash = 1125899906842597L;
-        String text = value == null ? "" : value;
-        for (int i = 0; i < text.length(); i++) {
-            hash = 31 * hash + text.charAt(i);
-        }
-        return hash & Long.MAX_VALUE;
     }
 
     private void upsertDesiredRecords(CloudflareDnsSetting setting,
@@ -733,7 +580,6 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     private void deleteStaleRecords(CloudflareDnsSetting setting,
                                     CloudflareDnsBinding binding,
                                     List<CloudflareDnsRecord> existingRecords,
-                                    Set<Long> unresolvedNodeIds,
                                     Set<String> desiredRecordKeys) {
         for (CloudflareDnsRecord record : existingRecords) {
             if (record == null
@@ -745,6 +591,30 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                 continue;
             }
             cloudflareApiClient.deleteDnsRecord(setting.getZoneId(), setting.getApiToken(), record.getId());
+        }
+    }
+
+    private void preserveExistingRecordsForUnresolvedNode(List<CloudflareDnsRecord> existingRecords,
+                                                          String domain,
+                                                          NodeDnsState state,
+                                                          Set<String> preservedRecordKeys,
+                                                          Set<Long> preservedNodeIds) {
+        if (state == null || state.nodeId == null) {
+            return;
+        }
+        boolean hasCurrentTargets = !state.targets.isEmpty();
+        for (CloudflareDnsRecord record : existingRecords) {
+            if (record == null) {
+                continue;
+            }
+            boolean belongsToNode = Objects.equals(state.nodeId, extractCommentLong(record.getComment(), "node"));
+            boolean matchesCurrentTarget = hasCurrentTargets && state.targets.stream()
+                    .anyMatch(target -> targetRecordKey(domain, target).equals(recordContentKey(record)));
+            // 共享 IP 时记录可能只带有另一个节点的标记，按内容保留仍在使用的 IP。
+            if (matchesCurrentTarget || (!hasCurrentTargets && belongsToNode)) {
+                preservedRecordKeys.add(recordContentKey(record));
+                preservedNodeIds.add(state.nodeId);
+            }
         }
     }
 
@@ -804,6 +674,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             for (String type : MANAGED_RECORD_TYPES) {
                 records.addAll(cloudflareApiClient.listDnsRecords(setting.getZoneId(), setting.getApiToken(), domain, type)
                         .stream()
+                        .filter(record -> isManagedRecord(binding, record))
                         .collect(Collectors.toList()));
             }
         }

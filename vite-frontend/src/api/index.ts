@@ -34,7 +34,6 @@ export const getNodeInstallCommand = (
   publicBaseUrl?: string,
   assetMode: NodeInstallSource = 'github'
 ) => Network.post("/node/install", { id, publicBaseUrl, assetMode });
-export const checkNodeWallMonitor = (id: number) => Network.post("/node/wall-check", { id });
 export const checkNodeStatus = (nodeId?: number) => {
   const params = nodeId ? { nodeId } : {};
   return Network.post("/node/check-status", params);

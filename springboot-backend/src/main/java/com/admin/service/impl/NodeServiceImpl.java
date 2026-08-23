@@ -162,7 +162,11 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
 
         // 2. 构建更新对象并执行更新
+        Node previousNode = this.getById(nodeUpdateDto.getId());
         Node updateNode = buildUpdateNode(nodeUpdateDto);
+        if (hasNodeAddressChanged(previousNode, updateNode)) {
+            resetExternalProbeState(updateNode, "节点地址已变化，等待 APK 重新确认");
+        }
         boolean result = this.updateById(updateNode);
         if (!result) {
             return R.err(ERROR_UPDATE_MSG);
@@ -417,6 +421,9 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
             return false;
         }
 
+        // 新 IP 必须经过 APK 重新确认，不能沿用旧 IP 的 OK 状态。
+        resetExternalProbeState(node, "节点公网 IP 已变化，等待 APK 重新确认");
+
         node.setUpdatedTime(System.currentTimeMillis());
         boolean updated = this.updateById(node);
         if (updated) {
@@ -508,6 +515,26 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
             log.warn("Cloudflare DNS sync after node IP change failed, nodeId={}, trigger={}, error={}",
                     nodeId, trigger, e.getMessage());
         }
+    }
+
+    private boolean hasNodeAddressChanged(Node previousNode, Node nextNode) {
+        if (previousNode == null || nextNode == null) {
+            return false;
+        }
+        return !Objects.equals(normalizeNodeAddress(previousNode.getIp()), normalizeNodeAddress(nextNode.getIp()))
+                || !Objects.equals(normalizeNodeAddress(previousNode.getServerIp()), normalizeNodeAddress(nextNode.getServerIp()));
+    }
+
+    private void resetExternalProbeState(Node node, String message) {
+        node.setWallMonitorEnabled(1);
+        node.setWallMonitorStatus("UNKNOWN");
+        node.setWallMonitorLastCheckAt(null);
+        node.setWallMonitorConsecutiveFailures(0);
+        node.setWallMonitorMessage(message);
+        node.setWallMonitorExternalStatus("UNKNOWN");
+        node.setWallMonitorExternalLastCheckAt(null);
+        node.setWallMonitorExternalConsecutiveFailures(0);
+        node.setWallMonitorExternalMessage(message);
     }
 
     private String resolveNodeAddress(Node node, boolean preferServerIp) {

@@ -5,6 +5,7 @@ import com.admin.common.dto.GostConfigDto;
 import com.admin.common.dto.GostDto;
 import com.admin.common.task.CheckGostConfigAsync;
 import com.admin.entity.Node;
+import com.admin.service.CloudflareDnsSyncService;
 import com.admin.service.NodeService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -29,6 +30,10 @@ public class WebSocketServer extends TextWebSocketHandler {
 
     @Resource
     NodeService nodeService;
+
+    @Resource
+    @org.springframework.context.annotation.Lazy
+    CloudflareDnsSyncService cloudflareDnsSyncService;
 
     // 存储所有活跃的 WebSocket 连接（
     private static final CopyOnWriteArraySet<WebSocketSession> activeSessions = new CopyOnWriteArraySet<>();
@@ -499,6 +504,8 @@ public class WebSocketServer extends TextWebSocketHandler {
                     if (updateResult) {
                         log.info("节点 {} 连接建立成功，状态更新为在线，版本: {}", nodeId, version);
 
+                        cloudflareDnsSyncService.requestSyncAll("node-online");
+
                         if (hasReportedRuntimeIp) {
                             // 先保存在线状态，再异步更新公网 IP，避免旧 Node 对象覆盖新 IP。
                             nodeService.refreshRuntimeNodeServerIpAsync(nodeId, nodePublicIp, nodePublicIpv4, nodePublicIpv6, clientIp);
@@ -589,6 +596,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                         
                         if (updateResult) {
                             log.info("节点 {} 状态更新为离线成功", nodeId);
+                            cloudflareDnsSyncService.requestSyncAll("node-offline");
                             
                             JSONObject res = new JSONObject();
                             res.put("id", id);

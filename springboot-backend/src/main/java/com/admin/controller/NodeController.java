@@ -6,7 +6,6 @@ import com.admin.common.aop.LogAnnotation;
 import com.admin.common.dto.NodeDto;
 import com.admin.common.dto.NodeUpdateDto;
 import com.admin.common.lang.R;
-import com.admin.service.NodeWallMonitorService;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,9 +24,6 @@ import java.util.Map;
 @CrossOrigin
 @RequestMapping("/api/v1/node")
 public class NodeController extends BaseController {
-
-    @Resource
-    private NodeWallMonitorService nodeWallMonitorService;
 
     @LogAnnotation
     @RequireRole
@@ -71,14 +67,6 @@ public class NodeController extends BaseController {
                 ? null
                 : params.get("assetMode").toString();
         return nodeService.getInstallCommand(id, publicBaseUrl, assetMode);
-    }
-
-    @LogAnnotation
-    @RequireRole
-    @PostMapping("/wall-check")
-    public R wallCheck(@RequestBody Map<String, Object> params) {
-        Long id = Long.valueOf(params.get("id").toString());
-        return nodeWallMonitorService.checkNodeNow(id);
     }
 
 }
