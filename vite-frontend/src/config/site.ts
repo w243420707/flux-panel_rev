@@ -4,8 +4,8 @@ export type SiteConfig = typeof siteConfig;
 
 // 缓存相关常量
 const CACHE_PREFIX = 'vite_config_';
-const VERSION = "1.3.41";
-const APP_VERSION = "1.0.11";
+const VERSION = "1.3.42";
+const APP_VERSION = "1.0.12";
 
 const getInitialConfig = () => {
   if (typeof window === 'undefined') {

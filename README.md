@@ -133,13 +133,19 @@ APK 必须运行在大陆网络出口，海外 VPS 或海外模拟器不能代�
 
 ## 更新日志
 
-### 2026-08-24 v1.3.41
+### 2026-08-23 v1.3.42
+
+- Fixed installation on Ubuntu 20.04. The installer now uses Docker's official apt repository and skips the unavailable `docker-model-plugin` package.
+- Docker installation remains on official/global sources; no domestic mirror is added.
+- Frontend version is now `1.3.42`; application version is now `1.0.12`.
+
+### 2026-08-23 v1.3.41
 
 - Added a real HTTP health check for the frontend container.
 - Deployment now waits for MySQL, backend, and frontend health before reloading Nginx, preventing a successful-looking update from leaving the panel on `502 Bad Gateway`.
 - Frontend version is now `1.3.41`; application version is now `1.0.11`.
 
-### 2026-08-24 v1.3.40
+### 2026-08-23 v1.3.40
 
 - Removed the explicit `docker/dockerfile:1.7` frontend dependency from panel Dockerfiles. VPS updates no longer need to pull this extra Docker Hub image before the actual build starts.
 - Added a clear error message when official Docker Hub images cannot be downloaded because the VPS outbound network is unavailable.

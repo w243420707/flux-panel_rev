@@ -24,6 +24,7 @@ PURGE_DATA=0
 
 OS_ID="unknown"
 OS_VERSION="unknown"
+OS_CODENAME="unknown"
 OS_PRETTY="unknown"
 PKG_MANAGER=""
 ARCH_RAW="$(uname -m)"
@@ -212,6 +213,7 @@ detect_system() {
     . /etc/os-release
     OS_ID="${ID:-unknown}"
     OS_VERSION="${VERSION_ID:-unknown}"
+    OS_CODENAME="${VERSION_CODENAME:-${UBUNTU_CODENAME:-unknown}}"
     OS_PRETTY="${PRETTY_NAME:-$OS_ID $OS_VERSION}"
   fi
 
@@ -278,12 +280,55 @@ install_packages() {
   esac
 }
 
+install_docker_from_official_apt_repo() {
+  [[ "${PKG_MANAGER}" == "apt" ]] || die "Official Docker apt fallback called on a non-apt system."
+  [[ "${OS_ID}" == "ubuntu" || "${OS_ID}" == "debian" ]] || die "Unsupported apt distribution for the official Docker fallback: ${OS_ID}."
+  [[ "${OS_CODENAME}" != "unknown" ]] || die "Could not determine the ${OS_ID} release codename for the official Docker repository."
+
+  local docker_distribution="${OS_ID}"
+  local docker_arch
+  docker_arch="$(dpkg --print-architecture)"
+
+  log "Installing Docker from the official ${docker_distribution} repository without the unavailable docker-model-plugin..."
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL "https://download.docker.com/linux/${docker_distribution}/gpg" -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
+    "${docker_arch}" "${docker_distribution}" "${OS_CODENAME}" > /etc/apt/sources.list.d/docker.list
+
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+}
+
 install_docker() {
   if ! command -v docker >/dev/null 2>&1; then
-    log "Docker not found. Installing Docker with the official installer..."
-    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-    sh /tmp/get-docker.sh
+    if [[ "${PKG_MANAGER}" == "apt" && "${OS_ID}" == "ubuntu" && "${OS_VERSION}" == "20.04" ]]; then
+      warn "Ubuntu 20.04 is not compatible with the current get.docker.com package list; using the official Docker repository fallback."
+      install_docker_from_official_apt_repo
+    else
+      log "Docker not found. Installing Docker with the official installer..."
+      if ! curl -fsSL https://get.docker.com -o /tmp/get-docker.sh || ! sh /tmp/get-docker.sh; then
+        warn "The official Docker installer failed; retrying with the official package repository without docker-model-plugin."
+        case "${PKG_MANAGER}" in
+          apt)
+            install_docker_from_official_apt_repo
+            ;;
+          dnf|yum)
+            ${PKG_MANAGER} install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            ;;
+          apk)
+            apk add --no-cache docker docker-cli-compose
+            ;;
+          *)
+            die "Docker installation failed on ${PKG_MANAGER}."
+            ;;
+        esac
+      fi
+    fi
   fi
+
+  command -v docker >/dev/null 2>&1 || die "Docker installation failed: docker command is unavailable."
 
   systemctl enable --now docker
 
