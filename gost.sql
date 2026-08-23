@@ -236,7 +236,7 @@ CREATE TABLE `cloudflare_dns_setting` (
 --
 
 INSERT INTO `cloudflare_dns_setting` (`id`, `created_time`, `updated_time`, `status`, `enabled`, `ttl`, `proxied`, `record_type`, `sync_interval_seconds`, `auto_update_node_ip`) VALUES
-(1, UNIX_TIMESTAMP() * 1000, UNIX_TIMESTAMP() * 1000, 1, 0, 1, 0, 'AUTO', 120, 1);
+(1, UNIX_TIMESTAMP() * 1000, UNIX_TIMESTAMP() * 1000, 1, 0, 60, 0, 'AUTO', 120, 1);
 
 -- --------------------------------------------------------
 

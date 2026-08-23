@@ -49,6 +49,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     private static final int NODE_ONLINE = 1;
     private static final long SMART_POOL_SWITCH_COOLDOWN_MS = 5 * 60 * 1000L;
     private static final long SMART_POOL_ROTATE_INTERVAL_MS = 6 * 60 * 60 * 1000L;
+    private static final int MIN_DNS_TTL_SECONDS = 60;
 
     private static final ConcurrentHashMap<Long, Object> BINDING_LOCKS = new ConcurrentHashMap<>();
 
@@ -952,7 +953,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     }
 
     private int resolveTtl(Integer ttl) {
-        return ttl == null || ttl <= 0 ? 1 : ttl;
+        return ttl == null || ttl <= 0 ? MIN_DNS_TTL_SECONDS : Math.max(ttl, MIN_DNS_TTL_SECONDS);
     }
 
     private int resolveInterval(Integer intervalSeconds) {

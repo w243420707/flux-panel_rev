@@ -121,6 +121,12 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 ## 更新日志
 
+### 2026-08-23 v1.3.35
+
+- Cloudflare DNS TTL 改为手动 `60` 秒，取消默认自动 TTL，且前后端统一限制最低为 60 秒。
+- 面板启动时会自动把旧配置中的 `1`、空值或低于 60 秒的 TTL 修正为 60 秒，避免继续向 Cloudflare 提交自动 TTL。
+- Frontend version is now `1.3.35`; application version is now `1.0.5`.
+
 ### 2026-08-23 v1.3.31
 
 - 修复部分 VPS 无法解析 `github.com` 导致更新失败的问题。

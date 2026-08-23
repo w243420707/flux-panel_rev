@@ -14,7 +14,8 @@ import org.springframework.util.StringUtils;
 @Service
 public class CloudflareDnsSettingServiceImpl extends ServiceImpl<CloudflareDnsSettingMapper, CloudflareDnsSetting> implements CloudflareDnsSettingService {
 
-    private static final int DEFAULT_TTL = 1;
+    private static final int DEFAULT_TTL = 60;
+    private static final int MIN_TTL = 60;
     private static final int DEFAULT_SYNC_INTERVAL_SECONDS = 120;
     private static final int MIN_SYNC_INTERVAL_SECONDS = 60;
     private static final String DEFAULT_RECORD_TYPE = "AUTO";
@@ -99,7 +100,7 @@ public class CloudflareDnsSettingServiceImpl extends ServiceImpl<CloudflareDnsSe
     }
 
     private int resolveTtl(Integer ttl) {
-        return ttl == null || ttl <= 0 ? DEFAULT_TTL : ttl;
+        return ttl == null || ttl <= 0 ? DEFAULT_TTL : Math.max(ttl, MIN_TTL);
     }
 
     private int resolveInterval(Integer intervalSeconds) {
