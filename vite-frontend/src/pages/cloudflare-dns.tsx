@@ -87,7 +87,7 @@ interface BindingForm {
 
 const defaultSetting: CloudflareDnsSetting = {
   enabled: 0,
-  ttl: 1,
+  ttl: 60,
   recordType: "AUTO",
   syncIntervalSeconds: 120,
   autoUpdateNodeIp: 1,
@@ -564,11 +564,11 @@ export default function CloudflareDnsPage() {
                 variant="bordered"
               />
               <Input
-                label="TTL"
+                label="TTL（秒，最低 60 秒）"
                 type="number"
-                min={1}
+                min={60}
                 value={setting.ttl.toString()}
-                onChange={(e) => setSetting((prev) => ({ ...prev, ttl: parseInt(e.target.value, 10) || 1 }))}
+                onChange={(e) => setSetting((prev) => ({ ...prev, ttl: Math.max(parseInt(e.target.value, 10) || 60, 60) }))}
                 variant="bordered"
               />
             </div>
