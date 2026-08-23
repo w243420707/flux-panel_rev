@@ -8,6 +8,7 @@
 - 节点端：基于 go-gost 改造的节点程序，支持通过 WebSocket 接入面板。
 - 节点管理：支持创建节点、查看节点状态、生成节点安装命令。
 - 节点被墙监测：面板定时下发 TCP 探测，按国内多点失败比例和连续失败次数标记正常、观察中、疑似被墙或检测异常。
+- 独立 Android 大陆探针：单独仓库提供 APK，按节点配置的多个 TCP 端口检测；任一端口连续 3 次全部失败即可调用远程换 IP API，并通过面板回调接口标记节点不可达。
 - 转发管理：支持端口转发、隧道转发、TCP/UDP 转发、多入口、多出口转发，以及转发批量删除。
 - 负载分摊：新增隧道可选择多个入口节点和多个出口节点，多目标或多出口时自动使用轮询分摊。
 - 高吞吐默认：隧道转发默认使用适合公网大流量节点的 `mtls` 复用链路，并自动配置 keepalive 和缓冲参数。
@@ -19,6 +20,7 @@
 - 自动部署：支持 VPS 一键安装、更新、卸载、状态查看、日志查看、证书续期和 Docker 缓存清理。
 - 运行维护：面板容器后台运行并随 Docker 自动恢复，节点端使用 systemd 开机自启。
 - 长期复用：面板前后端从本仓库源码构建，不再依赖第三方面板镜像；节点端资源由独立公开仓库长期托管。
+- Android 探针仓库：`flux-panel-android-probe`，不参与面板 Docker 构建，也不接入节点转发配置。
 
 ## 双仓库维护规则
 
@@ -88,7 +90,17 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/main/deploy.sh -o deploy.sh && chmod +x deploy.sh && sudo ./deploy.sh install
 ```
 
-卸载时会提示是否删除数据库卷和部署目录，确认前不会直接清除数据。
+### Android 大陆探针
+
+Android 探针是独立工程，不需要安装到 VPS。通过独立仓库的 GitHub Actions 构建 `app-debug.apk` 后，安装到大陆网络出口的 Android 手机或模拟器中。
+
+新版 APK 默认使用“面板同步”模式：在 Cloudflare DNS 页面复制 Android 探针 API Key，填入 APK 的面板地址和 API Key，APK 会自动拉取节点及最新 IP/域名，并把检测结果回报面板。面板收到不可达结果后会复用 Cloudflare 智能解析逻辑，移除不可达 IP；节点恢复后重新加入解析池。
+
+APK 支持 IP 和域名、全局多个 TCP 端口（例如 `22,443,500`）、全局检测间隔和每端口检测次数。每个端口按顺序检测，成功一次即通过；任一端口不通过，节点才判定为不可达。域名每轮重新解析，面板同步失败时保留本地缓存。
+
+不接面板时仍可使用手动节点模式。手动节点不可达后可以按冷却时间调用远程换 IP API，例如 `/api/remote/change-ip/{token}`。面板节点不会直接调用换 IP API。
+
+APK 必须运行在大陆网络出口，海外 VPS 或海外模拟器不能代表大陆访问结果。首次运行请允许通知，并点击“开启通知、后台运行和忽略电池优化”。
 
 ### 节点端部署
 
@@ -121,18 +133,38 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 
 ## 更新日志
 
-### 2026-08-23 v1.3.35
+### 2026-08-23 v1.3.37
 
-- Cloudflare DNS TTL 改为手动 `60` 秒，取消默认自动 TTL，且前后端统一限制最低为 60 秒。
-- 面板启动时会自动把旧配置中的 `1`、空值或低于 60 秒的 TTL 修正为 60 秒，避免继续向 Cloudflare 提交自动 TTL。
-- Frontend version is now `1.3.35`; application version is now `1.0.5`.
+- 合并远程构建资源更新和本地面板改动，保留两边提交内容。
+- 完成 Android 探针面板同步接口、API Key 管理、节点同步和检测结果回报。
+- 节点公网 IP、域名和 Cloudflare DNS 同步继续使用最新运行时数据。
+- Frontend version is now `1.3.37`; application version is now `1.0.7`.
 
 ### 2026-08-23 v1.3.36
 
-- 节点心跳检测到新公网 IP 后，Cloudflare DNS 同步进入独立优先队列，先更新解析。
-- 转发配置刷新改为后台队列，避免大量转发配置阻塞 DNS 同步。
-- 增加 Cloudflare DNS 同步失败日志，便于定位 API、绑定或网络问题。
+- Cloudflare DNS TTL 改为手动 `60` 秒，取消默认自动 TTL，且前后端统一限制最低为 60 秒。
+- 面板启动时会自动把旧配置中的 `1`、空值或低于 60 秒的 TTL 修正为 60 秒，避免继续向 Cloudflare 提交自动 TTL。
 - Frontend version is now `1.3.36`; application version is now `1.0.6`.
+- Fixed delayed Cloudflare DNS updates after a node heartbeat reports a new public IP.
+- Runtime IP changes now submit DNS synchronization to a dedicated priority queue, while bulk forward configuration refresh runs independently in the background.
+- Added warning logs for runtime DNS synchronization failures to make Cloudflare/API/binding problems diagnosable.
+- Added the APK panel-sync API, API Key authentication, multi-port reports, and Cloudflare status synchronization.
+- Updated `flux-panel-android-probe` to `1.1.0` with panel sync, domain re-resolution, cached-node fallback, and background permission flow.
+
+### 2026-08-23 v1.3.33
+
+- 独立 Android 探针改为只通过节点专属远程 API 回调面板，不再引入面板内置探针、WebSocket 或额外探针表。
+- 部署脚本的 HTTP/HTTPS Nginx 配置补充 `/api/remote/` 代理，节点回调不再依赖前端容器转发。
+- 清理未使用的内置探针字段和新安装 SQL，保留已有数据库字段不做破坏性删除。
+- 独立 APK 版本更新到 `1.0.2`，每个端口每轮检测 3 次，3 次全部失败才触发远程 API。
+- 前端版本号同步更新到 `1.3.33`。
+
+### 2026-08-23 v1.3.32
+
+- 新增独立 Android 大陆探针工程 `flux-panel-android-probe`，支持多节点、多端口、全局检测间隔、后台前台服务和开机恢复。
+- APK 按每个端口 3 次 TCP 检测，任一端口全部失败时直接访问该节点配置的远程换 IP API，并增加冷却时间避免重复调用。
+- 面板为每个节点生成独立远程回调地址，收到 APK 回调后标记节点为疑似不可达并触发 Cloudflare DNS 备用池同步。
+- 前端版本号同步更新到 `1.3.32`。
 
 ### 2026-08-23 v1.3.31
 

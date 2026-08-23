@@ -25,6 +25,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("add tunnel.in_node_ids", () -> ensureColumn(connection, "tunnel", "in_node_ids", "ALTER TABLE tunnel ADD COLUMN in_node_ids LONGTEXT NULL AFTER in_node_id"));
             runStep("add tunnel.out_node_ids", () -> ensureColumn(connection, "tunnel", "out_node_ids", "ALTER TABLE tunnel ADD COLUMN out_node_ids LONGTEXT NULL AFTER out_node_id"));
             runStep("add node dual-stack runtime ip columns", () -> addNodeRuntimeIpColumns(connection));
+            runStep("add node remote change ip token", () -> addNodeRemoteChangeIpToken(connection));
             runStep("add node wall monitor columns", () -> addNodeWallMonitorColumns(connection));
             runStep("relax node ip columns", () -> relaxNodeIpColumns(connection));
             runStep("widen tunnel ip columns", () -> widenIpColumns(connection));
@@ -174,6 +175,15 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
         }
     }
 
+    private void addNodeRemoteChangeIpToken(Connection connection) throws Exception {
+        ensureColumn(connection, "node", "remote_change_ip_token",
+                "ALTER TABLE node ADD COLUMN remote_change_ip_token VARCHAR(128) NOT NULL DEFAULT '' AFTER secret");
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("UPDATE node SET remote_change_ip_token = REPLACE(UUID(), '-', '') "
+                    + "WHERE remote_change_ip_token IS NULL OR remote_change_ip_token = ''");
+        }
+    }
+
     private void addNodeWallMonitorColumns(Connection connection) throws Exception {
         ensureColumn(connection, "node", "wall_monitor_enabled",
                 "ALTER TABLE node ADD COLUMN wall_monitor_enabled TINYINT NOT NULL DEFAULT 1 AFTER version");
@@ -195,6 +205,18 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 "ALTER TABLE node ADD COLUMN wall_monitor_latency_ms DOUBLE NULL AFTER wall_monitor_global_total_count");
         ensureColumn(connection, "node", "wall_monitor_message",
                 "ALTER TABLE node ADD COLUMN wall_monitor_message VARCHAR(1000) NULL AFTER wall_monitor_latency_ms");
+        ensureColumn(connection, "node", "wall_monitor_external_status",
+                "ALTER TABLE node ADD COLUMN wall_monitor_external_status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN' AFTER wall_monitor_message");
+        ensureColumn(connection, "node", "wall_monitor_external_last_check_at",
+                "ALTER TABLE node ADD COLUMN wall_monitor_external_last_check_at BIGINT NULL AFTER wall_monitor_external_status");
+        ensureColumn(connection, "node", "wall_monitor_external_consecutive_failures",
+                "ALTER TABLE node ADD COLUMN wall_monitor_external_consecutive_failures INT NOT NULL DEFAULT 0 AFTER wall_monitor_external_last_check_at");
+        ensureColumn(connection, "node", "wall_monitor_external_message",
+                "ALTER TABLE node ADD COLUMN wall_monitor_external_message VARCHAR(1000) NULL AFTER wall_monitor_external_consecutive_failures");
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("UPDATE node SET wall_monitor_external_status = 'UNKNOWN' WHERE wall_monitor_external_status IS NULL OR wall_monitor_external_status = ''");
+            statement.executeUpdate("UPDATE node SET wall_monitor_external_consecutive_failures = 0 WHERE wall_monitor_external_consecutive_failures IS NULL OR wall_monitor_external_consecutive_failures < 0");
+        }
     }
 
     private void createCloudflareTables(Connection connection) throws Exception {

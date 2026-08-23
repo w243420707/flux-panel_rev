@@ -26,4 +26,5 @@ public class NodeDto {
     @Min(value = 1, message = "结束端口必须大于0")
     @Max(value = 65535, message = "结束端口不能超过65535")
     private Integer portEnd;
+
 }

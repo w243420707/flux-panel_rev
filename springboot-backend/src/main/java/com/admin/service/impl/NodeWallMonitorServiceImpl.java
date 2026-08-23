@@ -31,6 +31,7 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
     private static final String STATUS_SUSPECTED_BLOCKED = "SUSPECTED_BLOCKED";
     private static final String STATUS_NODE_OFFLINE = "NODE_OFFLINE";
     private static final String STATUS_CHECK_FAILED = "CHECK_FAILED";
+    private static final String EXTERNAL_STATUS_UNKNOWN = "UNKNOWN";
 
     private static final int NODE_ONLINE = 1;
     private static final int MONITOR_DISABLED = 0;
@@ -119,8 +120,63 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         Node updated = nodeService.getById(nodeId);
         if (updated != null) {
             updated.setSecret(null);
+            updated.setRemoteChangeIpToken(null);
         }
         return R.ok(updated);
+    }
+
+    @Override
+    public R markNodeUnavailableByExternalProbe(Long nodeId, String message) {
+        if (nodeId == null) {
+            return R.err("节点不存在");
+        }
+        Node node = nodeService.getById(nodeId);
+        if (node == null) {
+            return R.err("节点不存在");
+        }
+
+        String previousStatus = normalizeStatus(node.getWallMonitorExternalStatus());
+        Node update = new Node();
+        update.setId(nodeId);
+        update.setWallMonitorEnabled(1);
+        update.setWallMonitorExternalStatus(STATUS_SUSPECTED_BLOCKED);
+        update.setWallMonitorExternalLastCheckAt(System.currentTimeMillis());
+        update.setWallMonitorExternalConsecutiveFailures(safeInt(node.getWallMonitorExternalConsecutiveFailures()) + 1);
+        update.setWallMonitorExternalMessage(trimMessage(
+                message == null || message.trim().isEmpty()
+                        ? "独立 Android 探针确认节点端口不可达"
+                        : message));
+        nodeService.updateById(update);
+        broadcastMonitorUpdate(update);
+        syncCloudflareDnsIfExternalStatusChanged(nodeId, previousStatus, STATUS_SUSPECTED_BLOCKED);
+        return R.ok("节点已标记为不可达");
+    }
+
+    @Override
+    public R markNodeAvailableByExternalProbe(Long nodeId, String message) {
+        if (nodeId == null) {
+            return R.err("节点不存在");
+        }
+        Node node = nodeService.getById(nodeId);
+        if (node == null) {
+            return R.err("节点不存在");
+        }
+
+        String previousStatus = normalizeStatus(node.getWallMonitorExternalStatus());
+        Node update = new Node();
+        update.setId(nodeId);
+        update.setWallMonitorEnabled(1);
+        update.setWallMonitorExternalStatus(STATUS_OK);
+        update.setWallMonitorExternalLastCheckAt(System.currentTimeMillis());
+        update.setWallMonitorExternalConsecutiveFailures(0);
+        update.setWallMonitorExternalMessage(trimMessage(
+                message == null || message.trim().isEmpty()
+                        ? "独立 Android 探针确认节点端口可达"
+                        : message));
+        nodeService.updateById(update);
+        broadcastMonitorUpdate(update);
+        syncCloudflareDnsIfExternalStatusChanged(nodeId, previousStatus, STATUS_OK);
+        return R.ok("节点已标记为可达");
     }
 
     private void checkAndStore(Long nodeId) {
@@ -336,6 +392,10 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
             data.put("wallMonitorGlobalTotalCount", node.getWallMonitorGlobalTotalCount());
             data.put("wallMonitorLatencyMs", node.getWallMonitorLatencyMs());
             data.put("wallMonitorMessage", node.getWallMonitorMessage());
+            data.put("wallMonitorExternalStatus", node.getWallMonitorExternalStatus());
+            data.put("wallMonitorExternalLastCheckAt", node.getWallMonitorExternalLastCheckAt());
+            data.put("wallMonitorExternalConsecutiveFailures", node.getWallMonitorExternalConsecutiveFailures());
+            data.put("wallMonitorExternalMessage", node.getWallMonitorExternalMessage());
 
             JSONObject message = new JSONObject();
             message.put("id", node.getId());
@@ -356,6 +416,19 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
                 cloudflareDnsSyncService.syncBindingsByNode(nodeId, "wall-monitor");
             } catch (Exception e) {
                 log.warn("Cloudflare DNS sync by wall monitor failed, nodeId={}, error={}", nodeId, e.getMessage());
+            }
+        });
+    }
+
+    private void syncCloudflareDnsIfExternalStatusChanged(Long nodeId, String previousStatus, String nextStatus) {
+        if (Objects.equals(normalizeStatus(previousStatus), normalizeStatus(nextStatus))) {
+            return;
+        }
+        CompletableFuture.runAsync(() -> {
+            try {
+                cloudflareDnsSyncService.syncBindingsByNode(nodeId, "external-probe");
+            } catch (Exception e) {
+                log.warn("Cloudflare DNS sync by external probe failed, nodeId={}, error={}", nodeId, e.getMessage());
             }
         });
     }

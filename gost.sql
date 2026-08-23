@@ -56,6 +56,7 @@ CREATE TABLE `node` (
   `id` int(10) NOT NULL,
   `name` varchar(100) NOT NULL,
   `secret` varchar(100) NOT NULL,
+  `remote_change_ip_token` varchar(128) NOT NULL DEFAULT '',
   `ip` longtext,
   `server_ip` varchar(100) NOT NULL DEFAULT '',
   `server_ipv4` varchar(100) NOT NULL DEFAULT '',
@@ -73,6 +74,10 @@ CREATE TABLE `node` (
   `wall_monitor_global_total_count` int(10) NOT NULL DEFAULT '0',
   `wall_monitor_latency_ms` double DEFAULT NULL,
   `wall_monitor_message` varchar(1000) DEFAULT NULL,
+  `wall_monitor_external_status` varchar(32) NOT NULL DEFAULT 'UNKNOWN',
+  `wall_monitor_external_last_check_at` bigint(20) DEFAULT NULL,
+  `wall_monitor_external_consecutive_failures` int(10) NOT NULL DEFAULT '0',
+  `wall_monitor_external_message` varchar(1000) DEFAULT NULL,
   `created_time` bigint(20) NOT NULL,
   `updated_time` bigint(20) DEFAULT NULL,
   `status` int(10) NOT NULL

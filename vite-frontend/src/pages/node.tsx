@@ -54,6 +54,7 @@ interface Node {
   wallMonitorGlobalTotalCount?: number;
   wallMonitorLatencyMs?: number;
   wallMonitorMessage?: string;
+  remoteChangeIpUrl?: string;
   wallMonitorChecking?: boolean;
 }
 
@@ -623,6 +624,19 @@ export default function NodePage() {
     }
   };
 
+  const handleCopyRemoteChangeIpUrl = async (node: Node) => {
+    if (!node.remoteChangeIpUrl) {
+      toast.error('当前节点没有可用的远程 API 地址');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(node.remoteChangeIpUrl);
+      toast.success('远程换 IP API 已复制');
+    } catch (error) {
+      toast.error('复制失败，请使用 HTTPS 访问面板后重试');
+    }
+  };
+
   // 节点被墙监测
   const handleWallMonitorCheck = async (node: Node) => {
     setNodeList(prev => prev.map(n =>
@@ -870,6 +884,22 @@ export default function NodePage() {
                         <span>延迟 {node.wallMonitorLatencyMs ? `${node.wallMonitorLatencyMs.toFixed(0)}ms` : "-"}</span>
                         <span>{formatMonitorTime(node.wallMonitorLastCheckAt)}</span>
                       </div>
+                      {node.remoteChangeIpUrl && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate text-default-500" title={node.remoteChangeIpUrl}>
+                            独立 APK 回调 API
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="flat"
+                            color="primary"
+                            onPress={() => handleCopyRemoteChangeIpUrl(node)}
+                            className="min-h-7"
+                          >
+                            复制
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
 

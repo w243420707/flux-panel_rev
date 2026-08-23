@@ -57,6 +57,8 @@ export const saveCloudflareDnsBinding = (data: any) => Network.post("/cloudflare
 export const deleteCloudflareDnsBinding = (id: number) => Network.post("/cloudflare-dns/binding/delete", { id });
 export const syncCloudflareDnsBinding = (id: number) => Network.post("/cloudflare-dns/binding/sync", { id });
 export const syncCloudflareDnsAll = () => Network.post("/cloudflare-dns/sync");
+export const getProbeSyncApiKey = () => Network.post("/probe-sync/key");
+export const rotateProbeSyncApiKey = () => Network.post("/probe-sync/key/rotate");
 
 // 用户隧道权限管理操作 - 全部使用POST请求
 export const assignUserTunnel = (data: any) => Network.post("/tunnel/user/assign", data);

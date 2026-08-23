@@ -1141,6 +1141,31 @@ server {
         default_type "text/plain";
     }
 
+    # Standalone Android probe callback. It uses a per-node token and does not require panel login.
+    location ^~ /api/remote/ {
+        access_log off;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
+
+    location ^~ /api/probe-sync/ {
+        access_log off;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:${frontend_port};
         proxy_http_version 1.1;
@@ -1195,6 +1220,31 @@ server {
     ssl_prefer_server_ciphers off;
 
     client_max_body_size 100m;
+
+    # Standalone Android probe callback. It uses a per-node token and does not require panel login.
+    location ^~ /api/remote/ {
+        access_log off;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
+
+    location ^~ /api/probe-sync/ {
+        access_log off;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:${frontend_port};

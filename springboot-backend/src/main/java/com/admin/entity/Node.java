@@ -1,6 +1,7 @@
 package com.admin.entity;
 
 import java.io.Serializable;
+import com.baomidou.mybatisplus.annotation.TableField;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -21,6 +22,12 @@ public class Node extends BaseEntity {
     private String name;
 
     private String secret;
+
+    /** Token used only by the standalone Android probe callback. */
+    private String remoteChangeIpToken;
+
+    @TableField(exist = false)
+    private String remoteChangeIpUrl;
 
     private String ip;
 
@@ -51,6 +58,14 @@ public class Node extends BaseEntity {
     private Double wallMonitorLatencyMs;
 
     private String wallMonitorMessage;
+
+    private String wallMonitorExternalStatus;
+
+    private Long wallMonitorExternalLastCheckAt;
+
+    private Integer wallMonitorExternalConsecutiveFailures;
+
+    private String wallMonitorExternalMessage;
 
     private Integer portSta;
 

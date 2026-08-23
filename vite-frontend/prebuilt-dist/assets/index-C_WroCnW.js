@@ -31408,7 +31408,7 @@ function useAriaButton$1(props, ref) {
     })
   };
 }
-var domAnimation$8 = () => __vitePreload(() => import("./index-BXOX4qzH.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$8 = () => __vitePreload(() => import("./index-CPSU19Io.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple$1 = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -35760,7 +35760,7 @@ function useAriaButton(props, ref) {
     })
   };
 }
-var domAnimation$7 = () => __vitePreload(() => import("./index-BXOX4qzH.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$7 = () => __vitePreload(() => import("./index-CPSU19Io.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Ripple = (props) => {
   const { ripples = [], motionProps, color: color2 = "currentColor", style, onClear } = props;
   return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: ripples.map((ripple) => {
@@ -39806,6 +39806,8 @@ const saveCloudflareDnsBinding = (data) => Network.post("/cloudflare-dns/binding
 const deleteCloudflareDnsBinding = (id2) => Network.post("/cloudflare-dns/binding/delete", { id: id2 });
 const syncCloudflareDnsBinding = (id2) => Network.post("/cloudflare-dns/binding/sync", { id: id2 });
 const syncCloudflareDnsAll = () => Network.post("/cloudflare-dns/sync");
+const getProbeSyncApiKey = () => Network.post("/probe-sync/key");
+const rotateProbeSyncApiKey = () => Network.post("/probe-sync/key/rotate");
 const assignUserTunnel = (data) => Network.post("/tunnel/user/assign", data);
 const getUserTunnelList = (queryData = {}) => Network.post("/tunnel/user/list", queryData);
 const removeUserTunnel = (params) => Network.post("/tunnel/user/remove", params);
@@ -39832,8 +39834,8 @@ const getConfigByName = (name) => Network.post("/config/get", { name });
 const updateConfigs = (configMap) => Network.post("/config/update", configMap);
 const checkCaptcha = () => Network.post("/captcha/check");
 const CACHE_PREFIX = "vite_config_";
-const VERSION = "1.3.31";
-const APP_VERSION = "1.0.3";
+const VERSION = "1.3.37";
+const APP_VERSION = "1.0.7";
 const getInitialConfig = () => {
   if (typeof window === "undefined") {
     return {
@@ -40142,7 +40144,7 @@ var menuVariants = {
     }
   }
 };
-var domAnimation$6 = () => __vitePreload(() => import("./index-BXOX4qzH.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$6 = () => __vitePreload(() => import("./index-CPSU19Io.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var NavbarMenu = forwardRef$1((props, ref) => {
   var _a, _b;
   const { className, children, portalContainer, motionProps, style, ...otherProps } = props;
@@ -40476,7 +40478,7 @@ function useNavbar(originalProps) {
     getWrapperProps
   };
 }
-var domAnimation$5 = () => __vitePreload(() => import("./index-BXOX4qzH.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$5 = () => __vitePreload(() => import("./index-CPSU19Io.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var Navbar$1 = forwardRef$1((props, ref) => {
   const { children, ...otherProps } = props;
   const context = useNavbar({ ...otherProps, ref });
@@ -43523,7 +43525,7 @@ function getViewportSize() {
     height: visualViewport && (visualViewport == null ? void 0 : visualViewport.height) || window.innerHeight
   };
 }
-var domAnimation$4 = () => __vitePreload(() => import("./index-BXOX4qzH.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$4 = () => __vitePreload(() => import("./index-CPSU19Io.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var ModalContent = (props) => {
   const { as, children, role = "dialog", ...otherProps } = props;
   const {
@@ -73483,7 +73485,7 @@ function usePopover$1(originalProps) {
     getContentProps
   };
 }
-var domAnimation$3 = () => __vitePreload(() => import("./index-BXOX4qzH.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$3 = () => __vitePreload(() => import("./index-CPSU19Io.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var FreeSoloPopoverWrapper = forwardRef$1(
   ({
     children,
@@ -75191,7 +75193,7 @@ function useAccordionItem(props) {
     getSubtitleProps
   };
 }
-var domAnimation$2 = () => __vitePreload(() => import("./index-BXOX4qzH.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$2 = () => __vitePreload(() => import("./index-CPSU19Io.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var AccordionItem = forwardRef$1((props, ref) => {
   const {
     Component,
@@ -82879,6 +82881,18 @@ function NodePage() {
       zt.error("复制失败，请手动选择文本复制。原因：请使用https访问面板（例如nginx反代），http无法复制。");
     }
   };
+  const handleCopyRemoteChangeIpUrl = async (node) => {
+    if (!node.remoteChangeIpUrl) {
+      zt.error("当前节点没有可用的远程 API 地址");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(node.remoteChangeIpUrl);
+      zt.success("远程换 IP API 已复制");
+    } catch (error) {
+      zt.error("复制失败，请使用 HTTPS 访问面板后重试");
+    }
+  };
   const handleWallMonitorCheck = async (node) => {
     setNodeList((prev) => prev.map(
       (n2) => n2.id === node.id ? { ...n2, wallMonitorChecking: true } : n2
@@ -83077,6 +83091,20 @@ function NodePage() {
                     node.wallMonitorLatencyMs ? `${node.wallMonitorLatencyMs.toFixed(0)}ms` : "-"
                   ] }),
                   /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: formatMonitorTime(node.wallMonitorLastCheckAt) })
+                ] }),
+                node.remoteChangeIpUrl && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-2 flex items-center gap-2", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "min-w-0 flex-1 truncate text-default-500", title: node.remoteChangeIpUrl, children: "独立 APK 回调 API" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    button_default$1,
+                    {
+                      size: "sm",
+                      variant: "flat",
+                      color: "primary",
+                      onPress: () => handleCopyRemoteChangeIpUrl(node),
+                      className: "min-h-7",
+                      children: "复制"
+                    }
+                  )
                 ] })
               ] })
             ] }),
@@ -96664,7 +96692,7 @@ function CalendarPicker(props) {
     }
   );
 }
-var domAnimation$1 = () => __vitePreload(() => import("./index-BXOX4qzH.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation$1 = () => __vitePreload(() => import("./index-CPSU19Io.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopLayoutWrapper = reactExports.forwardRef(
   (props, ref) => {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref, ...props });
@@ -99082,7 +99110,7 @@ function ConfigPage() {
 }
 const defaultSetting = {
   enabled: 0,
-  ttl: 1,
+  ttl: 60,
   recordType: "AUTO",
   syncIntervalSeconds: 120,
   autoUpdateNodeIp: 1
@@ -99106,6 +99134,8 @@ function CloudflareDnsPage() {
   const [settingLoading, setSettingLoading] = reactExports.useState(false);
   const [testLoading, setTestLoading] = reactExports.useState(false);
   const [syncAllLoading, setSyncAllLoading] = reactExports.useState(false);
+  const [probeApiKey, setProbeApiKey] = reactExports.useState("");
+  const [probeRotateLoading, setProbeRotateLoading] = reactExports.useState(false);
   const [bindingModalOpen, setBindingModalOpen] = reactExports.useState(false);
   const [bindingSubmitLoading, setBindingSubmitLoading] = reactExports.useState(false);
   const [bindingActionId, setBindingActionId] = reactExports.useState(null);
@@ -99114,13 +99144,15 @@ function CloudflareDnsPage() {
     loadData();
   }, []);
   const loadData = async () => {
+    var _a;
     setLoading(true);
     try {
-      const [settingRes, bindingRes, tunnelRes, nodeRes] = await Promise.all([
+      const [settingRes, bindingRes, tunnelRes, nodeRes, probeKeyRes] = await Promise.all([
         getCloudflareDnsSetting(),
         getCloudflareDnsBindingList(),
         getTunnelList(),
-        getNodeList()
+        getNodeList(),
+        getProbeSyncApiKey()
       ]);
       if (settingRes.code === 0) {
         setSetting({ ...defaultSetting, ...settingRes.data || {} });
@@ -99137,6 +99169,11 @@ function CloudflareDnsPage() {
       }
       if (nodeRes.code === 0) {
         setNodes(nodeRes.data || []);
+      }
+      if (probeKeyRes.code === 0) {
+        setProbeApiKey(((_a = probeKeyRes.data) == null ? void 0 : _a.apiKey) || "");
+      } else {
+        zt.error(probeKeyRes.msg || "加载探针 API Key 失败");
       }
     } catch (error) {
       zt.error("加载 Cloudflare DNS 数据失败");
@@ -99182,6 +99219,37 @@ function CloudflareDnsPage() {
       domain = domain.slice(0, -1);
     }
     return domain;
+  };
+  const handleCopyProbeApiKey = async () => {
+    if (!probeApiKey) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(probeApiKey);
+      zt.success("探针 API Key 已复制");
+    } catch {
+      zt.error("复制失败，请使用 HTTPS 访问面板");
+    }
+  };
+  const handleRotateProbeApiKey = async () => {
+    var _a;
+    if (!window.confirm("轮换后旧 APK 将无法继续同步，确定继续吗？")) {
+      return;
+    }
+    setProbeRotateLoading(true);
+    try {
+      const res2 = await rotateProbeSyncApiKey();
+      if (res2.code === 0) {
+        setProbeApiKey(((_a = res2.data) == null ? void 0 : _a.apiKey) || "");
+        zt.success("探针 API Key 已轮换");
+      } else {
+        zt.error(res2.msg || "轮换 API Key 失败");
+      }
+    } catch {
+      zt.error("轮换 API Key 失败");
+    } finally {
+      setProbeRotateLoading(false);
+    }
   };
   const normalizeDomainList = (values) => {
     const domains = [];
@@ -99525,11 +99593,11 @@ function CloudflareDnsPage() {
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               input_default,
               {
-                label: "TTL",
+                label: "TTL（秒，最低 60 秒）",
                 type: "number",
-                min: 1,
+                min: 60,
                 value: setting.ttl.toString(),
-                onChange: (e3) => setSetting((prev) => ({ ...prev, ttl: parseInt(e3.target.value, 10) || 1 })),
+                onChange: (e3) => setSetting((prev) => ({ ...prev, ttl: Math.max(parseInt(e3.target.value, 10) || 60, 60) })),
                 variant: "bordered"
               }
             )
@@ -99571,6 +99639,28 @@ function CloudflareDnsPage() {
               description: "本功能只写入 DNS 记录，不开启 Cloudflare 代理。"
             }
           ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(divider_default$1, {}),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-sm font-semibold text-foreground", children: "Android 探针同步" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-default-500", children: "把这个 Key 填入 APK 的“转发面板同步”页面。" })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              input_default,
+              {
+                label: "面板 API Key",
+                value: probeApiKey,
+                readOnly: true,
+                type: "password",
+                variant: "bordered",
+                endContent: /* @__PURE__ */ jsxRuntimeExports.jsx(button_default$1, { size: "sm", variant: "light", onPress: handleCopyProbeApiKey, isIconOnly: true, "aria-label": "复制 API Key", children: "复制" })
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(button_default$1, { size: "sm", variant: "flat", onPress: handleCopyProbeApiKey, children: "复制 Key" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(button_default$1, { size: "sm", variant: "flat", color: "danger", onPress: handleRotateProbeApiKey, isLoading: probeRotateLoading, children: "轮换 Key" })
+            ] })
+          ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-2", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(button_default$1, { size: "sm", color: "primary", onPress: handleSaveSetting, isLoading: settingLoading, children: "保存配置" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx(button_default$1, { size: "sm", variant: "flat", onPress: handleTestSetting, isLoading: testLoading, children: "测试连接" }),
@@ -100668,7 +100758,7 @@ var [PopoverProvider, usePopoverContext] = createContext2$1({
   name: "PopoverContext",
   errorMessage: "usePopoverContext: `context` is undefined. Seems you forgot to wrap all popover components within `<Popover />`"
 });
-var domAnimation = () => __vitePreload(() => import("./index-BXOX4qzH.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
+var domAnimation = () => __vitePreload(() => import("./index-CPSU19Io.js"), true ? [] : void 0, import.meta.url).then((res2) => res2.default);
 var PopoverContent = (props) => {
   const { as, children, className, ...otherProps } = props;
   const {

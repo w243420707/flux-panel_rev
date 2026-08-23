@@ -266,6 +266,10 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                 smartPoolPlan = selectSmartPoolNodes(binding, nodeIds, nodeStates);
                 effectiveNodeIds = smartPoolPlan.activeNodeIds;
                 applySmartPoolPlan(binding, smartPoolPlan);
+            } else {
+                effectiveNodeIds = nodeIds.stream()
+                        .filter(nodeId -> isDnsNodeUsable(nodeStates.get(nodeId)))
+                        .collect(Collectors.toList());
             }
 
             List<CloudflareDnsTarget> desiredTargets = new ArrayList<>();
@@ -457,12 +461,22 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     }
 
     private boolean isSmartPoolUsable(NodeDnsState state) {
+        return isDnsNodeUsable(state);
+    }
+
+    private boolean isDnsNodeUsable(NodeDnsState state) {
         return state != null
                 && state.node != null
                 && state.node.getStatus() != null
                 && state.node.getStatus() == NODE_ONLINE
                 && !state.targets.isEmpty()
-                && !isCriticalWallStatus(state.node.getWallMonitorStatus());
+                && !isNodeBlocked(state.node);
+    }
+
+    private boolean isNodeBlocked(Node node) {
+        return node != null
+                && (isCriticalWallStatus(node.getWallMonitorStatus())
+                || WALL_STATUS_SUSPECTED_BLOCKED.equals(normalizeWallStatus(node.getWallMonitorExternalStatus())));
     }
 
     private int smartPoolHealthRank(NodeDnsState state) {

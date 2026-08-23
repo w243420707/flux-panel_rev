@@ -16,7 +16,9 @@ import {
   getCloudflareDnsBindingList,
   getCloudflareDnsSetting,
   getNodeList,
+  getProbeSyncApiKey,
   getTunnelList,
+  rotateProbeSyncApiKey,
   saveCloudflareDnsBinding,
   syncCloudflareDnsAll,
   syncCloudflareDnsBinding,
@@ -113,6 +115,8 @@ export default function CloudflareDnsPage() {
   const [settingLoading, setSettingLoading] = useState(false);
   const [testLoading, setTestLoading] = useState(false);
   const [syncAllLoading, setSyncAllLoading] = useState(false);
+  const [probeApiKey, setProbeApiKey] = useState("");
+  const [probeRotateLoading, setProbeRotateLoading] = useState(false);
   const [bindingModalOpen, setBindingModalOpen] = useState(false);
   const [bindingSubmitLoading, setBindingSubmitLoading] = useState(false);
   const [bindingActionId, setBindingActionId] = useState<number | null>(null);
@@ -125,11 +129,12 @@ export default function CloudflareDnsPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [settingRes, bindingRes, tunnelRes, nodeRes] = await Promise.all([
+      const [settingRes, bindingRes, tunnelRes, nodeRes, probeKeyRes] = await Promise.all([
         getCloudflareDnsSetting(),
         getCloudflareDnsBindingList(),
         getTunnelList(),
         getNodeList(),
+        getProbeSyncApiKey(),
       ]);
 
       if (settingRes.code === 0) {
@@ -150,6 +155,12 @@ export default function CloudflareDnsPage() {
 
       if (nodeRes.code === 0) {
         setNodes(nodeRes.data || []);
+      }
+
+      if (probeKeyRes.code === 0) {
+        setProbeApiKey(probeKeyRes.data?.apiKey || "");
+      } else {
+        toast.error(probeKeyRes.msg || "加载探针 API Key 失败");
       }
     } catch (error) {
       toast.error("加载 Cloudflare DNS 数据失败");
@@ -203,6 +214,38 @@ export default function CloudflareDnsPage() {
       domain = domain.slice(0, -1);
     }
     return domain;
+  };
+
+  const handleCopyProbeApiKey = async () => {
+    if (!probeApiKey) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(probeApiKey);
+      toast.success("探针 API Key 已复制");
+    } catch {
+      toast.error("复制失败，请使用 HTTPS 访问面板");
+    }
+  };
+
+  const handleRotateProbeApiKey = async () => {
+    if (!window.confirm("轮换后旧 APK 将无法继续同步，确定继续吗？")) {
+      return;
+    }
+    setProbeRotateLoading(true);
+    try {
+      const res = await rotateProbeSyncApiKey();
+      if (res.code === 0) {
+        setProbeApiKey(res.data?.apiKey || "");
+        toast.success("探针 API Key 已轮换");
+      } else {
+        toast.error(res.msg || "轮换 API Key 失败");
+      }
+    } catch {
+      toast.error("轮换 API Key 失败");
+    } finally {
+      setProbeRotateLoading(false);
+    }
   };
 
   const normalizeDomainList = (values: string[]) => {
@@ -603,6 +646,35 @@ export default function CloudflareDnsPage() {
               title="DNS-only"
               description="本功能只写入 DNS 记录，不开启 Cloudflare 代理。"
             />
+
+            <Divider />
+
+            <div className="space-y-2">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Android 探针同步</h3>
+                <p className="text-xs text-default-500">把这个 Key 填入 APK 的“转发面板同步”页面。</p>
+              </div>
+              <Input
+                label="面板 API Key"
+                value={probeApiKey}
+                readOnly
+                type="password"
+                variant="bordered"
+                endContent={
+                  <Button size="sm" variant="light" onPress={handleCopyProbeApiKey} isIconOnly aria-label="复制 API Key">
+                    复制
+                  </Button>
+                }
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="flat" onPress={handleCopyProbeApiKey}>
+                  复制 Key
+                </Button>
+                <Button size="sm" variant="flat" color="danger" onPress={handleRotateProbeApiKey} isLoading={probeRotateLoading}>
+                  轮换 Key
+                </Button>
+              </div>
+            </div>
 
             <div className="flex flex-wrap gap-2">
               <Button size="sm" color="primary" onPress={handleSaveSetting} isLoading={settingLoading}>

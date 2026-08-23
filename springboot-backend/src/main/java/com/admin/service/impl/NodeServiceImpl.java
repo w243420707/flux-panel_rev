@@ -136,6 +136,14 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     @Override
     public R getAllNodes() {
         List<Node> nodeList = this.list();
+        String remoteChangeIpBaseUrl = resolveRemoteChangeIpBaseUrl();
+        nodeList.forEach(node -> {
+            if (StrUtil.isNotBlank(remoteChangeIpBaseUrl)
+                    && StrUtil.isNotBlank(node.getRemoteChangeIpToken())) {
+                node.setRemoteChangeIpUrl(remoteChangeIpBaseUrl
+                        + "/api/remote/change-ip/" + node.getRemoteChangeIpToken());
+            }
+        });
         hideNodeSecrets(nodeList);
         return R.ok(nodeList);
     }
@@ -535,6 +543,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         
         // 设置默认属性
         node.setSecret(IdUtil.simpleUUID());
+        node.setRemoteChangeIpToken(IdUtil.simpleUUID());
         node.setStatus(NODE_STATUS_ACTIVE);
         node.setWallMonitorEnabled(1);
         node.setWallMonitorStatus("PENDING");
@@ -620,7 +629,36 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
      * @param nodeList 节点列表
      */
     private void hideNodeSecrets(List<Node> nodeList) {
-        nodeList.forEach(node -> node.setSecret(null));
+        nodeList.forEach(node -> {
+            node.setSecret(null);
+            node.setRemoteChangeIpToken(null);
+        });
+    }
+
+    private String resolveRemoteChangeIpBaseUrl() {
+        String configured = System.getenv("PANEL_PUBLIC_URL");
+        if (StrUtil.isBlank(configured)) {
+            ViteConfig panelConfig = viteConfigService.getOne(new QueryWrapper<ViteConfig>().eq("name", "ip"));
+            configured = panelConfig == null ? null : panelConfig.getValue();
+        }
+        if (StrUtil.isBlank(configured)) {
+            return null;
+        }
+
+        String value = configured.trim();
+        if (value.startsWith("ws://")) {
+            value = "http://" + value.substring(5);
+        } else if (value.startsWith("wss://")) {
+            value = "https://" + value.substring(6);
+        } else if (!value.startsWith("http://") && !value.startsWith("https://")) {
+            value = "https://" + value;
+        }
+        value = value.replaceFirst("/api/v1/?$", "");
+        value = value.replaceFirst("/api/?$", "");
+        while (value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        return value;
     }
 
     /**
