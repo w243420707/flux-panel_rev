@@ -330,6 +330,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
 
         // 3. 执行删除操作
+        WebSocketServer.disconnectNode(id);
         boolean result = this.removeById(id);
         if (result) {
             WebSocketServer.clearLatestSystemInfo(id);

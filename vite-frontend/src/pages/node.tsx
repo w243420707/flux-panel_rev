@@ -198,6 +198,9 @@ export default function NodePage() {
     
     if (type === 'status') {
       const nextConnectionStatus = messageData === 1 ? 'online' : 'offline';
+      if (nextConnectionStatus === 'offline') {
+        systemInfoCacheRef.current.delete(Number(id));
+      }
       const cachedRuntime = runtimeIpCacheRef.current.get(Number(id));
       if (cachedRuntime) {
         runtimeIpCacheRef.current.set(Number(id), {
@@ -257,7 +260,6 @@ export default function NodePage() {
         if (hasRuntimeIp) {
           runtimeIpCacheRef.current.set(nodeId, {
             ...baseRuntimeIpPatch,
-            connectionStatus: 'online',
           });
         }
 
@@ -319,13 +321,11 @@ export default function NodePage() {
           if (hasRuntimeIp) {
             runtimeIpCacheRef.current.set(nodeId, {
               ...runtimeIpPatch,
-              connectionStatus: 'online',
             });
           }
           return {
             ...node,
             ...runtimeIpPatch,
-            connectionStatus: 'online',
             systemInfo: nextSystemInfo || node.systemInfo
           };
         }));

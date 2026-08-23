@@ -133,6 +133,13 @@ APK 必须运行在大陆网络出口，海外 VPS 或海外模拟器不能代�
 
 ## 更新日志
 
+### 2026-08-23 v1.3.43
+
+- 修复节点删除或断线后，旧系统指标缓存被管理员页面重放并误显示为在线的问题。
+- 节点 WebSocket 指标只接受当前活跃连接，旧连接和已删除节点的心跳不会再更新状态或运行时信息。
+- 管理员页面不再根据指标消息强制把节点改成在线，在线/离线状态以实时状态消息和节点列表为准。
+- 删除节点时主动关闭对应 WebSocket，并清理指标缓存；前端版本更新为 `1.3.43`，应用版本更新为 `1.0.13`。
+
 ### 2026-08-23 v1.3.42
 
 - Fixed installation on Ubuntu 20.04. The installer now uses Docker's official apt repository and skips the unavailable `docker-model-plugin` package.

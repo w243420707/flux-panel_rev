@@ -38,6 +38,7 @@ public class WebSocketServer extends TextWebSocketHandler {
 
     // 保存每个节点最近一次系统指标和速度，管理员页面重新连接时立即回放。
     private static final ConcurrentHashMap<Long, LatestSystemInfo> latestSystemInfo = new ConcurrentHashMap<>();
+    private static final long LATEST_INFO_MAX_AGE_MS = TimeUnit.SECONDS.toMillis(60);
     
     // 为每个session提供锁对象，防止并发发送消息
     private static final ConcurrentHashMap<String, Object> sessionLocks = new ConcurrentHashMap<>();
@@ -74,6 +75,15 @@ public class WebSocketServer extends TextWebSocketHandler {
                 String id = session.getAttributes().get("id").toString();
                 String type = session.getAttributes().get("type").toString();
                 String nodeSecret = (String) session.getAttributes().get("nodeSecret");
+
+                if (Objects.equals(type, "1")) {
+                    Long nodeId = Long.valueOf(id);
+                    WebSocketSession currentSession = nodeSessions.get(nodeId);
+                    if (currentSession == null || !currentSession.equals(session) || !session.isOpen()) {
+                        log.debug("忽略节点 {} 的旧 WebSocket 消息，sessionId={}", nodeId, session.getId());
+                        return;
+                    }
+                }
 
                 // 尝试解密消息
                 String decryptedPayload = decryptMessageIfNeeded(message.getPayload(), nodeSecret);
@@ -159,6 +169,11 @@ public class WebSocketServer extends TextWebSocketHandler {
         try {
             JSONObject info = JSONObject.parseObject(payload);
             Long nodeId = Long.valueOf(id);
+            WebSocketSession currentSession = nodeSessions.get(nodeId);
+            if (currentSession == null || !currentSession.equals(session) || !session.isOpen()) {
+                log.debug("忽略节点 {} 的旧 WebSocket 指标，sessionId={}", nodeId, session.getId());
+                return;
+            }
             cacheLatestSystemInfo(nodeId, info);
             String publicIp = firstNonBlank(info.getString("public_ip"), info.getString("publicIp"), info.getString("host_ip"));
             String publicIpv4 = firstNonBlank(info.getString("public_ipv4"), info.getString("publicIpv4"));
@@ -254,14 +269,25 @@ public class WebSocketServer extends TextWebSocketHandler {
         metrics.put("upload_speed", uploadSpeed);
         metrics.put("download_speed", downloadSpeed);
         latestSystemInfo.put(nodeId, new LatestSystemInfo(
-                metrics.toJSONString(), uptime, bytesReceived, bytesTransmitted));
+                metrics.toJSONString(), uptime, bytesReceived, bytesTransmitted, System.currentTimeMillis()));
     }
 
     /**
      * 管理员 WebSocket 建立后立即补发最近指标，避免页面必须等待下一条节点心跳。
      */
     private void sendLatestSystemInfo(WebSocketSession session) {
+        long now = System.currentTimeMillis();
         latestSystemInfo.forEach((nodeId, snapshot) -> {
+            WebSocketSession nodeSession = nodeSessions.get(nodeId);
+            Node node = nodeService.getById(nodeId);
+            if (nodeSession == null
+                    || !nodeSession.isOpen()
+                    || node == null
+                    || !Objects.equals(node.getStatus(), 1)
+                    || now - snapshot.getUpdatedAt() > LATEST_INFO_MAX_AGE_MS) {
+                latestSystemInfo.remove(nodeId, snapshot);
+                return;
+            }
             JSONObject message = new JSONObject();
             message.put("id", nodeId);
             message.put("type", "info");
@@ -275,12 +301,14 @@ public class WebSocketServer extends TextWebSocketHandler {
         private final long uptime;
         private final long bytesReceived;
         private final long bytesTransmitted;
+        private final long updatedAt;
 
-        private LatestSystemInfo(String payload, long uptime, long bytesReceived, long bytesTransmitted) {
+        private LatestSystemInfo(String payload, long uptime, long bytesReceived, long bytesTransmitted, long updatedAt) {
             this.payload = payload;
             this.uptime = uptime;
             this.bytesReceived = bytesReceived;
             this.bytesTransmitted = bytesTransmitted;
+            this.updatedAt = updatedAt;
         }
 
         private String getPayload() {
@@ -298,6 +326,10 @@ public class WebSocketServer extends TextWebSocketHandler {
         private long getBytesTransmitted() {
             return bytesTransmitted;
         }
+
+        private long getUpdatedAt() {
+            return updatedAt;
+        }
     }
 
     /**
@@ -306,6 +338,30 @@ public class WebSocketServer extends TextWebSocketHandler {
     public static void clearLatestSystemInfo(Long nodeId) {
         if (nodeId != null) {
             latestSystemInfo.remove(nodeId);
+        }
+    }
+
+    /**
+     * 删除节点或清理失效节点时，主动断开节点连接，避免旧节点继续上报心跳。
+     */
+    public static void disconnectNode(Long nodeId) {
+        if (nodeId == null) {
+            return;
+        }
+
+        WebSocketSession session = nodeSessions.remove(nodeId);
+        clearLatestSystemInfo(nodeId);
+        if (session == null) {
+            return;
+        }
+
+        sessionLocks.remove(session.getId());
+        try {
+            if (session.isOpen()) {
+                session.close(CloseStatus.NORMAL);
+            }
+        } catch (Exception e) {
+            log.debug("关闭节点 {} 的 WebSocket 失败: {}", nodeId, e.getMessage());
         }
     }
 
@@ -460,7 +516,15 @@ public class WebSocketServer extends TextWebSocketHandler {
                 } else {
                     log.info("节点 {} 不存在，无法更新状态", nodeId);
                     // 移除无效的会话
-                    nodeSessions.remove(nodeId);
+                    nodeSessions.remove(nodeId, session);
+                    clearLatestSystemInfo(nodeId);
+                    try {
+                        if (session.isOpen()) {
+                            session.close(CloseStatus.NORMAL);
+                        }
+                    } catch (Exception closeException) {
+                        log.debug("关闭无效节点 {} 的 WebSocket 失败: {}", nodeId, closeException.getMessage());
+                    }
                 }
             }
 
@@ -472,7 +536,8 @@ public class WebSocketServer extends TextWebSocketHandler {
                 String type = session.getAttributes().get("type").toString();
                 if (Objects.equals(type, "1")) {
                     Long nodeId = Long.valueOf(id);
-                    nodeSessions.remove(nodeId);
+                    nodeSessions.remove(nodeId, session);
+                    clearLatestSystemInfo(nodeId);
                     log.info("由于异常，移除节点 {} 的会话", nodeId);
                 }
             } catch (Exception cleanupException) {
@@ -508,8 +573,13 @@ public class WebSocketServer extends TextWebSocketHandler {
                 }
                 
                 log.info("节点 {} 当前活跃连接关闭，开始验证并更新状态", nodeId);
-                
-                    nodeSessions.remove(nodeId);
+
+                    if (!nodeSessions.remove(nodeId, session)) {
+                        log.info("节点 {} 关闭回调执行时已被新连接替换，跳过离线处理", nodeId);
+                        sessionLocks.remove(sessionId);
+                        return;
+                    }
+                    clearLatestSystemInfo(nodeId);
                     
                     // 更新节点状态为离线
                     Node node = nodeService.getById(nodeId);
@@ -594,6 +664,7 @@ public class WebSocketServer extends TextWebSocketHandler {
         if (!removedFromAdmin) {
             nodeSessions.entrySet().removeIf(entry -> {
                 if (entry.getValue() == session) {
+                    clearLatestSystemInfo(entry.getKey());
                     return true;
                 }
                 return false;
