@@ -9,6 +9,7 @@ import com.admin.service.NodeService;
 import com.admin.service.NodeWallMonitorService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -40,6 +41,8 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
     private static final int CONSECUTIVE_FAILURE_THRESHOLD = 2;
     private static final int CHINA_FAILURE_COUNT_THRESHOLD = 4;
     private static final int CHINA_FAILURE_PERCENT_THRESHOLD = 60;
+    private static final long MONITOR_PERSIST_INTERVAL_MS = 5 * 60 * 1000L;
+    private static final long MONITOR_COMMAND_TIMEOUT_MS = 3500L;
 
     private static final List<TcpTarget> GLOBAL_TARGETS = Arrays.asList(
             new TcpTarget("www.cloudflare.com", 443),
@@ -74,7 +77,9 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
             return;
         }
         try {
-            List<Node> nodes = nodeService.list();
+            List<Node> nodes = nodeService.list(new QueryWrapper<Node>()
+                    .select("id", "status", "wall_monitor_enabled", "wall_monitor_status",
+                            "wall_monitor_last_check_at", "wall_monitor_consecutive_failures"));
             if (nodes == null || nodes.isEmpty()) {
                 return;
             }
@@ -83,7 +88,7 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
                     .filter(this::isMonitorEnabled)
                     .map(node -> CompletableFuture.runAsync(() -> {
                         try {
-                            checkAndStore(node.getId());
+                            checkAndStore(node);
                         } catch (Exception e) {
                             log.warn("Node wall monitor check failed, nodeId={}, error={}", node.getId(), e.getMessage());
                         }
@@ -136,12 +141,17 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         }
 
         String previousStatus = normalizeStatus(node.getWallMonitorExternalStatus());
+        long now = System.currentTimeMillis();
+        int nextFailures = safeInt(node.getWallMonitorExternalConsecutiveFailures()) + 1;
+        if (!shouldPersistExternalResult(node, STATUS_SUSPECTED_BLOCKED, now)) {
+            return R.ok("节点不可达状态未变化");
+        }
         Node update = new Node();
         update.setId(nodeId);
         update.setWallMonitorEnabled(1);
         update.setWallMonitorExternalStatus(STATUS_SUSPECTED_BLOCKED);
-        update.setWallMonitorExternalLastCheckAt(System.currentTimeMillis());
-        update.setWallMonitorExternalConsecutiveFailures(safeInt(node.getWallMonitorExternalConsecutiveFailures()) + 1);
+        update.setWallMonitorExternalLastCheckAt(now);
+        update.setWallMonitorExternalConsecutiveFailures(nextFailures);
         update.setWallMonitorExternalMessage(trimMessage(
                 message == null || message.trim().isEmpty()
                         ? "独立 Android 探针确认节点端口不可达"
@@ -163,11 +173,15 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         }
 
         String previousStatus = normalizeStatus(node.getWallMonitorExternalStatus());
+        long now = System.currentTimeMillis();
+        if (!shouldPersistExternalResult(node, STATUS_OK, now)) {
+            return R.ok("节点可达状态未变化");
+        }
         Node update = new Node();
         update.setId(nodeId);
         update.setWallMonitorEnabled(1);
         update.setWallMonitorExternalStatus(STATUS_OK);
-        update.setWallMonitorExternalLastCheckAt(System.currentTimeMillis());
+        update.setWallMonitorExternalLastCheckAt(now);
         update.setWallMonitorExternalConsecutiveFailures(0);
         update.setWallMonitorExternalMessage(trimMessage(
                 message == null || message.trim().isEmpty()
@@ -180,7 +194,10 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
     }
 
     private void checkAndStore(Long nodeId) {
-        Node node = nodeService.getById(nodeId);
+        checkAndStore(nodeService.getById(nodeId));
+    }
+
+    private void checkAndStore(Node node) {
         if (node == null || !isMonitorEnabled(node)) {
             return;
         }
@@ -206,13 +223,18 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         update.setWallMonitorLatencyMs(decision.latencyMs);
         update.setWallMonitorMessage(trimMessage(decision.message));
 
+        long now = System.currentTimeMillis();
+        if (!shouldPersistMonitorResult(node, update, now)) {
+            return;
+        }
+
         nodeService.updateById(update);
         broadcastMonitorUpdate(update);
         syncCloudflareDnsIfStatusChanged(node.getId(), previousStatus, decision.status);
     }
 
     private MonitorDecision runConnectivityCheck(Node node) {
-        ProbeSummary global = probeTargets(node.getId(), GLOBAL_TARGETS);
+        ProbeSummary global = probeTargets(node.getId(), GLOBAL_TARGETS, 1, Integer.MAX_VALUE);
         if (global.successCount <= 0) {
             return decision(
                     STATUS_CHECK_FAILED,
@@ -226,7 +248,10 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
             );
         }
 
-        ProbeSummary china = probeTargets(node.getId(), CHINA_TARGETS);
+        int requiredChinaFailures = Math.max(CHINA_FAILURE_COUNT_THRESHOLD,
+                (int) Math.ceil(CHINA_TARGETS.size() * (CHINA_FAILURE_PERCENT_THRESHOLD / 100.0D)));
+        int clearSuccessThreshold = Math.max(1, CHINA_TARGETS.size() - requiredChinaFailures + 1);
+        ProbeSummary china = probeTargets(node.getId(), CHINA_TARGETS, clearSuccessThreshold, requiredChinaFailures);
         if (china.totalCount <= 0) {
             return decision(
                     STATUS_CHECK_FAILED,
@@ -278,7 +303,7 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         );
     }
 
-    private ProbeSummary probeTargets(Long nodeId, List<TcpTarget> targets) {
+    private ProbeSummary probeTargets(Long nodeId, List<TcpTarget> targets, int stopAfterSuccessCount, int stopAfterFailureCount) {
         ProbeSummary summary = new ProbeSummary();
         for (TcpTarget target : targets) {
             summary.totalCount++;
@@ -286,8 +311,16 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
             if (result.success) {
                 summary.successCount++;
                 summary.totalLatencyMs += Math.max(0, result.latencyMs);
+                if (stopAfterSuccessCount > 0 && summary.successCount >= stopAfterSuccessCount) {
+                    break;
+                }
             } else if (summary.firstError == null) {
                 summary.firstError = target + " " + result.message;
+                if (stopAfterFailureCount > 0 && summary.totalCount - summary.successCount >= stopAfterFailureCount) {
+                    break;
+                }
+            } else if (stopAfterFailureCount > 0 && summary.totalCount - summary.successCount >= stopAfterFailureCount) {
+                break;
             }
         }
         return summary;
@@ -301,7 +334,8 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
             tcpPingData.put("count", TCP_COUNT);
             tcpPingData.put("timeout", TCP_TIMEOUT_MS);
 
-            GostDto gostResult = WebSocketServer.send_msg(nodeId, tcpPingData, "TcpPing");
+            GostDto gostResult = WebSocketServer.send_msg(
+                    nodeId, tcpPingData, "TcpPing", MONITOR_COMMAND_TIMEOUT_MS);
             if (gostResult == null) {
                 return ProbeResult.fail("节点无响应");
             }
@@ -411,26 +445,34 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         if (Objects.equals(normalizeStatus(previousStatus), normalizeStatus(nextStatus))) {
             return;
         }
-        CompletableFuture.runAsync(() -> {
-            try {
-                cloudflareDnsSyncService.syncBindingsByNode(nodeId, "wall-monitor");
-            } catch (Exception e) {
-                log.warn("Cloudflare DNS sync by wall monitor failed, nodeId={}, error={}", nodeId, e.getMessage());
-            }
-        });
+        cloudflareDnsSyncService.requestSyncAll("wall-monitor");
     }
 
     private void syncCloudflareDnsIfExternalStatusChanged(Long nodeId, String previousStatus, String nextStatus) {
         if (Objects.equals(normalizeStatus(previousStatus), normalizeStatus(nextStatus))) {
             return;
         }
-        CompletableFuture.runAsync(() -> {
-            try {
-                cloudflareDnsSyncService.syncBindingsByNode(nodeId, "external-probe");
-            } catch (Exception e) {
-                log.warn("Cloudflare DNS sync by external probe failed, nodeId={}, error={}", nodeId, e.getMessage());
-            }
-        });
+        cloudflareDnsSyncService.requestSyncAll("external-probe");
+    }
+
+    private boolean shouldPersistMonitorResult(Node previous, Node update, long now) {
+        if (!Objects.equals(normalizeStatus(previous.getWallMonitorStatus()),
+                normalizeStatus(update.getWallMonitorStatus()))) {
+            return true;
+        }
+        if (!Objects.equals(previous.getWallMonitorConsecutiveFailures(), update.getWallMonitorConsecutiveFailures())) {
+            return true;
+        }
+        Long lastCheckAt = previous.getWallMonitorLastCheckAt();
+        return lastCheckAt == null || now - lastCheckAt >= MONITOR_PERSIST_INTERVAL_MS;
+    }
+
+    private boolean shouldPersistExternalResult(Node previous, String nextStatus, long now) {
+        if (!Objects.equals(normalizeStatus(previous.getWallMonitorExternalStatus()), nextStatus)) {
+            return true;
+        }
+        Long lastCheckAt = previous.getWallMonitorExternalLastCheckAt();
+        return lastCheckAt == null || now - lastCheckAt >= MONITOR_PERSIST_INTERVAL_MS;
     }
 
     private String normalizeStatus(String status) {

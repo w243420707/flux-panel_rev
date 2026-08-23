@@ -45,6 +45,11 @@ public class LogAspect {
      */
     @AfterReturning(value = "pt()", returning = "returnValue")
     public void log(JoinPoint joinPoint, Object returnValue) throws Throwable {
+        // 成功请求日志默认不输出时直接返回，避免高频流量上报仍然做 JWT、IP 和 JSON 序列化。
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+
         // 获取请求信息
         HttpServletRequest request = HttpContextUtils.getHttpServletRequest();
         

@@ -1,18 +1,20 @@
 import { Route, Routes, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
-import IndexPage from "@/pages/index";
-import ChangePasswordPage from "@/pages/change-password";
-import DashboardPage from "@/pages/dashboard";
-import ForwardPage from "@/pages/forward";
-import TunnelPage from "@/pages/tunnel";
-import NodePage from "@/pages/node";
-import UserPage from "@/pages/user";
-import ProfilePage from "@/pages/profile";
-import LimitPage from "@/pages/limit";
-import ConfigPage from "@/pages/config";
-import CloudflareDnsPage from "@/pages/cloudflare-dns";
-import { SettingsPage } from "@/pages/settings";
+const IndexPage = lazy(() => import("@/pages/index"));
+const ChangePasswordPage = lazy(() => import("@/pages/change-password"));
+const DashboardPage = lazy(() => import("@/pages/dashboard"));
+const ForwardPage = lazy(() => import("@/pages/forward"));
+const TunnelPage = lazy(() => import("@/pages/tunnel"));
+const NodePage = lazy(() => import("@/pages/node"));
+const UserPage = lazy(() => import("@/pages/user"));
+const ProfilePage = lazy(() => import("@/pages/profile"));
+const LimitPage = lazy(() => import("@/pages/limit"));
+const ConfigPage = lazy(() => import("@/pages/config"));
+const CloudflareDnsPage = lazy(() => import("@/pages/cloudflare-dns"));
+const SettingsPage = lazy(() =>
+  import("@/pages/settings").then((module) => ({ default: module.SettingsPage }))
+);
 
 import AdminLayout from "@/layouts/admin";
 import H5Layout from "@/layouts/h5";
@@ -148,7 +150,12 @@ function App() {
   }, []);
 
   return (
-    <Routes>
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-white dark:bg-black" />
+      }
+    >
+      <Routes>
       <Route path="/" element={<LoginRoute />} />
       <Route 
         path="/change-password" 
@@ -234,7 +241,8 @@ function App() {
         path="/settings" 
         element={<SettingsPage />}
       />
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 }
 

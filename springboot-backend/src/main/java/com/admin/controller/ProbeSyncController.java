@@ -60,7 +60,9 @@ public class ProbeSyncController {
         }
 
         List<Map<String, Object>> nodes = new ArrayList<>();
-        for (Node node : nodeService.list()) {
+        List<Node> sourceNodes = nodeService.list(new QueryWrapper<Node>()
+                .select("id", "name", "server_ip", "server_ipv4", "server_ipv6", "status", "updated_time"));
+        for (Node node : sourceNodes) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", node.getId());
             item.put("name", node.getName());
@@ -90,15 +92,20 @@ public class ProbeSyncController {
         int accepted = 0;
         int ignored = 0;
         for (ProbeNodeReportDto result : report.getResults()) {
-            if (result == null || result.getNodeId() == null || nodeService.getById(result.getNodeId()) == null) {
+            if (result == null || result.getNodeId() == null) {
                 ignored++;
                 continue;
             }
             String message = trimMessage(result.getMessage());
+            R markResult;
             if (Boolean.TRUE.equals(result.getReachable())) {
-                nodeWallMonitorService.markNodeAvailableByExternalProbe(result.getNodeId(), message);
+                markResult = nodeWallMonitorService.markNodeAvailableByExternalProbe(result.getNodeId(), message);
             } else {
-                nodeWallMonitorService.markNodeUnavailableByExternalProbe(result.getNodeId(), message);
+                markResult = nodeWallMonitorService.markNodeUnavailableByExternalProbe(result.getNodeId(), message);
+            }
+            if (markResult.getCode() != 0) {
+                ignored++;
+                continue;
             }
             accepted++;
         }

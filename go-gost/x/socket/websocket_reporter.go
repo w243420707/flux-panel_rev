@@ -145,8 +145,8 @@ func NewWebSocketReporter(serverURL string, secret string) *WebSocketReporter {
 	return &WebSocketReporter{
 		url:            serverURL,
 		reconnectTime:  5 * time.Second,  // 重连间隔
-		pingInterval:   2 * time.Second,  // 发送间隔改为2秒
-		configInterval: 30 * time.Second, // 公网IP刷新间隔
+		pingInterval:   5 * time.Second,  // 降低面板心跳频率，减少 WebSocket 和广播压力
+		configInterval: 60 * time.Second, // 公网IP刷新间隔
 		ctx:            ctx,
 		cancel:         cancel,
 		connected:      false,
@@ -1038,7 +1038,7 @@ func getCPUInfo() CPUInfo {
 	var cpuInfo CPUInfo
 
 	// 获取CPU使用率
-	percentages, err := cpu.Percent(time.Second, false)
+	percentages, err := cpu.Percent(0, false)
 	if err == nil && len(percentages) > 0 {
 		cpuInfo.Usage = percentages[0]
 	}

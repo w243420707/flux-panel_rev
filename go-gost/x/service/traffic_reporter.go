@@ -20,6 +20,16 @@ var httpReportURL string
 var configReportURL string
 var httpAESCrypto *crypto.AESCrypto // 新增：HTTP上报加密器
 
+var httpReportClient = &http.Client{
+	Timeout: 5 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:        32,
+		MaxIdleConnsPerHost: 8,
+		IdleConnTimeout:     90 * time.Second,
+		DisableCompression:  false,
+	},
+}
+
 // TrafficReportItem 流量报告项（压缩格式）
 type TrafficReportItem struct {
 	N string `json:"n"` // 服务名（name缩写）
@@ -117,11 +127,7 @@ func sendTrafficReport(ctx context.Context, reportItems TrafficReportItem) (bool
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "GOST-Traffic-Reporter/1.0")
 
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-
-	resp, err := client.Do(req)
+	resp, err := httpReportClient.Do(req)
 	if err != nil {
 		return false, fmt.Errorf("发送HTTP请求失败: %v", err)
 	}

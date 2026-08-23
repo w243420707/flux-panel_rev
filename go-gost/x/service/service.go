@@ -351,7 +351,9 @@ func (s *defaultService) observeStats(ctx context.Context) {
 
 	d := s.options.observerPeriod
 	if d == 0 {
-		d = 5 * time.Second
+		// 流量统计不需要每几秒写一次面板；延长观察周期可以显著降低
+		// 大量转发同时上报时的 HTTP 请求和数据库写入压力。
+		d = 15 * time.Second
 	}
 	if d < time.Second {
 		d = 1 * time.Second

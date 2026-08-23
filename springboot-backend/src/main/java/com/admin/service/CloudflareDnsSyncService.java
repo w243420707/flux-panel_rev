@@ -7,6 +7,8 @@ public interface CloudflareDnsSyncService {
 
     R syncAllBindings(String trigger);
 
+    void requestSyncAll(String trigger);
+
     R syncDueBindings();
 
     R syncBindingsByTunnel(Long tunnelId, String trigger);

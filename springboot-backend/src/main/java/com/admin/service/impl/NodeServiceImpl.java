@@ -502,7 +502,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
     private void syncCloudflareDnsByNode(Long nodeId, String trigger) {
         try {
-            cloudflareDnsSyncService.syncBindingsByNode(nodeId, trigger);
+            cloudflareDnsSyncService.requestSyncAll(trigger);
         } catch (Exception e) {
             log.warn("Cloudflare DNS sync after node IP change failed, nodeId={}, trigger={}, error={}",
                     nodeId, trigger, e.getMessage());

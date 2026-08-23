@@ -26,6 +26,7 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -52,6 +53,10 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     private static final int MIN_DNS_TTL_SECONDS = 60;
 
     private static final ConcurrentHashMap<Long, Object> BINDING_LOCKS = new ConcurrentHashMap<>();
+    private final Object requestedSyncLock = new Object();
+    private boolean requestedSyncRunning;
+    private boolean requestedSyncDirty;
+    private String requestedSyncTrigger = "runtime-change";
 
     @Resource
     private CloudflareDnsSettingService cloudflareDnsSettingService;
@@ -67,6 +72,43 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
     @Resource
     private NodeService nodeService;
+
+    @Resource(name = "cloudflareDnsExecutor")
+    private Executor cloudflareDnsExecutor;
+
+    @Override
+    public void requestSyncAll(String trigger) {
+        synchronized (requestedSyncLock) {
+            requestedSyncDirty = true;
+            if (StringUtils.hasText(trigger)) {
+                requestedSyncTrigger = trigger;
+            }
+            if (requestedSyncRunning) {
+                return;
+            }
+            requestedSyncRunning = true;
+        }
+
+        cloudflareDnsExecutor.execute(() -> {
+            while (true) {
+                String currentTrigger;
+                synchronized (requestedSyncLock) {
+                    if (!requestedSyncDirty) {
+                        requestedSyncRunning = false;
+                        return;
+                    }
+                    requestedSyncDirty = false;
+                    currentTrigger = requestedSyncTrigger;
+                }
+
+                try {
+                    syncAllBindings(currentTrigger);
+                } catch (Exception e) {
+                    log.warn("Queued Cloudflare DNS sync failed, trigger={}, error={}", currentTrigger, e.getMessage());
+                }
+            }
+        });
+    }
 
     @Override
     public R syncBinding(Long bindingId, String trigger) {
@@ -87,7 +129,8 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
         Object lock = BINDING_LOCKS.computeIfAbsent(binding.getId(), ignored -> new Object());
         synchronized (lock) {
-            return syncBindingInternal(setting, binding, trigger);
+            Map<Long, Node> nodeSnapshot = loadNodeSnapshot(resolveNodeIds(binding));
+            return syncBindingInternal(setting, binding, trigger, nodeSnapshot);
         }
     }
 
@@ -102,10 +145,11 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
         List<CloudflareDnsBinding> bindings = cloudflareDnsBindingService.list(
                 new QueryWrapper<CloudflareDnsBinding>().eq("status", 1));
+        Map<Long, Node> nodeSnapshot = loadNodeSnapshot(collectNodeIds(bindings));
         int success = 0;
         int failed = 0;
         for (CloudflareDnsBinding binding : bindings) {
-            R result = syncBinding(binding.getId(), trigger);
+            R result = syncBindingWithSnapshot(setting, binding, trigger, nodeSnapshot);
             if (result.getCode() == 0) {
                 success++;
             } else {
@@ -229,10 +273,16 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         if (bindings == null || bindings.isEmpty()) {
             return R.ok("没有需要同步的 DNS 绑定");
         }
+        CloudflareDnsSetting setting = cloudflareDnsSettingService.getCurrentSetting();
+        String readyMessage = validateSetting(setting);
+        if (readyMessage != null) {
+            return R.err(readyMessage);
+        }
+        Map<Long, Node> nodeSnapshot = loadNodeSnapshot(collectNodeIds(bindings));
         int success = 0;
         int failed = 0;
         for (CloudflareDnsBinding binding : bindings) {
-            R result = syncBinding(binding.getId(), trigger);
+            R result = syncBindingWithSnapshot(setting, binding, trigger, nodeSnapshot);
             if (result.getCode() == 0) {
                 success++;
             } else {
@@ -243,7 +293,20 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         return failed == 0 ? R.ok(message) : R.err(message);
     }
 
-    private R syncBindingInternal(CloudflareDnsSetting setting, CloudflareDnsBinding binding, String trigger) {
+    private R syncBindingWithSnapshot(CloudflareDnsSetting setting,
+                                      CloudflareDnsBinding binding,
+                                      String trigger,
+                                      Map<Long, Node> nodeSnapshot) {
+        Object lock = BINDING_LOCKS.computeIfAbsent(binding.getId(), ignored -> new Object());
+        synchronized (lock) {
+            return syncBindingInternal(setting, binding, trigger, nodeSnapshot);
+        }
+    }
+
+    private R syncBindingInternal(CloudflareDnsSetting setting,
+                                  CloudflareDnsBinding binding,
+                                  String trigger,
+                                  Map<Long, Node> nodeSnapshot) {
         try {
             List<Long> nodeIds = resolveNodeIds(binding);
             if (nodeIds.isEmpty()) {
@@ -259,7 +322,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             List<String> aliasDomains = domains.size() > 1 ? domains.subList(1, domains.size()) : Collections.emptyList();
 
             String recordType = resolveRecordType(binding.getRecordType(), setting.getRecordType());
-            Map<Long, NodeDnsState> nodeStates = resolveNodeStates(nodeIds, recordType);
+            Map<Long, NodeDnsState> nodeStates = resolveNodeStates(nodeIds, recordType, nodeSnapshot);
             SmartPoolPlan smartPoolPlan = null;
             List<Long> effectiveNodeIds = nodeIds;
             if (isEnabled(binding.getSmartPoolEnabled())) {
@@ -331,13 +394,42 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         }
     }
 
-    private Map<Long, NodeDnsState> resolveNodeStates(List<Long> nodeIds, String recordType) {
+    private Map<Long, NodeDnsState> resolveNodeStates(List<Long> nodeIds, String recordType, Map<Long, Node> nodeSnapshot) {
         Map<Long, NodeDnsState> states = new LinkedHashMap<>();
         for (Long nodeId : normalizeNodeIdList(nodeIds)) {
-            Node node = nodeService.getById(nodeId);
+            Node node = nodeSnapshot == null ? null : nodeSnapshot.get(nodeId);
             states.put(nodeId, new NodeDnsState(nodeId, node, resolveNodeTargets(node, recordType)));
         }
         return states;
+    }
+
+    private Map<Long, Node> loadNodeSnapshot(List<Long> nodeIds) {
+        List<Long> normalizedIds = normalizeNodeIdList(nodeIds);
+        if (normalizedIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<Node> nodes = nodeService.list(new QueryWrapper<Node>()
+                .select("id", "status", "wall_monitor_status", "wall_monitor_external_status",
+                        "server_ip", "server_ipv4", "server_ipv6")
+                .in("id", normalizedIds));
+        Map<Long, Node> snapshot = new LinkedHashMap<>();
+        if (nodes != null) {
+            for (Node node : nodes) {
+                snapshot.put(node.getId(), node);
+            }
+        }
+        return snapshot;
+    }
+
+    private List<Long> collectNodeIds(List<CloudflareDnsBinding> bindings) {
+        if (bindings == null || bindings.isEmpty()) {
+            return new ArrayList<>();
+        }
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        for (CloudflareDnsBinding binding : bindings) {
+            ids.addAll(resolveNodeIds(binding));
+        }
+        return new ArrayList<>(ids);
     }
 
     private SmartPoolPlan selectSmartPoolNodes(CloudflareDnsBinding binding,

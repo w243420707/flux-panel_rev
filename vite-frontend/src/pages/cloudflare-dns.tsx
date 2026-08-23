@@ -128,13 +128,19 @@ export default function CloudflareDnsPage() {
 
   const loadData = async () => {
     setLoading(true);
+
+    const withTimeout = <T,>(request: Promise<T>, timeoutMs: number) =>
+      Promise.race([
+        request,
+        new Promise<T>((_, reject) => {
+          window.setTimeout(() => reject(new Error("请求超时")), timeoutMs);
+        }),
+      ]);
+
     try {
-      const [settingRes, bindingRes, tunnelRes, nodeRes, probeKeyRes] = await Promise.all([
-        getCloudflareDnsSetting(),
-        getCloudflareDnsBindingList(),
-        getTunnelList(),
-        getNodeList(),
-        getProbeSyncApiKey(),
+      const [settingRes, bindingRes] = await Promise.all([
+        withTimeout(getCloudflareDnsSetting(), 10000),
+        withTimeout(getCloudflareDnsBindingList(), 10000),
       ]);
 
       if (settingRes.code === 0) {
@@ -148,24 +154,27 @@ export default function CloudflareDnsPage() {
       } else {
         toast.error(bindingRes.msg || "加载 DNS 绑定失败");
       }
-
-      if (tunnelRes.code === 0) {
-        setTunnels(tunnelRes.data || []);
-      }
-
-      if (nodeRes.code === 0) {
-        setNodes(nodeRes.data || []);
-      }
-
-      if (probeKeyRes.code === 0) {
-        setProbeApiKey(probeKeyRes.data?.apiKey || "");
-      } else {
-        toast.error(probeKeyRes.msg || "加载探针 API Key 失败");
-      }
     } catch (error) {
       toast.error("加载 Cloudflare DNS 数据失败");
     } finally {
       setLoading(false);
+    }
+
+    // 节点、隧道和探针 Key 只影响辅助展示，不阻塞 DNS 主页面首屏。
+    const [tunnelResult, nodeResult, probeResult] = await Promise.allSettled([
+      withTimeout(getTunnelList(), 10000),
+      withTimeout(getNodeList(), 10000),
+      withTimeout(getProbeSyncApiKey(), 10000),
+    ]);
+
+    if (tunnelResult.status === "fulfilled" && tunnelResult.value.code === 0) {
+      setTunnels(tunnelResult.value.data || []);
+    }
+    if (nodeResult.status === "fulfilled" && nodeResult.value.code === 0) {
+      setNodes(nodeResult.value.data || []);
+    }
+    if (probeResult.status === "fulfilled" && probeResult.value.code === 0) {
+      setProbeApiKey(probeResult.value.data?.apiKey || "");
     }
   };
 

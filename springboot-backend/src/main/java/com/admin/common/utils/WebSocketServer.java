@@ -83,8 +83,6 @@ public class WebSocketServer extends TextWebSocketHandler {
                         handleNodeSystemInfo(id, session, decryptedPayload);
                     }
                     sendToUser(session, "{\"type\":\"call\"}", nodeSecret);
-                    // 先发送确认消息
-                    sendToUser(session, "{\"type\":\"call\"}", nodeSecret);
                 }else if (decryptedPayload.contains("requestId")) {
                     // 处理命令响应消息
                     try {
@@ -613,6 +611,17 @@ public class WebSocketServer extends TextWebSocketHandler {
 
 
     public static GostDto send_msg(Long node_id, Object msg, String type) {
+        return send_msg(node_id, msg, type, 10000L, true);
+    }
+
+    /**
+     * 用于短时诊断命令。监控失败时不应占用线程等待默认的 15 秒。
+     */
+    public static GostDto send_msg(Long node_id, Object msg, String type, long timeoutMillis) {
+        return send_msg(node_id, msg, type, timeoutMillis, false);
+    }
+
+    private static GostDto send_msg(Long node_id, Object msg, String type, long timeoutMillis, boolean retryAfterTimeout) {
         WebSocketSession nodeSession = nodeSessions.get(node_id);
 
         if (nodeSession == null) {
@@ -656,11 +665,20 @@ public class WebSocketServer extends TextWebSocketHandler {
                 return result;
             }
             try {
-                GostDto result = future.get(10, TimeUnit.SECONDS);
+                long firstWaitMillis = Math.max(500L, timeoutMillis);
+                GostDto result = future.get(firstWaitMillis, TimeUnit.MILLISECONDS);
                 log.debug("节点命令完成 [nodeId={}, type={}, requestId={}, elapsedMs={}, message={}]",
                         node_id, type, requestId, elapsedMillis(startedAt), result.getMsg());
                 return result;
             } catch (java.util.concurrent.TimeoutException firstTimeout) {
+                if (!retryAfterTimeout) {
+                    pendingRequests.remove(requestId);
+                    GostDto result = new GostDto();
+                    result.setMsg("等待响应超时");
+                    log.debug("节点诊断命令响应超时 [nodeId={}, type={}, requestId={}, timeoutMs={}]",
+                            node_id, type, requestId, timeoutMillis);
+                    return result;
+                }
                 log.warn("节点命令首次等待响应超时 [nodeId={}, type={}, requestId={}，自动再等 5 秒]",
                         node_id, type, requestId);
                 try {

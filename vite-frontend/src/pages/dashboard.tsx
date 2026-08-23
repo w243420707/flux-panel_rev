@@ -176,7 +176,7 @@ export default function DashboardPage() {
     loadPackageData();
     const refreshTimer = window.setInterval(() => {
       loadPackageData({ showLoading: false, showError: false });
-    }, 10000);
+    }, 30000);
     localStorage.setItem('e', '/dashboard');
 
     return () => {
