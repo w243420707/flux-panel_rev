@@ -5,6 +5,7 @@ import com.admin.common.dto.ForwardUpdateDto;
 import com.admin.common.dto.ForwardWithTunnelDto;
 import com.admin.common.dto.GostDto;
 import com.admin.common.lang.R;
+import com.admin.common.task.TunnelConfigSyncTask;
 import com.admin.common.utils.GostUtil;
 import com.admin.common.utils.JwtUtil;
 import com.admin.common.utils.TunnelNodeUtil;
@@ -79,6 +80,13 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     @Resource(name = "forwardConfigExecutor")
     private Executor forwardConfigExecutor;
 
+    @Resource(name = "deferredForwardExecutor")
+    private Executor deferredForwardExecutor;
+
+    @Resource
+    @Lazy
+    private TunnelConfigSyncTask tunnelConfigSyncTask;
+
 
     @Override
     public R createForward(ForwardDto forwardDto) {
@@ -118,6 +126,15 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             return R.err("端口转发创建失败");
         }
 
+        if (Boolean.TRUE.equals(forwardDto.getDeferConfig())) {
+            // 批量导入先落库，避免任一故障节点把整条导入请求拖失败。
+            forward.setStatus(FORWARD_STATUS_PENDING);
+            forward.setUpdatedTime(System.currentTimeMillis());
+            this.updateById(forward);
+            scheduleDeferredForwardConfig(forward.getId(), Boolean.TRUE.equals(forwardDto.getForceClearPort()));
+            return R.ok("转发已保存，节点配置正在后台下发");
+        }
+
         // 6. 获取所需的节点信息
         NodeInfo nodeInfo = getRequiredNodes(tunnel);
         if (nodeInfo.isHasError()) {
@@ -146,6 +163,44 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
 
         return R.ok();
+    }
+
+    /**
+     * 批量导入使用保存优先模式：先返回数据库结果，再在后台下发节点配置。
+     * 节点不在线或响应超时时，交给隧道配置补偿队列持续重试。
+     */
+    private void scheduleDeferredForwardConfig(Long forwardId, boolean forceClearPort) {
+        // 该任务内部还会把不同节点提交到 forwardConfigExecutor，不能占用同一个池等待自己。
+        deferredForwardExecutor.execute(() -> {
+            Forward forward = this.getById(forwardId);
+            if (forward == null) {
+                return;
+            }
+
+            Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
+            if (tunnel == null) {
+                log.warn("批量导入转发 {} 下发失败，隧道不存在", forwardId);
+                return;
+            }
+
+            R result;
+            synchronized (forwardConfigLock) {
+                result = refreshForwardConfig(forward, null, forceClearPort);
+            }
+            if (result.getCode() == 0) {
+                log.info("批量导入转发 {} 节点配置已完成后台下发", forwardId);
+                return;
+            }
+
+            tunnelConfigSyncTask.queueForwardConfigRetry(
+                    tunnel.getId(),
+                    forward.getId(),
+                    null,
+                    tunnel.getUpdatedTime(),
+                    result.getMsg(),
+                    forceClearPort);
+            log.warn("批量导入转发 {} 已保存，节点配置暂未全部下发，已加入后台补偿队列: {}", forwardId, result.getMsg());
+        });
     }
 
     @Override
@@ -1414,25 +1469,61 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     private R updateGostServices(Forward forward, Tunnel tunnel, Integer limiter, NodeInfo nodeInfo, UserTunnel userTunnel, boolean markForwardError) {
         String serviceName = buildServiceName(forward.getId(), forward.getUserId(), userTunnel);
         String interfaceName = tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD ? null : forward.getInterfaceName();
+        List<String> failures = new ArrayList<>();
 
         if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
-            R remoteResult = updateRemoteServices(nodeInfo.getOutNodes(), serviceName, forward, tunnel.getProtocol(), forward.getInterfaceName());
-            if (remoteResult.getCode() != 0) {
+            NodeOperationBatchResult remoteResult = executeNodeOperationsDetailed(
+                    "update-remote-service",
+                    nodeInfo.getOutNodes(),
+                    node -> updateRemoteService(node, serviceName, forward, tunnel.getProtocol(), forward.getInterfaceName()));
+            failures.addAll(remoteResult.getFailures());
+
+            List<Node> usableOutNodes = new ArrayList<>();
+            for (Node node : remoteResult.getSuccessfulNodes()) {
+                if (hasText(resolveNodeServerAddress(node))) {
+                    usableOutNodes.add(node);
+                } else {
+                    failures.add(formatNode(node) + ": 出口节点没有可用服务器 IP");
+                }
+            }
+            if (usableOutNodes.isEmpty()) {
+                String message = failures.isEmpty()
+                        ? "没有可用出口节点，转发配置将在节点恢复后自动重试"
+                        : "没有可用出口节点：" + String.join("；", failures);
                 updateForwardStatusToError(forward, markForwardError);
-                return remoteResult;
+                return R.err(message);
             }
 
-            R chainResult = updateChainServices(nodeInfo.getInNodes(), serviceName, buildOutNodeAddresses(nodeInfo.getOutNodes(), forward.getOutPort()), tunnel.getProtocol(), tunnel.getInterfaceName(), forward.getStrategy());
-            if (chainResult.getCode() != 0) {
+            NodeOperationBatchResult chainResult = executeNodeOperationsDetailed(
+                    "update-chain-service",
+                    nodeInfo.getInNodes(),
+                    node -> updateChainService(node, serviceName, buildOutNodeAddresses(usableOutNodes, forward.getOutPort()), tunnel.getProtocol(), tunnel.getInterfaceName(), forward.getStrategy()));
+            failures.addAll(chainResult.getFailures());
+            if (chainResult.getSuccessfulNodes().isEmpty()) {
+                String message = failures.isEmpty()
+                        ? "没有可用入口节点，转发配置将在节点恢复后自动重试"
+                        : "没有可用入口节点：" + String.join("；", failures);
                 updateForwardStatusToError(forward, markForwardError);
-                return chainResult;
+                return R.err(message);
             }
+
+            NodeOperationBatchResult mainResult = executeNodeOperationsDetailed(
+                    "update-main-service",
+                    chainResult.getSuccessfulNodes(),
+                    node -> updateMainService(node, serviceName, forward, limiter, tunnel.getType(), tunnel, forward.getStrategy(), interfaceName));
+            failures.addAll(mainResult.getFailures());
+        } else {
+            NodeOperationBatchResult mainResult = executeNodeOperationsDetailed(
+                    "update-main-service",
+                    nodeInfo.getInNodes(),
+                    node -> updateMainService(node, serviceName, forward, limiter, tunnel.getType(), tunnel, forward.getStrategy(), interfaceName));
+            failures.addAll(mainResult.getFailures());
         }
 
-        R serviceResult = updateMainServices(nodeInfo.getInNodes(), serviceName, forward, limiter, tunnel.getType(), tunnel, forward.getStrategy(), interfaceName);
-        if (serviceResult.getCode() != 0) {
+        if (!failures.isEmpty()) {
+            String message = "部分节点下发失败，已保留成功节点并将在后台自动重试：" + String.join("；", failures);
             updateForwardStatusToError(forward, markForwardError);
-            return serviceResult;
+            return R.err(message);
         }
 
         return R.ok();
@@ -1635,8 +1726,19 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
      * 在一个下发阶段内并行处理不同节点，同时保证同一节点上的配置命令串行执行。
      */
     private R executeNodeOperations(String phase, List<Node> nodes, NodeConfigOperation operation) {
-        if (nodes == null || nodes.isEmpty()) {
+        NodeOperationBatchResult result = executeNodeOperationsDetailed(phase, nodes, operation);
+        if (result.getFailures().isEmpty()) {
             return R.ok();
+        }
+        return R.err("节点下发失败（" + phase + "）：" + String.join("；", result.getFailures()));
+    }
+
+    /**
+     * 返回每个节点的成功/失败明细，允许隧道转发继续使用已经成功的节点。
+     */
+    private NodeOperationBatchResult executeNodeOperationsDetailed(String phase, List<Node> nodes, NodeConfigOperation operation) {
+        if (nodes == null || nodes.isEmpty()) {
+            return NodeOperationBatchResult.empty();
         }
 
         Map<Long, Node> uniqueNodes = new LinkedHashMap<>();
@@ -1646,7 +1748,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             }
         }
         if (uniqueNodes.isEmpty()) {
-            return R.ok();
+            return NodeOperationBatchResult.empty();
         }
 
         long startedAt = System.nanoTime();
@@ -1656,6 +1758,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
 
         int successCount = 0;
+        List<Node> successfulNodes = new ArrayList<>();
         List<String> failures = new ArrayList<>();
         for (CompletableFuture<NodeOperationResult> future : futures) {
             NodeOperationResult result;
@@ -1668,6 +1771,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
             if (result.isSuccess()) {
                 successCount++;
+                successfulNodes.add(result.getNode());
             } else {
                 failures.add(formatNode(result.getNode()) + ": " + result.getMessage());
             }
@@ -1678,9 +1782,8 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                 phase, uniqueNodes.size(), successCount, failures.size(), elapsedMs);
         if (!failures.isEmpty()) {
             log.warn("转发节点配置阶段存在失败 [phase={}, failedNodes={}]", phase, failures);
-            return R.err("节点下发失败（" + phase + "）：" + String.join("；", failures));
         }
-        return R.ok();
+        return new NodeOperationBatchResult(successfulNodes, failures, uniqueNodes.size(), elapsedMs);
     }
 
     private NodeOperationResult executeNodeOperation(String phase, Node node, NodeConfigOperation operation) {
@@ -1744,6 +1847,25 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     @FunctionalInterface
     private interface NodeConfigOperation {
         R execute(Node node);
+    }
+
+    @Data
+    private static class NodeOperationBatchResult {
+        private final List<Node> successfulNodes;
+        private final List<String> failures;
+        private final int total;
+        private final long elapsedMs;
+
+        private NodeOperationBatchResult(List<Node> successfulNodes, List<String> failures, int total, long elapsedMs) {
+            this.successfulNodes = successfulNodes;
+            this.failures = failures;
+            this.total = total;
+            this.elapsedMs = elapsedMs;
+        }
+
+        private static NodeOperationBatchResult empty() {
+            return new NodeOperationBatchResult(new ArrayList<>(), new ArrayList<>(), 0, 0L);
+        }
     }
 
     @Data
@@ -2258,6 +2380,11 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Override
     public R refreshForwardConfig(Forward forward, Tunnel oldTunnel) {
+        return refreshForwardConfig(forward, oldTunnel, false);
+    }
+
+    @Override
+    public R refreshForwardConfig(Forward forward, Tunnel oldTunnel, boolean forceClearPort) {
         if (forward == null) {
             return R.err("forward is null");
         }
@@ -2273,6 +2400,13 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         NodeInfo nodeInfo = getRequiredNodes(tunnel);
         if (nodeInfo.isHasError()) {
             return R.err(nodeInfo.getErrorMessage());
+        }
+
+        if (forceClearPort) {
+            R releaseResult = forceReleaseForwardPorts(nodeInfo, forward, tunnel);
+            if (releaseResult.getCode() != 0) {
+                return releaseResult;
+            }
         }
 
         PortAllocation portAllocation = resolveForwardPortsForCurrentTunnel(forward, tunnel);
@@ -2291,7 +2425,13 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
         R result = updateGostServices(forward, tunnel, limiter, nodeInfo, userTunnel, false);
         if (result.getCode() != 0) {
-            log.info("刷新转发 {} 的节点配置失败，保留原状态 {}: {}", forward.getId(), originalStatus, result.getMsg());
+            if (originalStatus == null || originalStatus == FORWARD_STATUS_ACTIVE || originalStatus == FORWARD_STATUS_PENDING) {
+                // 保持在待确认状态，应用重启后可由后台扫描任务继续补发。
+                forward.setStatus(FORWARD_STATUS_PENDING);
+                forward.setUpdatedTime(System.currentTimeMillis());
+                this.updateById(forward);
+            }
+            log.info("刷新转发 {} 的节点配置失败，原状态 {}，当前标记为待确认: {}", forward.getId(), originalStatus, result.getMsg());
             return result;
         }
 
@@ -2299,7 +2439,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             cleanupDeprecatedGostServices(forward, oldTunnel, tunnel, userTunnel);
         }
 
-        forward.setStatus(originalStatus == null ? FORWARD_STATUS_ACTIVE : originalStatus);
+        // 批量导入的初始状态是“待下发”，全部节点成功后才转为正常。
+        forward.setStatus(originalStatus == null || originalStatus == FORWARD_STATUS_PENDING
+                ? FORWARD_STATUS_ACTIVE
+                : originalStatus);
         forward.setUpdatedTime(System.currentTimeMillis());
         this.updateById(forward);
         return R.ok();

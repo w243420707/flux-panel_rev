@@ -94,4 +94,9 @@ public interface ForwardService extends IService<Forward> {
     void updateForwardA(Forward forward);
 
     R refreshForwardConfig(Forward forward, Tunnel oldTunnel);
+
+    /**
+     * 刷新转发配置，可选先强制释放入口/出口端口。
+     */
+    R refreshForwardConfig(Forward forward, Tunnel oldTunnel, boolean forceClearPort);
 }

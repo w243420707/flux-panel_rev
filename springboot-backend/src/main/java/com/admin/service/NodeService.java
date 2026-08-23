@@ -38,4 +38,13 @@ public interface NodeService extends IService<Node> {
                                        String reportedPublicIpv6,
                                        String clientIp);
 
+    /**
+     * 异步刷新节点运行时公网 IP，避免阻塞节点 WebSocket 心跳和指标上报。
+     */
+    void refreshRuntimeNodeServerIpAsync(Long id,
+                                         String reportedPublicIp,
+                                         String reportedPublicIpv4,
+                                         String reportedPublicIpv6,
+                                         String clientIp);
+
 }

@@ -36,8 +36,8 @@ public class WebSocketServer extends TextWebSocketHandler {
     // 存储节点ID和对应的WebSocket session映射
     private static final ConcurrentHashMap<Long, WebSocketSession> nodeSessions = new ConcurrentHashMap<>();
 
-    // 保存每个节点最近一次系统指标，管理员页面重新连接时立即回放，避免等待下一次心跳。
-    private static final ConcurrentHashMap<Long, String> latestSystemInfo = new ConcurrentHashMap<>();
+    // 保存每个节点最近一次系统指标和速度，管理员页面重新连接时立即回放。
+    private static final ConcurrentHashMap<Long, LatestSystemInfo> latestSystemInfo = new ConcurrentHashMap<>();
     
     // 为每个session提供锁对象，防止并发发送消息
     private static final ConcurrentHashMap<String, Object> sessionLocks = new ConcurrentHashMap<>();
@@ -177,8 +177,9 @@ public class WebSocketServer extends TextWebSocketHandler {
                 return;
             }
 
-            nodeService.refreshRuntimeNodeServerIp(nodeId, effectivePublicIp, publicIpv4, publicIpv6, clientIp);
             rememberRuntimeIps(session, effectivePublicIp, publicIpv4, publicIpv6);
+            // IP 变化后的转发重建和 DNS 同步可能很慢，不能阻塞当前 WebSocket 心跳。
+            nodeService.refreshRuntimeNodeServerIpAsync(nodeId, effectivePublicIp, publicIpv4, publicIpv6, clientIp);
         } catch (Exception e) {
             log.info("刷新节点公网IP失败: {}", e.getMessage());
         }
@@ -233,20 +234,72 @@ public class WebSocketServer extends TextWebSocketHandler {
         metrics.remove("publicIpv4");
         metrics.remove("public_ipv6");
         metrics.remove("publicIpv6");
-        latestSystemInfo.put(nodeId, metrics.toJSONString());
+        long uptime = info.getLongValue("uptime");
+        long bytesReceived = info.getLongValue("bytes_received");
+        long bytesTransmitted = info.getLongValue("bytes_transmitted");
+        double uploadSpeed = 0D;
+        double downloadSpeed = 0D;
+        LatestSystemInfo previous = latestSystemInfo.get(nodeId);
+        if (previous != null) {
+            long timeDiff = uptime - previous.getUptime();
+            if (timeDiff > 0 && timeDiff <= 60) {
+                long uploadDiff = bytesTransmitted - previous.getBytesTransmitted();
+                long downloadDiff = bytesReceived - previous.getBytesReceived();
+                if (uploadDiff >= 0) {
+                    uploadSpeed = (double) uploadDiff / timeDiff;
+                }
+                if (downloadDiff >= 0) {
+                    downloadSpeed = (double) downloadDiff / timeDiff;
+                }
+            }
+        }
+        metrics.put("upload_speed", uploadSpeed);
+        metrics.put("download_speed", downloadSpeed);
+        latestSystemInfo.put(nodeId, new LatestSystemInfo(
+                metrics.toJSONString(), uptime, bytesReceived, bytesTransmitted));
     }
 
     /**
      * 管理员 WebSocket 建立后立即补发最近指标，避免页面必须等待下一条节点心跳。
      */
     private void sendLatestSystemInfo(WebSocketSession session) {
-        latestSystemInfo.forEach((nodeId, payload) -> {
+        latestSystemInfo.forEach((nodeId, snapshot) -> {
             JSONObject message = new JSONObject();
             message.put("id", nodeId);
             message.put("type", "info");
-            message.put("data", payload);
+            message.put("data", snapshot.getPayload());
             sendToUser(session, message.toJSONString());
         });
+    }
+
+    private static class LatestSystemInfo {
+        private final String payload;
+        private final long uptime;
+        private final long bytesReceived;
+        private final long bytesTransmitted;
+
+        private LatestSystemInfo(String payload, long uptime, long bytesReceived, long bytesTransmitted) {
+            this.payload = payload;
+            this.uptime = uptime;
+            this.bytesReceived = bytesReceived;
+            this.bytesTransmitted = bytesTransmitted;
+        }
+
+        private String getPayload() {
+            return payload;
+        }
+
+        private long getUptime() {
+            return uptime;
+        }
+
+        private long getBytesReceived() {
+            return bytesReceived;
+        }
+
+        private long getBytesTransmitted() {
+            return bytesTransmitted;
+        }
     }
 
     /**
@@ -348,6 +401,10 @@ public class WebSocketServer extends TextWebSocketHandler {
                 String nodePublicIp = (String) session.getAttributes().get("nodePublicIp");
                 String nodePublicIpv4 = (String) session.getAttributes().get("nodePublicIpv4");
                 String nodePublicIpv6 = (String) session.getAttributes().get("nodePublicIpv6");
+                boolean hasReportedRuntimeIp = nodePublicIp != null
+                        || nodePublicIpv4 != null
+                        || nodePublicIpv6 != null
+                        || clientIp != null;
                 
                 log.info("节点 {} 尝试连接，开始处理连接逻辑", nodeId);
                 
@@ -376,10 +433,8 @@ public class WebSocketServer extends TextWebSocketHandler {
                 Node node = nodeService.getById(nodeId);
                 if (node != null) {
                     // 更新状态和版本信息
-                    if (nodePublicIp != null || nodePublicIpv4 != null || nodePublicIpv6 != null || clientIp != null) {
-                        nodeService.refreshRuntimeNodeServerIp(nodeId, nodePublicIp, nodePublicIpv4, nodePublicIpv6, clientIp);
+                    if (hasReportedRuntimeIp) {
                         rememberRuntimeIps(session, nodePublicIp, nodePublicIpv4, nodePublicIpv6);
-                        node = nodeService.getById(nodeId);
                     }
                     node.setStatus(1);
                     if (version != null) {
@@ -389,6 +444,11 @@ public class WebSocketServer extends TextWebSocketHandler {
                     
                     if (updateResult) {
                         log.info("节点 {} 连接建立成功，状态更新为在线，版本: {}", nodeId, version);
+
+                        if (hasReportedRuntimeIp) {
+                            // 先保存在线状态，再异步更新公网 IP，避免旧 Node 对象覆盖新 IP。
+                            nodeService.refreshRuntimeNodeServerIpAsync(nodeId, nodePublicIp, nodePublicIpv4, nodePublicIpv6, clientIp);
+                        }
                         
                         // 广播节点上线状态给所有管理员
                         JSONObject res = new JSONObject();

@@ -35,6 +35,8 @@ CURRENT_COMMIT=""
 BUILD_SERVICES=()
 DOCKER_IPV4_HOSTS_TOKEN="flux-panel-rev-docker-ipv4-fallback"
 DOCKER_IPV4_HOSTS_ACTIVE=0
+GITHUB_IPV4_HOSTS_TOKEN="flux-panel-rev-github-ipv4-fallback"
+GITHUB_IPV4_HOSTS_ACTIVE=0
 
 log() { printf '\033[1;32m[INFO]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }
@@ -49,7 +51,20 @@ cleanup_docker_ipv4_fallback() {
   fi
 }
 
-trap cleanup_docker_ipv4_fallback EXIT
+cleanup_github_ipv4_fallback() {
+  if [[ "${GITHUB_IPV4_HOSTS_ACTIVE}" -eq 1 && -f /etc/hosts ]]; then
+    sed -i "/${GITHUB_IPV4_HOSTS_TOKEN}/d" /etc/hosts 2>/dev/null || true
+    GITHUB_IPV4_HOSTS_ACTIVE=0
+    log "Removed temporary GitHub IPv4 fallback entries."
+  fi
+}
+
+cleanup_ipv4_fallbacks() {
+  cleanup_docker_ipv4_fallback
+  cleanup_github_ipv4_fallback
+}
+
+trap cleanup_ipv4_fallbacks EXIT
 
 usage() {
   cat <<EOF
@@ -293,6 +308,7 @@ install_docker() {
 
   if ! docker compose version >/dev/null 2>&1; then
     local release
+    configure_github_ipv4_fallback || true
     release="$(curl -fsSL https://api.github.com/repos/docker/compose/releases/latest | sed -n 's/.*"tag_name": "\(v[^"]*\)".*/\1/p' | head -n 1 || true)"
     release="${release:-v2.29.7}"
     mkdir -p /usr/local/lib/docker/cli-plugins
@@ -321,7 +337,83 @@ resolve_ipv4() {
   if [[ -z "${address}" ]] && command -v getent >/dev/null 2>&1; then
     address="$(getent ahostsv4 "${host}" 2>/dev/null | awk '$1 ~ /^[0-9.]+$/ { print $1; exit }')"
   fi
+  if [[ -z "${address}" ]] && command -v dig >/dev/null 2>&1; then
+    # Some VPS providers have a broken or filtered local resolver. Use public
+    # DNS only to discover the current IPv4 address; no mirror is involved.
+    local resolver
+    for resolver in 1.1.1.1 8.8.8.8; do
+      address="$(dig @"${resolver}" +time=2 +tries=1 +short A "${host}" 2>/dev/null | awk '/^[0-9.]+$/ { print; exit }')"
+      [[ -n "${address}" ]] && break
+    done
+  fi
   printf '%s' "${address}"
+}
+
+github_endpoint_reachable() {
+  local family="$1"
+  local host="$2"
+  curl -fsS "-${family}" --connect-timeout 4 --max-time 8 -o /dev/null "https://${host}/" >/dev/null 2>&1
+}
+
+github_ipv4_fallback_needed() {
+  local address=""
+  local ipv4_ok=0
+  local ipv6_failed=0
+
+  github_endpoint_reachable 4 "github.com" && ipv4_ok=1 || true
+  github_endpoint_reachable 6 "github.com" || ipv6_failed=1
+
+  if [[ "${ipv4_ok}" -eq 1 && "${ipv6_failed}" -eq 0 ]]; then
+    return 1
+  fi
+
+  address="$(resolve_ipv4 "github.com")"
+  [[ -n "${address}" ]] || return 1
+
+  # Verify that the discovered address really serves GitHub before changing
+  # /etc/hosts. This avoids masking a broader network outage.
+  curl -fsS -4 --resolve "github.com:443:${address}" \
+    --connect-timeout 4 --max-time 8 -o /dev/null "https://github.com/" >/dev/null 2>&1
+}
+
+configure_github_ipv4_fallback() {
+  [[ "${GITHUB_IPV4_HOSTS_ACTIVE}" -eq 1 ]] && return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  [[ -f /etc/hosts ]] || return 0
+
+  if ! github_ipv4_fallback_needed; then
+    return 0
+  fi
+
+  local host address
+  local github_hosts=(
+    "github.com"
+    "api.github.com"
+    "raw.githubusercontent.com"
+    "codeload.github.com"
+    "objects.githubusercontent.com"
+  )
+
+  # Remove a stale entry left by an interrupted previous run before adding a
+  # fresh set of addresses.
+  sed -i "/${GITHUB_IPV4_HOSTS_TOKEN}/d" /etc/hosts 2>/dev/null || true
+  warn "GitHub DNS is unavailable on this VPS; temporarily preferring public IPv4 addresses."
+  warn "This uses GitHub's official endpoints only and is removed when the script exits."
+
+  for host in "${github_hosts[@]}"; do
+    address="$(resolve_ipv4 "${host}")"
+    if [[ -n "${address}" ]]; then
+      printf '%s %s %s\n' "${address}" "${host}" "${GITHUB_IPV4_HOSTS_TOKEN}" >> /etc/hosts
+      log "GitHub IPv4 fallback: ${host} -> ${address}"
+      GITHUB_IPV4_HOSTS_ACTIVE=1
+    else
+      warn "Could not resolve an IPv4 address for ${host}; leaving normal DNS resolution unchanged."
+    fi
+  done
+
+  if [[ "${GITHUB_IPV4_HOSTS_ACTIVE}" -eq 0 ]]; then
+    warn "GitHub IPv4 fallback could not be configured."
+  fi
 }
 
 docker_ipv4_fallback_needed() {
@@ -646,6 +738,8 @@ collect_install_config() {
 }
 
 sync_repo() {
+  configure_github_ipv4_fallback || true
+
   if [[ -d "${APP_DIR}/.git" ]]; then
     log "Updating repository in ${APP_DIR}..."
     PREVIOUS_COMMIT="$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)"
@@ -655,10 +749,18 @@ sync_repo() {
     fi
     log "Cloning ${REPO_URL} to ${APP_DIR}..."
     mkdir -p "$(dirname "${APP_DIR}")"
-    git clone "${REPO_URL}" "${APP_DIR}"
+    if ! git clone "${REPO_URL}" "${APP_DIR}"; then
+      warn "GitHub clone failed; retrying once after IPv4 fallback setup..."
+      configure_github_ipv4_fallback || true
+      git clone "${REPO_URL}" "${APP_DIR}" || die "Cannot clone ${REPO_URL}. The VPS cannot reach GitHub; check DNS/network access or use the panel's local-source deployment."
+    fi
   fi
 
-  git -C "${APP_DIR}" fetch origin --prune --tags --force
+  if ! git -C "${APP_DIR}" fetch origin --prune --tags --force; then
+    warn "GitHub fetch failed; retrying once after IPv4 fallback setup..."
+    configure_github_ipv4_fallback || true
+    git -C "${APP_DIR}" fetch origin --prune --tags --force || die "Cannot update ${REPO_URL}. The VPS cannot resolve or reach GitHub; check DNS/network access or use the panel's local-source deployment."
+  fi
   checkout_deploy_ref
   [[ -f "${APP_DIR}/${COMPOSE_FILE}" ]] || die "Missing ${COMPOSE_FILE} in ${APP_DIR}."
 }

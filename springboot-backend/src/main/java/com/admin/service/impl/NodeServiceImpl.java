@@ -24,6 +24,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.springframework.beans.BeanUtils;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -407,6 +408,16 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
             }
         }
         return updated;
+    }
+
+    @Override
+    @Async("nodeRuntimeIpExecutor")
+    public void refreshRuntimeNodeServerIpAsync(Long id,
+                                                String reportedPublicIp,
+                                                String reportedPublicIpv4,
+                                                String reportedPublicIpv6,
+                                                String clientIp) {
+        refreshRuntimeNodeServerIp(id, reportedPublicIp, reportedPublicIpv4, reportedPublicIpv6, clientIp);
     }
 
     // ========== 私有辅助方法 ==========

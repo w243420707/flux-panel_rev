@@ -33,4 +33,9 @@ public class ForwardDto {
 
     private Boolean forceClearPort;
 
+    /**
+     * 批量导入时先保存转发，再由后台异步下发节点配置。
+     */
+    private Boolean deferConfig;
+
 }

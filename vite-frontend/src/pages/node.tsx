@@ -275,8 +275,9 @@ export default function NodePage() {
           const currentDownload = parseInt(systemInfo.bytes_received) || 0;
           const currentUptime = parseInt(systemInfo.uptime) || 0;
           const previousSystemInfo = systemInfoCacheRef.current.get(nodeId);
-          let uploadSpeed = 0;
-          let downloadSpeed = 0;
+          // 页面刚连接时后端可能只回放一份快照，优先使用后端缓存的最近速度，避免先显示 0。
+          let uploadSpeed = parseFloat(systemInfo.upload_speed) || 0;
+          let downloadSpeed = parseFloat(systemInfo.download_speed) || 0;
 
           if (previousSystemInfo && previousSystemInfo.uptime) {
             const timeDiff = currentUptime - previousSystemInfo.uptime;

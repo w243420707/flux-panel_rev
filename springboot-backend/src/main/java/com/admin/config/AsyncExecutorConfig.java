@@ -34,6 +34,30 @@ public class AsyncExecutorConfig {
         return executor;
     }
 
+    @Bean(name = "deferredForwardExecutor")
+    public Executor deferredForwardExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(1000);
+        executor.setThreadNamePrefix("forward-deferred-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean(name = "nodeRuntimeIpExecutor")
+    public Executor nodeRuntimeIpExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("node-runtime-ip-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
+
     @Bean(name = "diagnosisExecutor")
     public Executor diagnosisExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

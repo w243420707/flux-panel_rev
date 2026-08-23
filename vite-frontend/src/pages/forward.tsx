@@ -1137,7 +1137,8 @@ export default function ForwardPage() {
             tunnelId: selectedTunnelForImport,
             inPort: portNumber,
             remoteAddr: remoteAddr.trim(),
-            strategy: 'fifo'
+            strategy: 'fifo',
+            deferConfig: true
           };
           let response: ApiResult = await createForward(createData);
 
@@ -1161,7 +1162,8 @@ export default function ForwardPage() {
             setImportResults(prev => [{
               line,
               success: true,
-              message: '创建成功',
+              pending: true,
+              message: '已保存，节点配置后台下发；异常节点恢复后自动补发',
               forwardName: name.trim()
             }, ...prev]);
           } else if (isLikelyTimeoutMessage(response.msg)) {
