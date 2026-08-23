@@ -843,8 +843,15 @@ build_panel_services() {
       fi
       if [[ "${DOCKER_IPV4_HOSTS_ACTIVE}" -eq 1 ]]; then
         warn "Docker image build failed once; retrying with the temporary IPv4 fallback."
-        compose build "${service}"
+        if ! compose build "${service}"; then
+          err "Docker image build failed for ${service}."
+          err "This VPS cannot currently download one or more official Docker Hub images."
+          err "Check outbound TCP/443 access to registry-1.docker.io, auth.docker.io, and production.cloudflare.docker.com, then retry the same update command."
+          return 1
+        fi
       else
+        err "Docker image build failed for ${service}."
+        err "The VPS cannot currently reach the official Docker image registry. Check outbound TCP/443 access and retry."
         return 1
       fi
     fi

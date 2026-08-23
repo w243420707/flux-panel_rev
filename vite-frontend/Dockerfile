@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 ARG FRONTEND_NODE_VERSION=22.13.1
 FROM node:${FRONTEND_NODE_VERSION} AS builder
 

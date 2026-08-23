@@ -133,6 +133,12 @@ APK 必须运行在大陆网络出口，海外 VPS 或海外模拟器不能代�
 
 ## 更新日志
 
+### 2026-08-23 v1.3.40
+
+- Removed the explicit `docker/dockerfile:1.7` frontend dependency from panel Dockerfiles. VPS updates no longer need to pull this extra Docker Hub image before the actual build starts.
+- Added a clear error message when official Docker Hub images cannot be downloaded because the VPS outbound network is unavailable.
+- Frontend version is now `1.3.40`; application version is now `1.0.10`.
+
 ### 2026-08-23 v1.3.39
 
 - 降低面板高频流量上报的数据库查询、Java 串行锁和限制检查频率，减轻大流量场景下的 CPU、线程和数据库压力。
