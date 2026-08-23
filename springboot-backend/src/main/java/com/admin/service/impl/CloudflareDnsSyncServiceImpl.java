@@ -329,6 +329,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             Set<String> preservedRecordKeys = new HashSet<>();
             Set<Long> preservedNodeIds = new LinkedHashSet<>();
             Set<Long> unresolvedNodeIds = new HashSet<>();
+            Set<Long> offlineNodeIds = new HashSet<>();
             Set<Long> blockedNodeIds = new HashSet<>();
             List<Long> effectiveNodeIds = new ArrayList<>();
 
@@ -355,6 +356,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
                 unresolvedNodeIds.add(nodeId);
                 if (!online) {
+                    offlineNodeIds.add(nodeId);
                     continue;
                 }
                 preserveExistingRecordsForUnresolvedNode(
@@ -380,7 +382,8 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                 desiredRecordKeys.add(targetRecordKey(primaryDomain, target));
             }
 
-            if (desiredTargets.isEmpty() && desiredRecordKeys.isEmpty() && blockedNodeIds.isEmpty()) {
+            if (desiredTargets.isEmpty() && desiredRecordKeys.isEmpty()
+                    && blockedNodeIds.isEmpty() && offlineNodeIds.isEmpty()) {
                 String message = "未解析到任何可用公网 " + recordTypeLabel(recordType) + "，已保留旧 DNS 记录";
                 if (smartPoolPlan != null && smartPoolPlan.activeNodeIds.isEmpty()) {
                     message = "智能池没有可用活跃节点，已保留旧 DNS 记录";
@@ -406,6 +409,9 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             }
             if (!unresolvedNodeIds.isEmpty()) {
                 message += "，" + unresolvedNodeIds.size() + " 个节点等待 APK 或地址确认";
+            }
+            if (!offlineNodeIds.isEmpty()) {
+                message += "，" + offlineNodeIds.size() + " 个节点离线，已下掉解析";
             }
             markBinding(binding, SYNC_SUCCESS, message, desiredTargets);
             updateSettingSyncStatus(setting, SYNC_SUCCESS, "最近由 " + trigger + " 触发: " + String.join(", ", domains));
