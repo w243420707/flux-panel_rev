@@ -127,6 +127,13 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 - 面板启动时会自动把旧配置中的 `1`、空值或低于 60 秒的 TTL 修正为 60 秒，避免继续向 Cloudflare 提交自动 TTL。
 - Frontend version is now `1.3.35`; application version is now `1.0.5`.
 
+### 2026-08-23 v1.3.36
+
+- 节点心跳检测到新公网 IP 后，Cloudflare DNS 同步进入独立优先队列，先更新解析。
+- 转发配置刷新改为后台队列，避免大量转发配置阻塞 DNS 同步。
+- 增加 Cloudflare DNS 同步失败日志，便于定位 API、绑定或网络问题。
+- Frontend version is now `1.3.36`; application version is now `1.0.6`.
+
 ### 2026-08-23 v1.3.31
 
 - 修复部分 VPS 无法解析 `github.com` 导致更新失败的问题。

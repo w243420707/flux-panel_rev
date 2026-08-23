@@ -22,6 +22,7 @@ import com.admin.service.ViteConfigService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
@@ -34,6 +35,8 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * <p>
@@ -45,6 +48,7 @@ import java.util.Objects;
  * @since 2025-06-03
  */
 @Service
+@Slf4j
 public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements NodeService {
 
     // ========== 常量定义 ==========
@@ -98,6 +102,12 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     @Resource
     @Lazy
     private CloudflareDnsSyncService cloudflareDnsSyncService;
+
+    @Resource(name = "deferredForwardExecutor")
+    private Executor deferredForwardExecutor;
+
+    @Resource(name = "nodeRuntimeDnsExecutor")
+    private Executor nodeRuntimeDnsExecutor;
 
 
     // ========== 公共接口实现 ==========
@@ -401,11 +411,21 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         node.setUpdatedTime(System.currentTimeMillis());
         boolean updated = this.updateById(node);
         if (updated) {
-            refreshMultiNodeTunnelIps(id);
-            refreshForwardConfigsByNode(id);
             if (autoUpdateEnabled) {
-                syncCloudflareDnsByNode(id, "node-runtime-ip");
+                CompletableFuture.runAsync(
+                        () -> syncCloudflareDnsByNode(id, "node-runtime-ip"),
+                        nodeRuntimeDnsExecutor
+                );
             }
+
+            refreshMultiNodeTunnelIps(id);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    refreshForwardConfigsByNode(id);
+                } catch (Exception e) {
+                    log.warn("Refresh forward configs after runtime IP change failed, nodeId={}, error={}", id, e.getMessage());
+                }
+            }, deferredForwardExecutor);
         }
         return updated;
     }
@@ -475,7 +495,9 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     private void syncCloudflareDnsByNode(Long nodeId, String trigger) {
         try {
             cloudflareDnsSyncService.syncBindingsByNode(nodeId, trigger);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.warn("Cloudflare DNS sync after node IP change failed, nodeId={}, trigger={}, error={}",
+                    nodeId, trigger, e.getMessage());
         }
     }
 

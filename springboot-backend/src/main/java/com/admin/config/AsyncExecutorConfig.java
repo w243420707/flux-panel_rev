@@ -58,6 +58,18 @@ public class AsyncExecutorConfig {
         return executor;
     }
 
+    @Bean(name = "nodeRuntimeDnsExecutor")
+    public Executor nodeRuntimeDnsExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("node-runtime-dns-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
+
     @Bean(name = "diagnosisExecutor")
     public Executor diagnosisExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
