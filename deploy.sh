@@ -1012,10 +1012,15 @@ wait_for_health() {
   local timeout="${2:-180}"
   local elapsed=0
   local status=""
+  local has_health=""
 
   while [[ "${elapsed}" -lt "${timeout}" ]]; do
     status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container}" 2>/dev/null || true)"
-    if [[ "${status}" == "healthy" || "${status}" == "running" ]]; then
+    has_health="$(docker inspect -f '{{if .State.Health}}yes{{else}}no{{end}}' "${container}" 2>/dev/null || true)"
+    if [[ "${has_health}" == "yes" && "${status}" == "healthy" ]]; then
+      return 0
+    fi
+    if [[ "${has_health}" == "no" && "${status}" == "running" ]]; then
       return 0
     fi
     sleep 5
@@ -1052,8 +1057,9 @@ start_stack() {
 
   log "Starting containers in background..."
   compose_up_with_port_retry "${recreate}"
-  wait_for_health "${APP_SLUG}-mysql" 180 || true
-  wait_for_health "${APP_SLUG}-backend" 240 || true
+  wait_for_health "${APP_SLUG}-mysql" 180 || die "MySQL did not become healthy. Check the MySQL container logs before retrying."
+  wait_for_health "${APP_SLUG}-backend" 240 || die "Backend did not become healthy. Nginx was not reconfigured; check the backend container logs before retrying."
+  wait_for_health "${APP_SLUG}-frontend" 120 || die "Frontend did not become healthy. Nginx was not reconfigured; check the frontend container logs before retrying."
 }
 
 post_deploy_cleanup() {
