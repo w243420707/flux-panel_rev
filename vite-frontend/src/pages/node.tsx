@@ -95,21 +95,11 @@ export default function NodePage() {
   const reconnectAttemptsRef = useRef(0);
   const runtimeIpCacheRef = useRef<Map<number, Partial<Node>>>(new Map());
   const systemInfoCacheRef = useRef<Map<number, NonNullable<Node['systemInfo']>>>(new Map());
+  const nodeListRef = useRef<Node[]>([]);
   const maxReconnectAttempts = 5;
 
-  const totalUploadSpeed = nodeList.reduce((sum, node) => {
-    if (node.connectionStatus !== 'online' || !node.systemInfo) {
-      return sum;
-    }
-    return sum + (node.systemInfo.uploadSpeed || 0);
-  }, 0);
-
-  const totalDownloadSpeed = nodeList.reduce((sum, node) => {
-    if (node.connectionStatus !== 'online' || !node.systemInfo) {
-      return sum;
-    }
-    return sum + (node.systemInfo.downloadSpeed || 0);
-  }, 0);
+  const [totalSpeed, setTotalSpeed] = useState({ upload: 0, download: 0 });
+  nodeListRef.current = nodeList;
 
   useEffect(() => {
     initWebSocket();
@@ -118,6 +108,27 @@ export default function NodePage() {
     return () => {
       closeWebSocket();
     };
+  }, []);
+
+  useEffect(() => {
+    const refreshTotalSpeed = () => {
+      const nextTotalSpeed = nodeListRef.current.reduce(
+        (totals, node) => {
+          if (node.connectionStatus === 'online' && node.systemInfo) {
+            totals.upload += node.systemInfo.uploadSpeed || 0;
+            totals.download += node.systemInfo.downloadSpeed || 0;
+          }
+          return totals;
+        },
+        { upload: 0, download: 0 }
+      );
+
+      setTotalSpeed(nextTotalSpeed);
+    };
+
+    refreshTotalSpeed();
+    const refreshTimer = window.setInterval(refreshTotalSpeed, 2000);
+    return () => window.clearInterval(refreshTimer);
   }, []);
 
   // 加载节点列表
@@ -735,7 +746,7 @@ export default function NodePage() {
               size="sm"
               className="text-xs whitespace-nowrap"
             >
-              总上传 {formatSpeed(totalUploadSpeed)}
+              总上传 {formatSpeed(totalSpeed.upload)}
             </Chip>
             <Chip
               variant="flat"
@@ -743,7 +754,7 @@ export default function NodePage() {
               size="sm"
               className="text-xs whitespace-nowrap"
             >
-              总下载 {formatSpeed(totalDownloadSpeed)}
+              总下载 {formatSpeed(totalSpeed.download)}
             </Chip>
         </div>
 
