@@ -685,6 +685,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         packageDto.setTunnelPermissions(tunnelPermissions);
         packageDto.setForwards(forwards);
         packageDto.setStatisticsFlows(statisticsFlows);
+        if (Objects.equals(roleId, ADMIN_ROLE_ID)) {
+            packageDto.setNodeOnlineCount(nodeService.count(new QueryWrapper<Node>().eq("status", 1)));
+            packageDto.setNodeTotalCount(nodeService.count());
+        }
         
         return packageDto;
     }

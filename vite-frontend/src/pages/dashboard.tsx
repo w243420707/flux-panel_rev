@@ -3,6 +3,7 @@ import { Button } from "@heroui/button";
 import { Modal, ModalContent, ModalHeader, ModalBody } from "@heroui/modal";
 import { useState, useEffect, useRef } from "react";
 import toast from 'react-hot-toast';
+import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 
@@ -57,6 +58,14 @@ interface StatisticsFlow {
   time: string;
 }
 
+interface DashboardNodeSystemInfo {
+  uploadTraffic: number;
+  downloadTraffic: number;
+  uploadSpeed: number;
+  downloadSpeed: number;
+  uptime: number;
+}
+
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -70,6 +79,13 @@ export default function DashboardPage() {
   const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [addressModalTitle, setAddressModalTitle] = useState('');
   const [addressList, setAddressList] = useState<AddressItem[]>([]);
+  const [nodeCounts, setNodeCounts] = useState({ online: 0, total: 0 });
+  const [networkSpeed, setNetworkSpeed] = useState({ upload: 0, download: 0 });
+  const websocketRef = useRef<WebSocket | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const systemInfoCacheRef = useRef<Map<number, DashboardNodeSystemInfo>>(new Map());
+  const maxReconnectAttempts = 5;
 
   // 检查有效期通知
   const checkExpirationNotifications = (userInfo: UserInfo, tunnels: UserTunnel[]) => {
@@ -171,16 +187,31 @@ export default function DashboardPage() {
     
     // 检查用户是否是管理员
     const adminStatus = localStorage.getItem('admin');
-    setIsAdmin(adminStatus === 'true');
+    const nextIsAdmin = adminStatus === 'true';
+    setIsAdmin(nextIsAdmin);
+    if (!nextIsAdmin) {
+      setNodeCounts({ online: 0, total: 0 });
+      setNetworkSpeed({ upload: 0, download: 0 });
+      systemInfoCacheRef.current.clear();
+    }
     
     loadPackageData();
     const refreshTimer = window.setInterval(() => {
       loadPackageData({ showLoading: false, showError: false });
     }, 30000);
+    const speedTimer = nextIsAdmin ? window.setInterval(refreshNetworkSpeed, 2000) : null;
+    if (nextIsAdmin) {
+      initWebSocket();
+      refreshNetworkSpeed();
+    }
     localStorage.setItem('e', '/dashboard');
 
     return () => {
       window.clearInterval(refreshTimer);
+      if (speedTimer) {
+        window.clearInterval(speedTimer);
+      }
+      closeWebSocket();
     };
   }, []);
 
@@ -205,6 +236,12 @@ export default function DashboardPage() {
         setUserTunnels(data.tunnelPermissions || []);
         setForwardList(data.forwards || []);
         setStatisticsFlows(data.statisticsFlows || []);
+        if (localStorage.getItem('admin') === 'true') {
+          setNodeCounts({
+            online: Number(data.nodeOnlineCount || 0),
+            total: Number(data.nodeTotalCount || 0)
+          });
+        }
         
         // 检查有效期并显示通知
         checkExpirationNotifications(data.userInfo, data.tunnelPermissions || []);
@@ -233,6 +270,160 @@ export default function DashboardPage() {
     }
   };
 
+  const refreshNetworkSpeed = () => {
+    const nextSpeed = Array.from(systemInfoCacheRef.current.values()).reduce(
+      (totals, info) => ({
+        upload: totals.upload + (info.uploadSpeed || 0),
+        download: totals.download + (info.downloadSpeed || 0)
+      }),
+      { upload: 0, download: 0 }
+    );
+    setNetworkSpeed(nextSpeed);
+  };
+
+  const initWebSocket = () => {
+    if (websocketRef.current &&
+        (websocketRef.current.readyState === WebSocket.OPEN ||
+         websocketRef.current.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    if (websocketRef.current) {
+      closeWebSocket();
+    }
+
+    const baseUrl = axios.defaults.baseURL || (import.meta.env.VITE_API_BASE ? `${import.meta.env.VITE_API_BASE}/api/v1/` : '/api/v1/');
+    const wsUrl = baseUrl.replace(/^http/, 'ws').replace(/\/api\/v1\/$/, '') + `/system-info?type=0&secret=${localStorage.getItem('token')}`;
+
+    try {
+      websocketRef.current = new WebSocket(wsUrl);
+
+      websocketRef.current.onopen = () => {
+        reconnectAttemptsRef.current = 0;
+      };
+
+      websocketRef.current.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleWebSocketMessage(data);
+        } catch {
+          // 忽略非 JSON 消息。
+        }
+      };
+
+      websocketRef.current.onerror = () => {
+        // WebSocket 失败不影响仪表盘基础数据。
+      };
+
+      websocketRef.current.onclose = () => {
+        websocketRef.current = null;
+        attemptReconnect();
+      };
+    } catch {
+      attemptReconnect();
+    }
+  };
+
+  const handleWebSocketMessage = (data: any) => {
+    const { id, type, data: messageData } = data;
+    const nodeId = Number(id);
+    if (!Number.isFinite(nodeId)) {
+      return;
+    }
+
+    if (type === 'status') {
+      if (messageData === 0) {
+        systemInfoCacheRef.current.delete(nodeId);
+        refreshNetworkSpeed();
+      }
+      loadPackageData({ showLoading: false, showError: false });
+      return;
+    }
+
+    if (type !== 'info') {
+      return;
+    }
+
+    try {
+      const systemInfo = typeof messageData === 'string'
+        ? JSON.parse(messageData)
+        : messageData;
+      const hasSystemMetrics =
+        systemInfo &&
+        (
+          Object.prototype.hasOwnProperty.call(systemInfo, "bytes_received") ||
+          Object.prototype.hasOwnProperty.call(systemInfo, "bytes_transmitted") ||
+          Object.prototype.hasOwnProperty.call(systemInfo, "uptime")
+        );
+      if (!hasSystemMetrics) {
+        return;
+      }
+
+      const currentUpload = parseInt(systemInfo.bytes_transmitted) || 0;
+      const currentDownload = parseInt(systemInfo.bytes_received) || 0;
+      const currentUptime = parseInt(systemInfo.uptime) || 0;
+      const previousSystemInfo = systemInfoCacheRef.current.get(nodeId);
+      let uploadSpeed = parseFloat(systemInfo.upload_speed) || 0;
+      let downloadSpeed = parseFloat(systemInfo.download_speed) || 0;
+
+      if (previousSystemInfo && previousSystemInfo.uptime) {
+        const timeDiff = currentUptime - previousSystemInfo.uptime;
+        if (timeDiff > 0 && timeDiff <= 10) {
+          const uploadDiff = currentUpload - previousSystemInfo.uploadTraffic;
+          const downloadDiff = currentDownload - previousSystemInfo.downloadTraffic;
+          if (uploadDiff >= 0) {
+            uploadSpeed = uploadDiff / timeDiff;
+          }
+          if (downloadDiff >= 0) {
+            downloadSpeed = downloadDiff / timeDiff;
+          }
+        }
+      }
+
+      systemInfoCacheRef.current.set(nodeId, {
+        uploadTraffic: currentUpload,
+        downloadTraffic: currentDownload,
+        uploadSpeed,
+        downloadSpeed,
+        uptime: currentUptime
+      });
+    } catch {
+      // 忽略格式异常的节点指标。
+    }
+  };
+
+  const attemptReconnect = () => {
+    if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
+      return;
+    }
+    reconnectAttemptsRef.current++;
+    reconnectTimerRef.current = setTimeout(() => {
+      initWebSocket();
+    }, 3000 * reconnectAttemptsRef.current);
+  };
+
+  const closeWebSocket = () => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    reconnectAttemptsRef.current = 0;
+
+    if (websocketRef.current) {
+      websocketRef.current.onopen = null;
+      websocketRef.current.onmessage = null;
+      websocketRef.current.onerror = null;
+      websocketRef.current.onclose = null;
+
+      if (websocketRef.current.readyState === WebSocket.OPEN ||
+          websocketRef.current.readyState === WebSocket.CONNECTING) {
+        websocketRef.current.close();
+      }
+
+      websocketRef.current = null;
+    }
+  };
+
   const formatFlow = (value: number, unit: string = 'bytes'): string => {
     // 99999 表示无限制
     if (value === 99999) {
@@ -248,6 +439,15 @@ export default function DashboardPage() {
       if (value < 1024 * 1024 * 1024) return (value / (1024 * 1024)).toFixed(2) + ' MB';
       return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
     }
+  };
+
+  const formatSpeed = (bytesPerSecond: number): string => {
+    if (bytesPerSecond <= 0) return '0 B/s';
+
+    const k = 1024;
+    const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
+    const i = Math.min(Math.floor(Math.log(bytesPerSecond) / Math.log(k)), sizes.length - 1);
+    return `${parseFloat((bytesPerSecond / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
   };
 
   const formatNumber = (value: number): string => {
@@ -645,16 +845,37 @@ export default function DashboardPage() {
          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-6 lg:mb-8">
            <Card className="border border-gray-200 dark:border-default-200 shadow-md hover:shadow-lg transition-shadow">
              <CardBody className="p-3 lg:p-4">
-               <div className="flex flex-col space-y-2">
+               <div className="flex flex-col gap-3">
                  <div className="flex items-center justify-between">
-                   <p className="text-xs lg:text-sm text-default-600 truncate">总流量</p>
+                   <p className="text-xs lg:text-sm text-default-600 truncate">网络</p>
                    <div className="p-1.5 lg:p-2 bg-blue-100 dark:bg-blue-500/20 rounded-lg flex-shrink-0">
                      <svg className="w-4 h-4 lg:w-5 lg:h-5 text-blue-600 dark:text-blue-400" fill="currentColor" viewBox="0 0 20 20">
                        <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" />
                      </svg>
                    </div>
                  </div>
-                 <p className="text-base lg:text-xl font-bold text-foreground truncate">{formatFlow(userInfo.flow, 'gb')}</p>
+                 <div className="grid grid-cols-2 gap-2">
+                   <div className="min-w-0">
+                     <p className="text-xs text-default-500 mb-1">上传</p>
+                     <p className="text-base lg:text-xl font-bold text-green-600 dark:text-green-400 truncate">{formatFlow(userInfo.inFlow || 0)}</p>
+                   </div>
+                   <div className="min-w-0">
+                     <p className="text-xs text-default-500 mb-1">下载</p>
+                     <p className="text-base lg:text-xl font-bold text-orange-600 dark:text-orange-400 truncate">{formatFlow(userInfo.outFlow || 0)}</p>
+                   </div>
+                 </div>
+                 {isAdmin && (
+                   <div className="grid grid-cols-2 gap-2 border-t border-default-200 pt-2">
+                     <div className="min-w-0">
+                       <p className="text-xs text-default-500 mb-1">实时上传</p>
+                       <p className="text-xs lg:text-sm font-semibold text-green-600 dark:text-green-400 truncate">{formatSpeed(networkSpeed.upload)}</p>
+                     </div>
+                     <div className="min-w-0">
+                       <p className="text-xs text-default-500 mb-1">实时下载</p>
+                       <p className="text-xs lg:text-sm font-semibold text-orange-600 dark:text-orange-400 truncate">{formatSpeed(networkSpeed.download)}</p>
+                     </div>
+                   </div>
+                 )}
                </div>
              </CardBody>
            </Card>
@@ -695,14 +916,21 @@ export default function DashboardPage() {
              <CardBody className="p-3 lg:p-4">
                <div className="flex flex-col space-y-2">
                  <div className="flex items-center justify-between">
-                   <p className="text-xs lg:text-sm text-default-600 truncate">转发配额</p>
+                   <p className="text-xs lg:text-sm text-default-600 truncate">{isAdmin ? '节点状态' : '转发配额'}</p>
                    <div className="p-1.5 lg:p-2 bg-purple-100 dark:bg-purple-500/20 rounded-lg flex-shrink-0">
                      <svg className="w-4 h-4 lg:w-5 lg:h-5 text-purple-600 dark:text-purple-400" fill="currentColor" viewBox="0 0 20 20">
                        <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
                      </svg>
                    </div>
                  </div>
-                 <p className="text-base lg:text-xl font-bold text-foreground truncate">{formatNumber(userInfo.num || 0)}</p>
+                 {isAdmin ? (
+                   <>
+                     <p className="text-base lg:text-xl font-bold text-foreground truncate">{nodeCounts.online} / {nodeCounts.total}</p>
+                     <p className="text-xs text-default-500 truncate">在线节点 / 总节点</p>
+                   </>
+                 ) : (
+                   <p className="text-base lg:text-xl font-bold text-foreground truncate">{formatNumber(userInfo.num || 0)}</p>
+                 )}
                </div>
              </CardBody>
            </Card>

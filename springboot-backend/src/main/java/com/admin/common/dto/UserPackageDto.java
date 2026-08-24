@@ -30,6 +30,16 @@ public class UserPackageDto {
      * 用户转发列表
      */
     private List<StatisticsFlow> statisticsFlows;
+
+    /**
+     * 管理员可见：在线节点数
+     */
+    private Integer nodeOnlineCount;
+
+    /**
+     * 管理员可见：总节点数
+     */
+    private Integer nodeTotalCount;
     
     /**
      * 用户基本信息
@@ -88,4 +98,4 @@ public class UserPackageDto {
         private Integer status;
         private Long createdTime;
     }
-} 
+}
