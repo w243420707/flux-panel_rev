@@ -97,6 +97,20 @@ export default function NodePage() {
   const systemInfoCacheRef = useRef<Map<number, NonNullable<Node['systemInfo']>>>(new Map());
   const maxReconnectAttempts = 5;
 
+  const totalUploadSpeed = nodeList.reduce((sum, node) => {
+    if (node.connectionStatus !== 'online' || !node.systemInfo) {
+      return sum;
+    }
+    return sum + (node.systemInfo.uploadSpeed || 0);
+  }, 0);
+
+  const totalDownloadSpeed = nodeList.reduce((sum, node) => {
+    if (node.connectionStatus !== 'online' || !node.systemInfo) {
+      return sum;
+    }
+    return sum + (node.systemInfo.downloadSpeed || 0);
+  }, 0);
+
   useEffect(() => {
     initWebSocket();
     loadNodes();
@@ -713,14 +727,31 @@ export default function NodePage() {
     
       <div className="px-3 lg:px-6 py-8">
         {/* 页面头部 */}
-        <div className="flex items-center justify-between mb-6">
-        <div className="flex-1">
+        <div className="flex items-center justify-between gap-3 mb-6">
+        <div className="min-w-0 flex flex-1 flex-wrap items-center justify-end gap-2">
+            <Chip
+              variant="flat"
+              color="primary"
+              size="sm"
+              className="text-xs whitespace-nowrap"
+            >
+              总上传 {formatSpeed(totalUploadSpeed)}
+            </Chip>
+            <Chip
+              variant="flat"
+              color="success"
+              size="sm"
+              className="text-xs whitespace-nowrap"
+            >
+              总下载 {formatSpeed(totalDownloadSpeed)}
+            </Chip>
         </div>
 
         <Button
               size="sm"
               variant="flat"
               color="primary"
+              className="shrink-0"
               onPress={handleAdd}
              
             >
