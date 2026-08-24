@@ -47,4 +47,9 @@ public interface NodeService extends IService<Node> {
                                          String reportedPublicIpv6,
                                          String clientIp);
 
+    /**
+     * Trigger forward configuration self-healing after a node reconnects.
+     */
+    void triggerForwardConfigSelfHealing(Long nodeId);
+
 }

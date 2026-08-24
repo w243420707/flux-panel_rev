@@ -2,6 +2,7 @@ package com.admin.service.impl;
 
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
+import com.admin.common.task.TunnelConfigSyncTask;
 import com.admin.common.dto.NodeDto;
 import com.admin.common.dto.NodeUpdateDto;
 import com.admin.common.lang.R;
@@ -56,6 +57,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     /** 节点默认状态：启用 */
     private static final int NODE_STATUS_ACTIVE = 0;
     private static final int FORWARD_STATUS_ACTIVE = 1;
+    private static final int FORWARD_STATUS_PENDING = 2;
     private static final String DEFAULT_NODE_ASSET_BASE_URL = "https://raw.githubusercontent.com/w243420707/flux-panel-node-assets/refs/heads/main";
     
     /** 成功响应消息 */
@@ -102,6 +104,10 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     @Resource
     @Lazy
     private CloudflareDnsSyncService cloudflareDnsSyncService;
+
+    @Resource
+    @Lazy
+    private TunnelConfigSyncTask tunnelConfigSyncTask;
 
     @Resource(name = "deferredForwardExecutor")
     private Executor deferredForwardExecutor;
@@ -223,19 +229,71 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     }
 
     private void refreshForwardConfigsByNode(Long nodeId) {
-        List<Forward> forwards = forwardService.list();
+        List<Forward> forwards = forwardService.list(new QueryWrapper<Forward>().in("status", FORWARD_STATUS_ACTIVE, FORWARD_STATUS_PENDING));
         for (Forward forward : forwards) {
-            if (forward.getStatus() == null || forward.getStatus() != FORWARD_STATUS_ACTIVE) {
-                continue;
+            try {
+                if (forward == null || forward.getId() == null || forward.getTunnelId() == null) {
+                    continue;
+                }
+                Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
+                if (tunnel == null) {
+                    continue;
+                }
+                if (!TunnelNodeUtil.containsInNode(tunnel, nodeId)
+                        && !TunnelNodeUtil.containsOutNode(tunnel, nodeId)) {
+                    continue;
+                }
+
+                if (forward.getStatus() == FORWARD_STATUS_PENDING) {
+                    tunnelConfigSyncTask.queueForwardConfigRetryNow(
+                            tunnel.getId(),
+                            forward.getId(),
+                            null,
+                            null,
+                            "node reconnected; retry pending forward configuration",
+                            false);
+                    continue;
+                }
+
+                R result = forwardService.refreshForwardConfig(forward, null);
+                if (result != null && result.getCode() != 0) {
+                    tunnelConfigSyncTask.queueForwardConfigRetryNow(
+                            tunnel.getId(),
+                            forward.getId(),
+                            null,
+                            null,
+                            result.getMsg(),
+                            false);
+                }
+            } catch (Exception e) {
+                log.warn("Forward config self-healing failed for node {}, forward {}: {}",
+                        nodeId,
+                        forward != null ? forward.getId() : null,
+                        e.getMessage());
+                if (forward != null && forward.getId() != null && forward.getTunnelId() != null) {
+                    tunnelConfigSyncTask.queueForwardConfigRetryNow(
+                            forward.getTunnelId().longValue(),
+                            forward.getId().longValue(),
+                            null,
+                            null,
+                            e.getMessage(),
+                            false);
+                }
             }
-            Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
-            if (tunnel == null) {
-                continue;
-            }
-            if (!TunnelNodeUtil.containsOutNode(tunnel, nodeId)) {
-                continue;
-            }
-            forwardService.refreshForwardConfig(forward, null);
+        }
+    }
+
+    @Override
+    @Async("deferredForwardExecutor")
+    public void triggerForwardConfigSelfHealing(Long nodeId) {
+        if (nodeId == null) {
+            return;
+        }
+        try {
+            refreshForwardConfigsByNode(nodeId);
+        } catch (Exception e) {
+            log.warn("Forward config self-healing failed after node reconnect, nodeId={}, error={}",
+                    nodeId, e.getMessage());
         }
     }
 

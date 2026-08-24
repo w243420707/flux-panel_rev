@@ -506,6 +506,9 @@ public class WebSocketServer extends TextWebSocketHandler {
 
                         cloudflareDnsSyncService.requestSyncAll("node-online");
 
+                        // Retry active and pending forwards as soon as the node reconnects.
+                        nodeService.triggerForwardConfigSelfHealing(nodeId);
+
                         if (hasReportedRuntimeIp) {
                             // 先保存在线状态，再异步更新公网 IP，避免旧 Node 对象覆盖新 IP。
                             nodeService.refreshRuntimeNodeServerIpAsync(nodeId, nodePublicIp, nodePublicIpv4, nodePublicIpv6, clientIp);

@@ -74,12 +74,12 @@ public class TunnelConfigSyncTask {
                             if (result.getCode() != 0) {
                                 failed++;
                                 log.warn("Tunnel {} forward {} config sync failed: {}", tunnelId, forward.getId(), result.getMsg());
-                                queueForwardRetry(tunnelId, forward.getId(), oldTunnel, syncVersion, 1, result.getMsg(), false);
+                                queueForwardRetry(tunnelId, forward.getId(), oldTunnel, syncVersion, 1, result.getMsg(), false, false);
                             }
                         } catch (Exception e) {
                             failed++;
                             log.warn("Tunnel {} forward {} config sync exception", tunnelId, forward.getId(), e);
-                            queueForwardRetry(tunnelId, forward.getId(), oldTunnel, syncVersion, 1, e.getMessage(), false);
+                            queueForwardRetry(tunnelId, forward.getId(), oldTunnel, syncVersion, 1, e.getMessage(), false, false);
                         }
                     }
                 }
@@ -114,7 +114,17 @@ public class TunnelConfigSyncTask {
         if (syncVersion == null && tunnelId != null) {
             syncVersion = currentTunnelVersion(tunnelService.getById(tunnelId));
         }
-        queueForwardRetry(tunnelId, forwardId, oldTunnel, syncVersion, 1, reason, forceClearPort);
+        queueForwardRetry(tunnelId, forwardId, oldTunnel, syncVersion, 1, reason, forceClearPort, false);
+    }
+
+    /**
+     * 节点恢复或手动触发时，优先唤醒已存在的补偿任务，避免继续等退避时间。
+     */
+    public void queueForwardConfigRetryNow(Long tunnelId, Long forwardId, Tunnel oldTunnel, Long syncVersion, String reason, boolean forceClearPort) {
+        if (syncVersion == null && tunnelId != null) {
+            syncVersion = currentTunnelVersion(tunnelService.getById(tunnelId));
+        }
+        queueForwardRetry(tunnelId, forwardId, oldTunnel, syncVersion, 1, reason, forceClearPort, true);
     }
 
     @Scheduled(fixedDelay = 15000)
@@ -180,6 +190,18 @@ public class TunnelConfigSyncTask {
             if (!Objects.equals(currentTunnelVersion(currentTunnel), job.getSyncVersion())) {
                 log.info("Skip stale forward retry, tunnel {} version changed from {} to {}, forward={}",
                         job.getTunnelId(), job.getSyncVersion(), currentTunnelVersion(currentTunnel), job.getForwardId());
+                Forward currentForward = forwardService.getById(job.getForwardId());
+                if (currentForward != null
+                        && Objects.equals(currentForward.getTunnelId(), job.getTunnelId().intValue())
+                        && Objects.equals(currentForward.getStatus(), FORWARD_STATUS_PENDING)) {
+                    queueForwardConfigRetry(
+                            job.getTunnelId(),
+                            job.getForwardId(),
+                            null,
+                            currentTunnelVersion(currentTunnel),
+                            "tunnel version changed; retry with latest configuration",
+                            job.isForceClearPort());
+                }
                 return;
             }
 
@@ -208,10 +230,10 @@ public class TunnelConfigSyncTask {
             log.warn("Tunnel {} forward {} config retry reached max attempts, last error={}", job.getTunnelId(), job.getForwardId(), reason);
             return;
         }
-        queueForwardRetry(job.getTunnelId(), job.getForwardId(), job.getOldTunnel(), job.getSyncVersion(), job.getAttempt() + 1, reason, job.isForceClearPort());
+        queueForwardRetry(job.getTunnelId(), job.getForwardId(), job.getOldTunnel(), job.getSyncVersion(), job.getAttempt() + 1, reason, job.isForceClearPort(), false);
     }
 
-    private void queueForwardRetry(Long tunnelId, Long forwardId, Tunnel oldTunnel, Long syncVersion, int attempt, String reason, boolean forceClearPort) {
+    private void queueForwardRetry(Long tunnelId, Long forwardId, Tunnel oldTunnel, Long syncVersion, int attempt, String reason, boolean forceClearPort, boolean immediate) {
         if (tunnelId == null || forwardId == null || attempt < 1
                 || (MAX_FORWARD_RETRY_ATTEMPTS > 0 && attempt > MAX_FORWARD_RETRY_ATTEMPTS)) {
             return;
@@ -231,7 +253,8 @@ public class TunnelConfigSyncTask {
         job.setOldTunnel(copyTunnel(oldTunnel));
         job.setAttempt(attempt);
         job.setForceClearPort(forceClearPort);
-        job.setNextRetryAtMillis(System.currentTimeMillis() + retryDelayMillis(attempt));
+        long now = System.currentTimeMillis();
+        job.setNextRetryAtMillis(immediate ? now : now + retryDelayMillis(attempt));
         job.setLastError(reason);
         job.setKey(retryKey(tunnelId, forwardId, syncVersion));
 
@@ -239,8 +262,17 @@ public class TunnelConfigSyncTask {
         if (existingJob == null) {
             log.info("Queued tunnel {} forward {} config retry, attempt={}, retryAt={}, reason={}",
                     tunnelId, forwardId, attempt, job.getNextRetryAtMillis(), reason);
-        } else if (forceClearPort && !existingJob.isForceClearPort()) {
-            existingJob.setForceClearPort(true);
+        } else {
+            if (forceClearPort && !existingJob.isForceClearPort()) {
+                existingJob.setForceClearPort(true);
+            }
+            if (immediate) {
+                existingJob.setAttempt(1);
+                existingJob.setNextRetryAtMillis(now);
+                existingJob.setLastError(reason);
+                log.info("Woke tunnel {} forward {} config retry, retryAt={}, reason={}",
+                        tunnelId, forwardId, existingJob.getNextRetryAtMillis(), reason);
+            }
         }
     }
 
@@ -281,10 +313,10 @@ public class TunnelConfigSyncTask {
         private Long forwardId;
         private Long syncVersion;
         private Tunnel oldTunnel;
-        private int attempt;
-        private boolean forceClearPort;
-        private long nextRetryAtMillis;
-        private String lastError;
+        private volatile int attempt;
+        private volatile boolean forceClearPort;
+        private volatile long nextRetryAtMillis;
+        private volatile String lastError;
 
         public String getKey() {
             return key;
