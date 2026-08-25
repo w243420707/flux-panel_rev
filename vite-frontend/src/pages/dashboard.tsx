@@ -983,7 +983,12 @@ export default function DashboardPage() {
                                     {/* 流量趋势图 */}
                    <div className="h-64 lg:h-80 w-full">
                      <ResponsiveContainer width="100%" height="100%">
-                       <BarChart data={processFlowChartData()} barCategoryGap="18%" barGap={2}>
+                       <BarChart
+                         data={processFlowChartData()}
+                         barCategoryGap="18%"
+                         barGap={2}
+                         margin={{ top: 44, right: 8, left: 0, bottom: 0 }}
+                       >
                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                          <XAxis 
                            dataKey="time" 
@@ -992,6 +997,7 @@ export default function DashboardPage() {
                            axisLine={{ stroke: '#e5e7eb', strokeWidth: 1 }}
                          />
                          <YAxis 
+                           domain={[0, (dataMax) => Math.max(1, Math.ceil(Number(dataMax) * 1.2))]}
                            tick={{ fontSize: 12 }}
                            tickLine={false}
                            axisLine={{ stroke: '#e5e7eb', strokeWidth: 1 }}
@@ -1028,7 +1034,7 @@ export default function DashboardPage() {
                              dataKey="flow"
                              position="top"
                              offset={8}
-                             formatter={(value) => formatFlow(Number(value ?? 0))}
+                             formatter={(value) => formatFlow(Number(value ?? 0)).replace(/\s+/g, '\u00A0')}
                              style={{ fontSize: 11, fill: '#c4b5fd' }}
                            />
                          </Bar>
