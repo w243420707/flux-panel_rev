@@ -1,7 +1,7 @@
 import { Card, CardBody, CardHeader } from "@heroui/card";
 import { Button } from "@heroui/button";
 import { Modal, ModalContent, ModalHeader, ModalBody } from "@heroui/modal";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import toast from 'react-hot-toast';
 import axios from 'axios';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts';
@@ -483,6 +483,8 @@ export default function DashboardPage() {
       formattedFlow: formatFlow(flowMap.get(hour) || 0)
     }));
   };
+
+  const flowChartData = useMemo(() => processFlowChartData(), [statisticsFlows]);
 
 
   const getExpStatus = (expTime?: string) => {
@@ -984,7 +986,7 @@ export default function DashboardPage() {
                    <div className="h-64 lg:h-80 w-full">
                      <ResponsiveContainer width="100%" height="100%">
                        <BarChart
-                         data={processFlowChartData()}
+                         data={flowChartData}
                          barCategoryGap="18%"
                          barGap={2}
                          margin={{ top: 44, right: 8, left: 0, bottom: 0 }}
@@ -1029,6 +1031,7 @@ export default function DashboardPage() {
                            fill="#8b5cf6"
                            radius={[6, 6, 0, 0]}
                            maxBarSize={20}
+                           isAnimationActive={false}
                          >
                            <LabelList
                              dataKey="flow"
