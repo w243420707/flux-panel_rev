@@ -4,7 +4,7 @@ import { Modal, ModalContent, ModalHeader, ModalBody } from "@heroui/modal";
 import { useState, useEffect, useRef } from "react";
 import toast from 'react-hot-toast';
 import axios from 'axios';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts';
 
 
 import { getUserPackageInfo } from "@/api";
@@ -1023,7 +1023,15 @@ export default function DashboardPage() {
                            fill="#8b5cf6"
                            radius={[6, 6, 0, 0]}
                            maxBarSize={20}
-                         />
+                         >
+                           <LabelList
+                             dataKey="flow"
+                             position="top"
+                             offset={8}
+                             formatter={(value) => formatFlow(Number(value ?? 0))}
+                             style={{ fontSize: 11, fill: '#c4b5fd' }}
+                           />
+                         </Bar>
                        </BarChart>
                      </ResponsiveContainer>
                    </div>
