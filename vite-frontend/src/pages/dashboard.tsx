@@ -198,7 +198,7 @@ export default function DashboardPage() {
     loadPackageData();
     const refreshTimer = window.setInterval(() => {
       loadPackageData({ showLoading: false, showError: false });
-    }, 30000);
+    }, 600000);
     const speedTimer = nextIsAdmin ? window.setInterval(refreshNetworkSpeed, 2000) : null;
     if (nextIsAdmin) {
       initWebSocket();
