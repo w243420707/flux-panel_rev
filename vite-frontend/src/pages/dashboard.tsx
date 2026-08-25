@@ -4,7 +4,7 @@ import { Modal, ModalContent, ModalHeader, ModalBody } from "@heroui/modal";
 import { useState, useEffect, useRef } from "react";
 import toast from 'react-hot-toast';
 import axios from 'axios';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 
 import { getUserPackageInfo } from "@/api";
@@ -983,7 +983,7 @@ export default function DashboardPage() {
                                     {/* 流量趋势图 */}
                    <div className="h-64 lg:h-80 w-full">
                      <ResponsiveContainer width="100%" height="100%">
-                       <LineChart data={processFlowChartData()}>
+                       <BarChart data={processFlowChartData()} barCategoryGap="18%" barGap={2}>
                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
                          <XAxis 
                            dataKey="time" 
@@ -1018,15 +1018,13 @@ export default function DashboardPage() {
                              return null;
                            }}
                          />
-                         <Line
-                           type="monotone"
+                         <Bar
                            dataKey="flow"
-                           stroke="#8b5cf6"
-                           strokeWidth={3}
-                           dot={false}
-                           activeDot={{ r: 4, stroke: '#8b5cf6', strokeWidth: 2, fill: '#fff' }}
+                           fill="#8b5cf6"
+                           radius={[6, 6, 0, 0]}
+                           maxBarSize={20}
                          />
-                       </LineChart>
+                       </BarChart>
                      </ResponsiveContainer>
                    </div>
                </div>
