@@ -82,3 +82,61 @@ export interface Pagination {
   size: number;
   total: number;
 }
+
+export interface SiteTraffic {
+  totalInFlow: number;
+  totalOutFlow: number;
+  totalFlow: number;
+}
+
+export interface UserPackageUserInfo {
+  flow: number;
+  inFlow: number;
+  outFlow: number;
+  num: number;
+  expTime?: string;
+  flowResetTime?: number;
+}
+
+export interface UserPackageTunnel {
+  id: number;
+  tunnelId: number;
+  tunnelName: string;
+  flow: number;
+  inFlow: number;
+  outFlow: number;
+  num: number;
+  expTime?: string;
+  flowResetTime?: number;
+  tunnelFlow: number;
+}
+
+export interface UserPackageForward {
+  id: number;
+  name: string;
+  tunnelId: number;
+  tunnelName: string;
+  inIp: string;
+  inPort: number;
+  remoteAddr: string;
+  inFlow: number;
+  outFlow: number;
+}
+
+export interface UserPackageStatisticsFlow {
+  id: number;
+  userId: number;
+  flow: number;
+  totalFlow: number;
+  time: string;
+}
+
+export interface UserPackageData {
+  userInfo: UserPackageUserInfo;
+  tunnelPermissions: UserPackageTunnel[];
+  forwards: UserPackageForward[];
+  statisticsFlows: UserPackageStatisticsFlow[];
+  nodeOnlineCount?: number;
+  nodeTotalCount?: number;
+  siteTraffic?: SiteTraffic;
+}

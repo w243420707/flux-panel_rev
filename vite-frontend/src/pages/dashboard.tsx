@@ -8,6 +8,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 
 
 import { getUserPackageInfo } from "@/api";
+import type { SiteTraffic } from "@/types";
 
 interface UserInfo {
   flow: number;
@@ -66,11 +67,31 @@ interface DashboardNodeSystemInfo {
   uptime: number;
 }
 
+const isFiniteNonNegativeNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+const parseSiteTraffic = (value: unknown): SiteTraffic | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const traffic = value as Record<string, unknown>;
+  const { totalInFlow, totalOutFlow, totalFlow } = traffic;
+  if (!isFiniteNonNegativeNumber(totalInFlow) ||
+      !isFiniteNonNegativeNumber(totalOutFlow) ||
+      !isFiniteNonNegativeNumber(totalFlow)) {
+    return null;
+  }
+
+  return { totalInFlow, totalOutFlow, totalFlow };
+};
+
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const packageLoadingRef = useRef(false);
   const [userInfo, setUserInfo] = useState<UserInfo>({} as UserInfo);
+  const [siteTraffic, setSiteTraffic] = useState<SiteTraffic | null>(null);
   const [userTunnels, setUserTunnels] = useState<UserTunnel[]>([]);
   const [forwardList, setForwardList] = useState<Forward[]>([]);
   const [statisticsFlows, setStatisticsFlows] = useState<StatisticsFlow[]>([]);
@@ -181,6 +202,7 @@ export default function DashboardPage() {
     // 重置状态并加载数据，防止页面切换时显示旧数据
     setLoading(true);
     setUserInfo({} as UserInfo);
+    setSiteTraffic(null);
     setUserTunnels([]);
     setForwardList([]);
     setStatisticsFlows([]);
@@ -232,7 +254,8 @@ export default function DashboardPage() {
       if (res.code === 0) {
         const data = res.data;
         setLoadError('');
-        setUserInfo(data.userInfo || {});
+        setUserInfo(data.userInfo || ({} as UserInfo));
+        setSiteTraffic(parseSiteTraffic(data.siteTraffic));
         setUserTunnels(data.tunnelPermissions || []);
         setForwardList(data.forwards || []);
         setStatisticsFlows(data.statisticsFlows || []);
@@ -893,23 +916,44 @@ export default function DashboardPage() {
                      </svg>
                    </div>
                  </div>
-                 <p className="text-base lg:text-xl font-bold text-foreground truncate">{formatFlow(calculateUserTotalUsedFlow())}</p>
-                 <div className="mt-1">
-                   {renderProgressBar(calculateUsagePercentage('flow'), 'sm', userInfo.flow === 99999)}
-                   <div className="flex items-center justify-between mt-1">
-                     <p className="text-xs text-default-500 truncate">
-                       {userInfo.flow === 99999 ? '无限制' : `${calculateUsagePercentage('flow').toFixed(1)}%`}
+                 {isAdmin ? (
+                   <div className="flex items-center justify-between gap-2">
+                     <p className="text-base lg:text-xl font-bold text-foreground truncate">
+                       {formatFlow(siteTraffic?.totalFlow ?? 0)}
                      </p>
-                     {(userInfo.flowResetTime !== undefined && userInfo.flowResetTime !== null) && (
-                       <div className="text-xs text-default-500 flex items-center gap-1">
-                         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                         </svg>
-                         <span className="truncate">{formatResetTime(userInfo.flowResetTime)}</span>
-                       </div>
+                     {!siteTraffic && (
+                       <Button
+                         size="sm"
+                         variant="flat"
+                         color="primary"
+                         onPress={() => loadPackageData()}
+                         className="flex-shrink-0"
+                       >
+                         刷新
+                       </Button>
                      )}
                    </div>
-                 </div>
+                 ) : (
+                   <>
+                     <p className="text-base lg:text-xl font-bold text-foreground truncate">{formatFlow(calculateUserTotalUsedFlow())}</p>
+                     <div className="mt-1">
+                       {renderProgressBar(calculateUsagePercentage('flow'), 'sm', userInfo.flow === 99999)}
+                       <div className="flex items-center justify-between mt-1">
+                         <p className="text-xs text-default-500 truncate">
+                           {userInfo.flow === 99999 ? '无限制' : `${calculateUsagePercentage('flow').toFixed(1)}%`}
+                         </p>
+                         {(userInfo.flowResetTime !== undefined && userInfo.flowResetTime !== null) && (
+                           <div className="text-xs text-default-500 flex items-center gap-1">
+                             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                             </svg>
+                             <span className="truncate">{formatResetTime(userInfo.flowResetTime)}</span>
+                           </div>
+                         )}
+                       </div>
+                     </div>
+                   </>
+                 )}
                </div>
              </CardBody>
            </Card>
