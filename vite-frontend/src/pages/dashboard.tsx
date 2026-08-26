@@ -900,7 +900,14 @@ export default function DashboardPage() {
                      <p className="text-xs text-default-500 truncate">
                        {userInfo.flow === 99999 ? '无限制' : `${calculateUsagePercentage('flow').toFixed(1)}%`}
                      </p>
-                     {(userInfo.flowResetTime !== undefined && userInfo.flowResetTime !== null) && (
+                     {isAdmin ? (
+                       <div className="text-xs text-default-500 flex items-center gap-1">
+                         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                           <path d="M12 2a10 10 0 1 0 10 10A10.011 10.011 0 0 0 12 2Zm1 5v4.586l3.207 3.207-1.414 1.414L11 12.414V7Z" />
+                         </svg>
+                         <span className="truncate">永久累计</span>
+                       </div>
+                     ) : (userInfo.flowResetTime !== undefined && userInfo.flowResetTime !== null) && (
                        <div className="text-xs text-default-500 flex items-center gap-1">
                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />

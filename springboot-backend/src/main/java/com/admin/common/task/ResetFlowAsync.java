@@ -27,6 +27,8 @@ import java.util.List;
 @EnableScheduling
 public class ResetFlowAsync {
 
+    private static final int ADMIN_ROLE_ID = 0;
+
     @Resource
     UserService userService;
 
@@ -94,7 +96,8 @@ public class ResetFlowAsync {
             // 构建查询条件：重置日期等于今天，或者重置日期大于当月最大天数且今天是月末
             // 排除flowResetTime为0的记录（不重置）
             QueryWrapper<User> queryWrapper = new QueryWrapper<>();
-            queryWrapper.ne("flow_reset_time", 0); // 排除不重置的用户
+            queryWrapper.ne("role_id", ADMIN_ROLE_ID)
+                    .ne("flow_reset_time", 0); // 管理员流量永久累计，不参与自动重置
             
             if (currentDay == lastDayOfMonth) {
                 // 如果今天是月末，查询重置日期等于今天或者大于当月最大天数的记录

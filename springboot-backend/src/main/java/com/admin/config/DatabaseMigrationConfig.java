@@ -35,6 +35,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("seed cloudflare dns setting", () -> seedCloudflareSetting(connection));
             runStep("normalize cloudflare dns ttl", () -> normalizeCloudflareDnsTtl(connection));
             runStep("backfill cloudflare auto node ip setting", () -> backfillCloudflareAutoNodeIpSetting(connection));
+            runStep("normalize administrator flow accumulation", () -> normalizeAdministratorFlowSetting(connection));
             runStep("add query indexes", () -> addQueryIndexes(connection));
             runStep("backfill tunnel node arrays", () -> backfillNodeArrays(connection));
         } catch (Exception e) {
@@ -303,6 +304,13 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
     private void backfillCloudflareAutoNodeIpSetting(Connection connection) throws Exception {
         try (Statement statement = connection.createStatement()) {
             statement.executeUpdate("UPDATE cloudflare_dns_setting SET auto_update_node_ip = 1 WHERE auto_update_node_ip IS NULL");
+        }
+    }
+
+    /** 管理员流量永久累计，兼容旧库中仍保存月度重置日期的管理员账号。 */
+    private void normalizeAdministratorFlowSetting(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("UPDATE `user` SET flow_reset_time = 0 WHERE role_id = 0 AND (flow_reset_time IS NULL OR flow_reset_time <> 0)");
         }
     }
 

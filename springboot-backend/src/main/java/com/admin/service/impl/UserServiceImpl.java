@@ -349,6 +349,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (resetFlowDto.getType() == 1){ // 清零账号流量
             User user = this.getById(resetFlowDto.getId());
             if (user == null) return R.err(ERROR_USER_NOT_FOUND);
+            if (Objects.equals(user.getRoleId(), ADMIN_ROLE_ID)) {
+                return R.err("管理员流量为永久累计，不支持重置");
+            }
             user.setInFlow(0L);
             user.setOutFlow(0L);
             this.updateById(user);
@@ -709,7 +712,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         userInfo.setOutFlow(user.getOutFlow());
         userInfo.setNum(user.getNum());
         userInfo.setExpTime(user.getExpTime());
-        userInfo.setFlowResetTime(user.getFlowResetTime());
+        userInfo.setFlowResetTime(Objects.equals(user.getRoleId(), ADMIN_ROLE_ID)
+                ? 0L
+                : user.getFlowResetTime());
         userInfo.setCreatedTime(user.getCreatedTime());
         userInfo.setUpdatedTime(user.getUpdatedTime());
         return userInfo;
