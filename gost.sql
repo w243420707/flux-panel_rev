@@ -118,6 +118,20 @@ CREATE TABLE `statistics_flow` (
 -- --------------------------------------------------------
 
 --
+-- 表的结构 `site_traffic`
+--
+
+CREATE TABLE `site_traffic` (
+  `id` bigint(20) NOT NULL,
+  `total_in_flow` bigint(20) NOT NULL DEFAULT '0',
+  `total_out_flow` bigint(20) NOT NULL DEFAULT '0',
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- --------------------------------------------------------
+
+--
 -- 表的结构 `tunnel`
 --
 
@@ -170,6 +184,16 @@ CREATE TABLE `user` (
 
 INSERT INTO `user` (`id`, `user`, `pwd`, `role_id`, `exp_time`, `flow`, `in_flow`, `out_flow`, `flow_reset_time`, `num`, `created_time`, `updated_time`, `status`) VALUES
 (1, 'admin_user', '3c85cdebade1c51cf64ca9f3c09d182d', 0, 2727251700000, 99999, 0, 0, 1, 99999, 1748914865000, 1754011744252, 1);
+
+-- --------------------------------------------------------
+
+--
+-- 转存表中的数据 `site_traffic`
+--
+
+INSERT INTO `site_traffic` (`id`, `total_in_flow`, `total_out_flow`, `created_time`, `updated_time`)
+SELECT 1, COALESCE(SUM(`in_flow`), 0), COALESCE(SUM(`out_flow`), 0), UNIX_TIMESTAMP() * 1000, UNIX_TIMESTAMP() * 1000
+FROM `user`;
 
 -- --------------------------------------------------------
 
@@ -310,6 +334,12 @@ ALTER TABLE `statistics_flow`
   ADD KEY `idx_statistics_flow_created_time` (`created_time`);
 
 --
+-- 表的索引 `site_traffic`
+--
+ALTER TABLE `site_traffic`
+  ADD PRIMARY KEY (`id`);
+
+--
 -- 表的索引 `tunnel`
 --
 ALTER TABLE `tunnel`
@@ -384,6 +414,10 @@ ALTER TABLE `speed_limit`
 --
 ALTER TABLE `statistics_flow`
   MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- 表 `site_traffic` 使用固定单例主键，不使用自增。
+--
 
 --
 -- 使用表AUTO_INCREMENT `tunnel`

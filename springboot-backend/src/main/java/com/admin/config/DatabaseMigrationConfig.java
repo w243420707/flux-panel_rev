@@ -35,6 +35,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("seed cloudflare dns setting", () -> seedCloudflareSetting(connection));
             runStep("normalize cloudflare dns ttl", () -> normalizeCloudflareDnsTtl(connection));
             runStep("backfill cloudflare auto node ip setting", () -> backfillCloudflareAutoNodeIpSetting(connection));
+            runStep("create site traffic counter", () -> createSiteTrafficTable(connection));
             runStep("add query indexes", () -> addQueryIndexes(connection));
             runStep("backfill tunnel node arrays", () -> backfillNodeArrays(connection));
         } catch (Exception e) {
@@ -68,6 +69,29 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.next() && resultSet.getInt(1) > 0;
             }
+        }
+    }
+
+    /**
+     * Create and initialize the singleton cumulative traffic counter.
+     *
+     * The INSERT is guarded by the fixed primary key so a restart cannot
+     * re-seed the counter from the current periodic user counters.
+     */
+    private void createSiteTrafficTable(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE IF NOT EXISTS site_traffic ("
+                    + "id BIGINT NOT NULL PRIMARY KEY,"
+                    + "total_in_flow BIGINT NOT NULL DEFAULT 0,"
+                    + "total_out_flow BIGINT NOT NULL DEFAULT 0,"
+                    + "created_time BIGINT NOT NULL,"
+                    + "updated_time BIGINT NOT NULL"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+            statement.executeUpdate("INSERT IGNORE INTO site_traffic "
+                    + "(id, total_in_flow, total_out_flow, created_time, updated_time) "
+                    + "SELECT 1, COALESCE(SUM(in_flow), 0), COALESCE(SUM(out_flow), 0), "
+                    + "UNIX_TIMESTAMP() * 1000, UNIX_TIMESTAMP() * 1000 FROM user");
         }
     }
 

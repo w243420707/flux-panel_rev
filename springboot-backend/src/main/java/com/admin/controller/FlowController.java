@@ -9,10 +9,12 @@ import com.admin.common.utils.AESCrypto;
 import com.admin.common.utils.GostUtil;
 import com.admin.common.utils.TunnelNodeUtil;
 import com.admin.entity.*;
+import com.admin.mapper.SiteTrafficMapper;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import lombok.extern.slf4j.Slf4j;
 
@@ -63,6 +65,9 @@ public class FlowController extends BaseController {
 
     @Resource
     CheckGostConfigAsync checkGostConfigAsync;
+
+    @Resource
+    SiteTrafficMapper siteTrafficMapper;
 
     /**
      * 加密消息包装器
@@ -136,6 +141,7 @@ public class FlowController extends BaseController {
      */
     @RequestMapping("/upload")
     @LogAnnotation
+    @Transactional(rollbackFor = Exception.class)
     public String uploadFlowData(@RequestBody String rawData, String secret) {
         // 1. 验证节点权限
         if (!isValidNode(secret)) {
@@ -212,6 +218,11 @@ public class FlowController extends BaseController {
      * 处理流量数据的核心逻辑
      */
     private String processFlowData(FlowDto flowDataList) {
+        if (flowDataList.getD() == null || flowDataList.getU() == null
+                || flowDataList.getD() < 0 || flowDataList.getU() < 0) {
+            throw new IllegalArgumentException("流量数据无效");
+        }
+
         String[] serviceIds = parseServiceName(flowDataList.getN());
         String forwardId = serviceIds[0];
         String userId = serviceIds[1];
@@ -229,9 +240,11 @@ public class FlowController extends BaseController {
         FlowDto flowStats = filterFlowData(flowDataList, tunnel, flowType);
 
         // 先更新所有流量统计 - 确保流量数据的一致性
-        updateForwardFlow(forwardId, flowStats);
-        updateUserFlow(userId, flowStats);
+        requireUpdated("转发流量", updateForwardFlow(forwardId, flowStats));
+        requireUpdated("用户流量", updateUserFlow(userId, flowStats));
         updateUserTunnelFlow(userTunnelId, flowStats);
+        requireUpdated("站点累计流量", siteTrafficMapper.increment(
+                flowStats.getD(), flowStats.getU(), System.currentTimeMillis()));
 
         // 7. 检查和服务暂停操作
         String name = buildServiceName(forwardId, userId, userTunnelId);
@@ -364,32 +377,38 @@ public class FlowController extends BaseController {
         return tunnel.getFlow();
     }
 
-    private void updateForwardFlow(String forwardId, FlowDto flowStats) {
+    private int updateForwardFlow(String forwardId, FlowDto flowStats) {
         UpdateWrapper<Forward> updateWrapper = new UpdateWrapper<>();
         updateWrapper.eq("id", forwardId);
         updateWrapper.setSql("in_flow = in_flow + " + flowStats.getD());
         updateWrapper.setSql("out_flow = out_flow + " + flowStats.getU());
-        forwardService.update(null, updateWrapper);
+        return forwardService.update(null, updateWrapper) ? 1 : 0;
     }
 
-    private void updateUserFlow(String userId, FlowDto flowStats) {
+    private int updateUserFlow(String userId, FlowDto flowStats) {
         UpdateWrapper<User> updateWrapper = new UpdateWrapper<>();
         updateWrapper.eq("id", userId);
         updateWrapper.setSql("in_flow = in_flow + " + flowStats.getD());
         updateWrapper.setSql("out_flow = out_flow + " + flowStats.getU());
-        userService.update(null, updateWrapper);
+        return userService.update(null, updateWrapper) ? 1 : 0;
     }
 
     private void updateUserTunnelFlow(String userTunnelId, FlowDto flowStats) {
         if (Objects.equals(userTunnelId, DEFAULT_USER_TUNNEL_ID)) {
-            return; // 默认隧道不需要更新，返回成功
+            return; // 默认隧道不需要更新
         }
 
         UpdateWrapper<UserTunnel> updateWrapper = new UpdateWrapper<>();
         updateWrapper.eq("id", userTunnelId);
         updateWrapper.setSql("in_flow = in_flow + " + flowStats.getD());
         updateWrapper.setSql("out_flow = out_flow + " + flowStats.getU());
-        userTunnelService.update(null, updateWrapper);
+        requireUpdated("用户隧道流量", userTunnelService.update(null, updateWrapper) ? 1 : 0);
+    }
+
+    private void requireUpdated(String counterName, int updateCount) {
+        if (updateCount != 1) {
+            throw new IllegalStateException(counterName + "更新失败");
+        }
     }
 
     private boolean isLimitCheckDue(String key) {

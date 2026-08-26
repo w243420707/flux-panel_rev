@@ -14,6 +14,7 @@ import com.admin.entity.*;
 import com.admin.mapper.ForwardMapper;
 import com.admin.mapper.UserMapper;
 import com.admin.mapper.UserTunnelMapper;
+import com.admin.mapper.SiteTrafficMapper;
 import com.admin.service.*;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -115,6 +116,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Resource
     StatisticsFlowService statisticsFlowService;
+
+    @Resource
+    private SiteTrafficMapper siteTrafficMapper;
 
     @Resource
     private ImageCaptchaApplication application;
@@ -688,6 +692,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (Objects.equals(roleId, ADMIN_ROLE_ID)) {
             packageDto.setNodeOnlineCount(nodeService.count(new QueryWrapper<Node>().eq("status", 1)));
             packageDto.setNodeTotalCount(nodeService.count());
+
+            try {
+                SiteTraffic siteTraffic = siteTrafficMapper.selectSingleton();
+                if (siteTraffic == null || siteTraffic.getTotalInFlow() == null || siteTraffic.getTotalOutFlow() == null) {
+                    log.warn("site_traffic singleton is missing or incomplete; admin package omits siteTraffic");
+                } else {
+                    packageDto.setSiteTraffic(new SiteTrafficDto(
+                            siteTraffic.getTotalInFlow(), siteTraffic.getTotalOutFlow()));
+                }
+            } catch (Exception e) {
+                log.warn("site_traffic read failed; admin package omits siteTraffic: {}", e.getMessage());
+            }
         }
         
         return packageDto;
