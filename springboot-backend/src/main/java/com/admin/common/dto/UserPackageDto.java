@@ -1,6 +1,7 @@
 package com.admin.common.dto;
 
 import com.admin.entity.StatisticsFlow;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.util.List;
@@ -40,6 +41,12 @@ public class UserPackageDto {
      * 管理员可见：总节点数
      */
     private Integer nodeTotalCount;
+
+    /**
+     * 管理员可见：全站累计计费流量
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private SiteTrafficDto siteTraffic;
     
     /**
      * 用户基本信息
