@@ -412,7 +412,7 @@ verify_binary_checksum() {
     return 0
   fi
 
-  expected="$(awk -v name="${manifest_name}" '$2 == name {print $1; exit}' "${manifest_file}")"
+  expected="$(awk -v name="${manifest_name}" '$2 == name || $2 == "*" name {print $1; exit}' "${manifest_file}")"
   rm -f "${manifest_file}"
 
   if [[ -z "${expected}" ]]; then

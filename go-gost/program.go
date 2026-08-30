@@ -48,6 +48,14 @@ func (p *program) Init(env svc.Environment) error {
 }
 
 func (p *program) Start() error {
+	backupPath, recovered, err := config.EnsureRuntimeFile("gost.json")
+	if err != nil {
+		return err
+	}
+	if recovered {
+		logger.Default().Warnf("检测到损坏的 gost.json，已备份为 %s，并恢复为空配置", backupPath)
+	}
+
 	cfg, err := parser.Parse()
 	if err != nil {
 		return err
@@ -222,6 +230,14 @@ func (p *program) reload(ctx context.Context) {
 }
 
 func (p *program) reloadConfig() error {
+	backupPath, recovered, err := config.EnsureRuntimeFile("gost.json")
+	if err != nil {
+		return err
+	}
+	if recovered {
+		logger.Default().Warnf("检测到损坏的 gost.json，已备份为 %s，并恢复为空配置", backupPath)
+	}
+
 	cfg, err := parser.Parse()
 	if err != nil {
 		return err

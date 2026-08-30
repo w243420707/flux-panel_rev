@@ -129,6 +129,11 @@ type WebSocketReporter struct {
 	aesCrypto      *crypto.AESCrypto // 新增：AES加密器
 }
 
+const (
+	websocketPongWait     = 90 * time.Second
+	websocketKeepaliveInt = 20 * time.Second
+)
+
 // NewWebSocketReporter 创建一个新的WebSocket报告器
 func NewWebSocketReporter(serverURL string, secret string) *WebSocketReporter {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -267,6 +272,13 @@ func (w *WebSocketReporter) connect() error {
 	w.conn = conn
 	w.connected = true
 
+	// Keep the read side alive while there are no panel commands. The old
+	// 30-second deadline treated an idle command channel as a broken socket.
+	_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(websocketPongWait))
+	})
+
 	// 设置关闭处理器来检测连接状态
 	w.conn.SetCloseHandler(func(code int, text string) error {
 		w.connMutex.Lock()
@@ -302,11 +314,18 @@ func (w *WebSocketReporter) handleConnection() {
 	// 主发送循环
 	ticker := time.NewTicker(w.pingInterval)
 	defer ticker.Stop()
+	keepaliveTicker := time.NewTicker(websocketKeepaliveInt)
+	defer keepaliveTicker.Stop()
 
 	for {
 		select {
 		case <-w.ctx.Done():
 			return
+		case <-keepaliveTicker.C:
+			if err := w.sendWebSocketPing(); err != nil {
+				fmt.Printf("❌ WebSocket保活失败: %v，准备重连\n", err)
+				return
+			}
 		case <-ticker.C:
 			// 检查连接状态
 			w.connMutex.Lock()
@@ -456,9 +475,6 @@ func (w *WebSocketReporter) receiveMessages() {
 				return
 			}
 
-			// 设置读取超时
-			conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-
 			messageType, message, err := conn.ReadMessage()
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
@@ -470,10 +486,30 @@ func (w *WebSocketReporter) receiveMessages() {
 				return
 			}
 
+			// Any valid server frame also proves the connection is alive.
+			_ = conn.SetReadDeadline(time.Now().Add(websocketPongWait))
+
 			// 处理接收到的消息
 			w.handleReceivedMessage(messageType, message)
 		}
 	}
+}
+
+func (w *WebSocketReporter) sendWebSocketPing() error {
+	w.connMutex.Lock()
+	defer w.connMutex.Unlock()
+
+	if w.conn == nil || !w.connected {
+		return fmt.Errorf("连接未建立")
+	}
+
+	w.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := w.conn.WriteControl(websocket.PingMessage, []byte("flux-panel-node"), time.Now().Add(5*time.Second)); err != nil {
+		w.connected = false
+		return err
+	}
+
+	return nil
 }
 
 // handleReceivedMessage 处理接收到的消息
@@ -643,13 +679,17 @@ func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
 	}
 
 	// 发送响应
+	if saveErr := saveConfig(); saveErr != nil {
+		logger.Default().Errorf("保存节点运行配置失败 type=%s requestId=%s: %v", cmd.Type, cmd.RequestId, saveErr)
+		if err == nil {
+			err = fmt.Errorf("保存节点运行配置失败: %w", saveErr)
+		}
+	}
 	if err != nil {
-		saveConfig()
 		response.Success = false
 		response.Message = err.Error()
 		logger.Default().Errorf("面板命令执行失败 type=%s requestId=%s: %v", cmd.Type, cmd.RequestId, err)
 	} else {
-		saveConfig()
 		response.Success = true
 		response.Message = "OK"
 		logger.Default().Debugf("面板命令执行成功 type=%s requestId=%s", cmd.Type, cmd.RequestId)
@@ -1184,7 +1224,7 @@ func detectPublicIPWithNetwork(network string, endpoints []string) string {
 			if err != nil {
 				return
 			}
-			req.Header.Set("User-Agent", "flux-panel-node/1.3.13")
+			req.Header.Set("User-Agent", "flux-panel-node")
 			resp, err := client.Do(req)
 			if err != nil {
 				return

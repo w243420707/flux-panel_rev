@@ -42,7 +42,7 @@ main() {
   if command -v sha256sum >/dev/null 2>&1; then
     (
       cd "${RELEASE_DIR}"
-      sha256sum gost-linux-* > SHA256SUMS
+      sha256sum gost-linux-* | sed 's/ \*/  /' > SHA256SUMS
     )
     echo "[INFO] Wrote ${RELEASE_DIR}/SHA256SUMS"
   else
