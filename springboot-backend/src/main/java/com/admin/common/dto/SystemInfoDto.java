@@ -47,6 +47,18 @@ public class SystemInfoDto {
     private Double memoryUsage;
 
     /**
+     * 已使用内存（字节）
+     */
+    @JsonProperty("memory_used")
+    private Long memoryUsed;
+
+    /**
+     * 内存总量（字节）
+     */
+    @JsonProperty("memory_total")
+    private Long memoryTotal;
+
+    /**
      * Swap使用率（百分比）
      */
     @JsonProperty("swap_usage")

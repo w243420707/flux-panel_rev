@@ -7,6 +7,8 @@ import (
 
 func TestSystemInfoIncludesSwapMetrics(t *testing.T) {
 	data, err := json.Marshal(SystemInfo{
+		MemoryUsed:  512 * 1024 * 1024,
+		MemoryTotal: 2 * 1024 * 1024 * 1024,
 		SwapUsage: 25.5,
 		SwapUsed:  1024,
 		SwapTotal: 4096,
@@ -20,7 +22,7 @@ func TestSystemInfoIncludesSwapMetrics(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	for _, key := range []string{"swap_usage", "swap_used", "swap_total"} {
+	for _, key := range []string{"memory_used", "memory_total", "swap_usage", "swap_used", "swap_total"} {
 		if _, ok := payload[key]; !ok {
 			t.Fatalf("SystemInfo JSON is missing %q: %s", key, data)
 		}

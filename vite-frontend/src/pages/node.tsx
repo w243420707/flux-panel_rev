@@ -36,6 +36,8 @@ interface Node {
   systemInfo?: {
     cpuUsage: number;
     memoryUsage: number;
+    memoryUsed?: number;
+    memoryTotal?: number;
     swapUsage?: number;
     swapUsed?: number;
     swapTotal?: number;
@@ -290,6 +292,8 @@ export default function NodePage() {
           systemInfo &&
           (
             Object.prototype.hasOwnProperty.call(systemInfo, "memory_usage") ||
+            Object.prototype.hasOwnProperty.call(systemInfo, "memory_used") ||
+            Object.prototype.hasOwnProperty.call(systemInfo, "memory_total") ||
             Object.prototype.hasOwnProperty.call(systemInfo, "swap_usage") ||
             Object.prototype.hasOwnProperty.call(systemInfo, "swap_used") ||
             Object.prototype.hasOwnProperty.call(systemInfo, "swap_total") ||
@@ -307,6 +311,9 @@ export default function NodePage() {
             Object.prototype.hasOwnProperty.call(systemInfo, "swap_usage") ||
             Object.prototype.hasOwnProperty.call(systemInfo, "swap_used") ||
             Object.prototype.hasOwnProperty.call(systemInfo, "swap_total");
+          const hasMemoryMetrics =
+            Object.prototype.hasOwnProperty.call(systemInfo, "memory_used") ||
+            Object.prototype.hasOwnProperty.call(systemInfo, "memory_total");
           const previousSystemInfo = systemInfoCacheRef.current.get(nodeId);
           // 页面刚连接时后端可能只回放一份快照，优先使用后端缓存的最近速度，避免先显示 0。
           let uploadSpeed = parseFloat(systemInfo.upload_speed) || 0;
@@ -329,6 +336,8 @@ export default function NodePage() {
           nextSystemInfo = {
             cpuUsage: parseFloat(systemInfo.cpu_usage) || 0,
             memoryUsage: parseFloat(systemInfo.memory_usage) || 0,
+            memoryUsed: hasMemoryMetrics ? parseInt(systemInfo.memory_used) || 0 : undefined,
+            memoryTotal: hasMemoryMetrics ? parseInt(systemInfo.memory_total) || 0 : undefined,
             swapUsage: hasSwapMetrics ? parseFloat(systemInfo.swap_usage) || 0 : undefined,
             swapUsed: hasSwapMetrics ? parseInt(systemInfo.swap_used) || 0 : undefined,
             swapTotal: hasSwapMetrics ? parseInt(systemInfo.swap_total) || 0 : undefined,
@@ -447,6 +456,19 @@ export default function NodePage() {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const formatResourceSize = (bytes?: number): string => {
+    if (!bytes || bytes <= 0) return '0B';
+
+    const units = ['B', 'K', 'M', 'G', 'T'];
+    const exponent = Math.min(
+      Math.floor(Math.log(bytes) / Math.log(1024)),
+      units.length - 1
+    );
+    const value = bytes / Math.pow(1024, exponent);
+    const precision = exponent >= 2 ? (value >= 10 ? 0 : 1) : 0;
+    return `${value.toFixed(precision)}${units[exponent]}`;
   };
 
   // 获取进度条颜色
@@ -951,7 +973,9 @@ export default function NodePage() {
                           <span>内存</span>
                           <span className="font-mono">
                             {node.connectionStatus === 'online' && node.systemInfo 
-                              ? `${node.systemInfo.memoryUsage.toFixed(1)}%` 
+                              ? node.systemInfo.memoryTotal
+                                ? `${formatResourceSize(node.systemInfo.memoryUsed)} / ${formatResourceSize(node.systemInfo.memoryTotal)}`
+                                : '待更新'
                               : '-'
                             }
                           </span>
@@ -973,7 +997,7 @@ export default function NodePage() {
                             className="min-w-0 truncate font-mono"
                             title={
                               node.connectionStatus === 'online' && node.systemInfo?.swapTotal
-                                ? `${formatTraffic(node.systemInfo.swapUsed || 0)} / ${formatTraffic(node.systemInfo.swapTotal)}`
+                                ? `${formatResourceSize(node.systemInfo.swapUsed)} / ${formatResourceSize(node.systemInfo.swapTotal)}`
                                 : undefined
                             }
                           >
@@ -982,7 +1006,7 @@ export default function NodePage() {
                               : node.systemInfo.swapUsage === undefined
                                 ? '待更新'
                                 : node.systemInfo.swapTotal
-                                  ? `${node.systemInfo.swapUsage.toFixed(1)}%`
+                                  ? `${formatResourceSize(node.systemInfo.swapUsed)} / ${formatResourceSize(node.systemInfo.swapTotal)}`
                                   : '未配置'
                             }
                           </span>
