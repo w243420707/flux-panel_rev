@@ -31,6 +31,9 @@ type SystemInfo struct {
 	BytesTransmitted uint64  `json:"bytes_transmitted"` // 发送字节数
 	CPUUsage         float64 `json:"cpu_usage"`         // CPU使用率（百分比）
 	MemoryUsage      float64 `json:"memory_usage"`      // 内存使用率（百分比）
+	SwapUsage        float64 `json:"swap_usage"`        // Swap使用率（百分比）
+	SwapUsed         uint64  `json:"swap_used"`         // 已使用Swap（字节）
+	SwapTotal        uint64  `json:"swap_total"`        // Swap总量（字节）
 	PublicIP         string  `json:"public_ip,omitempty"`
 	PublicIPv4       string  `json:"public_ipv4,omitempty"`
 	PublicIPv6       string  `json:"public_ipv6,omitempty"`
@@ -49,7 +52,10 @@ type CPUInfo struct {
 
 // MemoryInfo 内存信息
 type MemoryInfo struct {
-	Usage float64 `json:"usage"` // 内存使用率（百分比）
+	Usage     float64 `json:"usage"`      // 内存使用率（百分比）
+	SwapUsage float64 `json:"swap_usage"` // Swap使用率（百分比）
+	SwapUsed  uint64  `json:"swap_used"`  // 已使用Swap（字节）
+	SwapTotal uint64  `json:"swap_total"` // Swap总量（字节）
 }
 
 // CommandMessage 命令消息结构体
@@ -359,6 +365,9 @@ func (w *WebSocketReporter) collectSystemInfo() SystemInfo {
 		BytesTransmitted: networkStats.BytesTransmitted,
 		CPUUsage:         cpuInfo.Usage,
 		MemoryUsage:      memoryInfo.Usage,
+		SwapUsage:        memoryInfo.SwapUsage,
+		SwapUsed:         memoryInfo.SwapUsed,
+		SwapTotal:        memoryInfo.SwapTotal,
 		PublicIP:         publicIP,
 		PublicIPv4:       publicIPv4,
 		PublicIPv6:       publicIPv6,
@@ -1091,11 +1100,16 @@ func getMemoryInfo() MemoryInfo {
 	var memInfo MemoryInfo
 
 	vmStat, err := mem.VirtualMemory()
-	if err != nil {
-		return memInfo
+	if err == nil {
+		memInfo.Usage = vmStat.UsedPercent
 	}
 
-	memInfo.Usage = vmStat.UsedPercent
+	swapStat, err := mem.SwapMemory()
+	if err == nil {
+		memInfo.SwapUsage = swapStat.UsedPercent
+		memInfo.SwapUsed = swapStat.Used
+		memInfo.SwapTotal = swapStat.Total
+	}
 
 	return memInfo
 }

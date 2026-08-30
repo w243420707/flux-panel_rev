@@ -13,6 +13,11 @@ DEFAULT_BINARY_BASE_URL="${GOST_DEFAULT_BINARY_BASE_URL:-https://raw.githubuserc
 BINARY_BASE_URL="${GOST_BINARY_BASE_URL:-}"
 BINARY_FALLBACK_BASE_URL="${GOST_BINARY_FALLBACK_BASE_URL:-}"
 BINARY_SOURCE_MODE="${GOST_BINARY_SOURCE_MODE:-}"
+SWAP_FILE="${GOST_SWAP_FILE:-/swapfile}"
+SWAP_SIZE_MB="${GOST_SWAP_SIZE_MB:-}"
+SWAP_MIN_FREE_MB="${GOST_SWAP_MIN_FREE_MB:-1024}"
+SWAPPINESS="${GOST_SWAPPINESS:-10}"
+SWAPPINESS_FILE="/etc/sysctl.d/99-flux-panel-swap.conf"
 
 ACTION=""
 SERVER_ADDR=""
@@ -45,6 +50,7 @@ Actions:
   uninstall   Stop and remove the node
   status      Show service status
   logs        Follow service logs
+  swap        Configure or check swap
   menu        Interactive menu (default)
 
 Options:
@@ -64,6 +70,11 @@ Binary source:
 
 Supported Linux architectures:
   amd64, arm64, armv7, armv6
+
+Swap defaults:
+  Existing swap is preserved. When no swap is active, the installer creates
+  2 GB, 4 GB, or 8 GB according to system memory and keeps at least 1 GB free.
+  Set GOST_SWAP_SIZE_MB to override the automatic target size.
 EOF
 }
 
@@ -153,7 +164,12 @@ detect_os() {
 }
 
 install_packages() {
-  if command -v curl >/dev/null 2>&1 && command -v logrotate >/dev/null 2>&1 && [[ "${INIT_SYSTEM}" == "systemd" ]]; then
+  if command -v curl >/dev/null 2>&1 \
+    && command -v logrotate >/dev/null 2>&1 \
+    && command -v mkswap >/dev/null 2>&1 \
+    && command -v swapon >/dev/null 2>&1 \
+    && command -v sysctl >/dev/null 2>&1 \
+    && [[ "${INIT_SYSTEM}" == "systemd" ]]; then
     return 0
   fi
 
@@ -161,26 +177,217 @@ install_packages() {
   case "${PKG_MANAGER}" in
     apt-get)
       apt-get update
-      apt-get install -y curl ca-certificates logrotate
+      apt-get install -y curl ca-certificates logrotate util-linux procps
       ;;
     dnf)
-      dnf install -y curl ca-certificates logrotate
+      dnf install -y curl ca-certificates logrotate util-linux procps-ng
       ;;
     yum)
-      yum install -y curl ca-certificates logrotate
+      yum install -y curl ca-certificates logrotate util-linux procps-ng
       ;;
     apk)
-      apk add --no-cache curl ca-certificates logrotate
+      apk add --no-cache curl ca-certificates logrotate util-linux procps
       ;;
     pacman)
-      pacman -Sy --noconfirm curl ca-certificates logrotate
+      pacman -Sy --noconfirm curl ca-certificates logrotate util-linux procps-ng
       ;;
     zypper)
-      zypper --non-interactive install curl ca-certificates logrotate
+      zypper --non-interactive install curl ca-certificates logrotate util-linux procps
       ;;
   esac
 
   [[ "${INIT_SYSTEM}" == "systemd" ]] || die "systemd is required for this installer. Detected init system: ${INIT_SYSTEM}."
+}
+
+is_unsigned_integer() {
+  [[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+recommended_swap_mb() {
+  local memory_mb
+
+  if [[ -n "${SWAP_SIZE_MB}" ]]; then
+    if ! is_unsigned_integer "${SWAP_SIZE_MB}" || [[ "${SWAP_SIZE_MB}" -lt 512 ]]; then
+      warn "Ignoring invalid GOST_SWAP_SIZE_MB=${SWAP_SIZE_MB}; using automatic sizing." >&2
+    else
+      printf '%s' "${SWAP_SIZE_MB}"
+      return 0
+    fi
+  fi
+
+  memory_mb="$(awk '/^MemTotal:/ { print int($2 / 1024); exit }' /proc/meminfo 2>/dev/null || true)"
+  if ! is_unsigned_integer "${memory_mb}" || [[ "${memory_mb}" -le 0 ]]; then
+    memory_mb=2048
+  fi
+
+  if [[ "${memory_mb}" -le 1024 ]]; then
+    printf '2048'
+  elif [[ "${memory_mb}" -le 4096 ]]; then
+    printf '4096'
+  else
+    printf '8192'
+  fi
+}
+
+current_swap_mb() {
+  awk '/^SwapTotal:/ { print int($2 / 1024); exit }' /proc/meminfo 2>/dev/null || printf '0'
+}
+
+configure_swappiness() {
+  local value="${SWAPPINESS}" temp_file
+
+  if ! is_unsigned_integer "${value}" || [[ "${value}" -gt 100 ]]; then
+    warn "Invalid GOST_SWAPPINESS=${value}; using 10."
+    value=10
+  fi
+  SWAPPINESS="${value}"
+
+  if [[ -d /etc/sysctl.d ]]; then
+    temp_file="${SWAPPINESS_FILE}.tmp.$$"
+    if printf 'vm.swappiness = %s\n' "${value}" > "${temp_file}"; then
+      chmod 644 "${temp_file}"
+      if ! mv -f "${temp_file}" "${SWAPPINESS_FILE}"; then
+        rm -f "${temp_file}"
+        warn "Could not persist vm.swappiness."
+      fi
+    else
+      rm -f "${temp_file}"
+      warn "Could not persist vm.swappiness."
+    fi
+  fi
+
+  if command -v sysctl >/dev/null 2>&1; then
+    sysctl -w "vm.swappiness=${value}" >/dev/null 2>&1 || warn "Could not apply vm.swappiness=${value}."
+  elif [[ -w /proc/sys/vm/swappiness ]]; then
+    printf '%s' "${value}" > /proc/sys/vm/swappiness || warn "Could not apply vm.swappiness=${value}."
+  fi
+}
+
+is_swap_active() {
+  local target="$1"
+  awk -v target="${target}" 'NR > 1 && $1 == target { found = 1 } END { exit(found ? 0 : 1) }' /proc/swaps 2>/dev/null
+}
+
+ensure_fstab_swap_entry() {
+  local target="$1"
+
+  if [[ ! -f /etc/fstab ]] && ! touch /etc/fstab; then
+    warn "Could not create /etc/fstab; swap is active but may not survive a reboot."
+    return 0
+  fi
+  if awk -v target="${target}" '$1 == target { found = 1 } END { exit(found ? 0 : 1) }' /etc/fstab; then
+    return 0
+  fi
+
+  printf '%s none swap sw 0 0\n' "${target}" >> /etc/fstab || warn "Could not persist ${target} in /etc/fstab."
+}
+
+ensure_swap() {
+  local target_mb existing_mb needed_mb available_mb create_mb reserve_mb
+  local swap_path swap_dir command_name
+
+  case "${VIRT_TYPE}" in
+    openvz|lxc|lxc-libvirt|docker|podman|systemd-nspawn|wsl)
+      warn "Swap is managed by the host in ${VIRT_TYPE}; skipped swap-file creation."
+      return 0
+      ;;
+  esac
+
+  configure_swappiness
+
+  for command_name in awk dd df mkswap swapon; do
+    if ! command -v "${command_name}" >/dev/null 2>&1; then
+      warn "Cannot configure swap because ${command_name} is unavailable."
+      return 0
+    fi
+  done
+
+  target_mb="$(recommended_swap_mb)"
+  existing_mb="$(current_swap_mb)"
+  if ! is_unsigned_integer "${existing_mb}"; then
+    existing_mb=0
+  fi
+
+  if [[ "${existing_mb}" -ge "${target_mb}" ]]; then
+    log "Swap is already available: ${existing_mb} MB (target ${target_mb} MB)."
+    return 0
+  fi
+
+  if [[ "${existing_mb}" -gt 0 ]]; then
+    log "Existing swap is preserved: ${existing_mb} MB."
+  fi
+
+  needed_mb=$((target_mb - existing_mb))
+  swap_path="${SWAP_FILE}"
+
+  if [[ -e "${swap_path}" ]]; then
+    if ! is_swap_active "${swap_path}" && swapon "${swap_path}" >/dev/null 2>&1; then
+      ensure_fstab_swap_entry "${swap_path}"
+      existing_mb="$(current_swap_mb)"
+      if [[ "${existing_mb}" -ge "${target_mb}" ]]; then
+        log "Activated existing swap file ${swap_path}: ${existing_mb} MB total."
+        return 0
+      fi
+      needed_mb=$((target_mb - existing_mb))
+    fi
+    swap_path="${SWAP_FILE}.flux"
+  fi
+
+  if [[ -e "${swap_path}" ]]; then
+    if is_swap_active "${swap_path}"; then
+      warn "Managed swap file ${swap_path} is active but total swap is below the target; it will not be resized while in use."
+    else
+      warn "Path ${swap_path} already exists and is not active swap; it will not be overwritten."
+    fi
+    return 0
+  fi
+
+  swap_dir="$(dirname "${swap_path}")"
+  available_mb="$(df -Pm "${swap_dir}" 2>/dev/null | awk 'NR == 2 { print $4; exit }')"
+  if ! is_unsigned_integer "${available_mb}"; then
+    warn "Could not determine free disk space; skipped swap-file creation."
+    return 0
+  fi
+
+  reserve_mb="${SWAP_MIN_FREE_MB}"
+  if ! is_unsigned_integer "${reserve_mb}" || [[ "${reserve_mb}" -lt 512 ]]; then
+    reserve_mb=1024
+  fi
+  if [[ "${available_mb}" -le $((reserve_mb + 512)) ]]; then
+    warn "Only ${available_mb} MB disk space is free; skipped swap-file creation."
+    return 0
+  fi
+
+  create_mb="${needed_mb}"
+  if [[ "${create_mb}" -gt $((available_mb - reserve_mb)) ]]; then
+    create_mb=$((((available_mb - reserve_mb) / 256) * 256))
+    warn "Disk space is limited; reducing new swap from ${needed_mb} MB to ${create_mb} MB."
+  fi
+  if [[ "${create_mb}" -lt 512 ]]; then
+    warn "Less than 512 MB can be allocated safely; skipped swap-file creation."
+    return 0
+  fi
+
+  log "Creating ${create_mb} MB swap file at ${swap_path}..."
+  if ! dd if=/dev/zero of="${swap_path}" bs=1M count="${create_mb}" status=none 2>/dev/null; then
+    rm -f "${swap_path}"
+    if ! dd if=/dev/zero of="${swap_path}" bs=1M count="${create_mb}" >/dev/null 2>&1; then
+      rm -f "${swap_path}"
+      warn "Swap-file allocation failed; node installation will continue without changing swap."
+      return 0
+    fi
+  fi
+
+  chmod 600 "${swap_path}"
+  if ! mkswap "${swap_path}" >/dev/null 2>&1 || ! swapon "${swap_path}" >/dev/null 2>&1; then
+    rm -f "${swap_path}"
+    warn "This VPS does not allow the generated swap file; node installation will continue without it."
+    return 0
+  fi
+
+  ensure_fstab_swap_entry "${swap_path}"
+  existing_mb="$(current_swap_mb)"
+  log "Swap enabled: ${existing_mb} MB total, vm.swappiness=${SWAPPINESS}."
 }
 
 binary_name() {
@@ -548,6 +755,7 @@ ensure_service_running() {
 install_flow() {
   detect_os
   install_packages
+  ensure_swap
   prompt_config
   resolve_binary_source
 
@@ -569,6 +777,7 @@ install_flow() {
 update_flow() {
   detect_os
   install_packages
+  ensure_swap
 
   [[ -d "${INSTALL_DIR}" ]] || die "The node is not installed."
   [[ -x "${INSTALL_DIR}/${APP_NAME}" ]] || die "Binary not found in ${INSTALL_DIR}."
@@ -620,6 +829,11 @@ status_flow() {
   else
     warn "Service file not found."
   fi
+
+  if [[ -r /proc/swaps ]]; then
+    printf '\nActive swap:\n'
+    cat /proc/swaps
+  fi
 }
 
 logs_flow() {
@@ -629,6 +843,15 @@ logs_flow() {
   else
     journalctl -u "${APP_NAME}" -f --no-pager
   fi
+}
+
+swap_flow() {
+  detect_os
+  install_packages
+  ensure_swap
+
+  printf '\nActive swap:\n'
+  cat /proc/swaps 2>/dev/null || true
 }
 
 show_menu() {
@@ -641,6 +864,7 @@ show_menu() {
 3. Uninstall
 4. Status
 5. Logs
+6. Configure / check swap
 0. Exit
 ===============================================
 EOF
@@ -649,7 +873,7 @@ EOF
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      install|update|uninstall|status|logs|menu)
+      install|update|uninstall|status|logs|swap|menu)
         ACTION="$1"
         shift
         ;;
@@ -709,16 +933,18 @@ main() {
     uninstall) uninstall_flow ;;
     status) status_flow ;;
     logs) logs_flow ;;
+    swap) swap_flow ;;
     menu)
       while true; do
         show_menu
-        read -r -p "Choose [0-5]: " choice
+        read -r -p "Choose [0-6]: " choice
         case "${choice}" in
           1) install_flow; break ;;
           2) update_flow; break ;;
           3) uninstall_flow; break ;;
           4) status_flow ;;
           5) logs_flow ;;
+          6) swap_flow ;;
           0) exit 0 ;;
           *) echo "Invalid choice." ;;
         esac
@@ -727,4 +953,6 @@ main() {
   esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

@@ -36,6 +36,9 @@ interface Node {
   systemInfo?: {
     cpuUsage: number;
     memoryUsage: number;
+    swapUsage?: number;
+    swapUsed?: number;
+    swapTotal?: number;
     uploadTraffic: number;
     downloadTraffic: number;
     uploadSpeed: number;
@@ -287,6 +290,9 @@ export default function NodePage() {
           systemInfo &&
           (
             Object.prototype.hasOwnProperty.call(systemInfo, "memory_usage") ||
+            Object.prototype.hasOwnProperty.call(systemInfo, "swap_usage") ||
+            Object.prototype.hasOwnProperty.call(systemInfo, "swap_used") ||
+            Object.prototype.hasOwnProperty.call(systemInfo, "swap_total") ||
             Object.prototype.hasOwnProperty.call(systemInfo, "cpu_usage") ||
             Object.prototype.hasOwnProperty.call(systemInfo, "bytes_received") ||
             Object.prototype.hasOwnProperty.call(systemInfo, "bytes_transmitted") ||
@@ -297,6 +303,10 @@ export default function NodePage() {
           const currentUpload = parseInt(systemInfo.bytes_transmitted) || 0;
           const currentDownload = parseInt(systemInfo.bytes_received) || 0;
           const currentUptime = parseInt(systemInfo.uptime) || 0;
+          const hasSwapMetrics =
+            Object.prototype.hasOwnProperty.call(systemInfo, "swap_usage") ||
+            Object.prototype.hasOwnProperty.call(systemInfo, "swap_used") ||
+            Object.prototype.hasOwnProperty.call(systemInfo, "swap_total");
           const previousSystemInfo = systemInfoCacheRef.current.get(nodeId);
           // 页面刚连接时后端可能只回放一份快照，优先使用后端缓存的最近速度，避免先显示 0。
           let uploadSpeed = parseFloat(systemInfo.upload_speed) || 0;
@@ -319,6 +329,9 @@ export default function NodePage() {
           nextSystemInfo = {
             cpuUsage: parseFloat(systemInfo.cpu_usage) || 0,
             memoryUsage: parseFloat(systemInfo.memory_usage) || 0,
+            swapUsage: hasSwapMetrics ? parseFloat(systemInfo.swap_usage) || 0 : undefined,
+            swapUsed: hasSwapMetrics ? parseInt(systemInfo.swap_used) || 0 : undefined,
+            swapTotal: hasSwapMetrics ? parseInt(systemInfo.swap_total) || 0 : undefined,
             uploadTraffic: currentUpload,
             downloadTraffic: currentDownload,
             uploadSpeed,
@@ -912,7 +925,7 @@ export default function NodePage() {
 
                   {/* 系统监控 */}
                   <div className="space-y-3 mb-4">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-3 gap-3">
                       <div>
                         <div className="flex justify-between text-xs mb-1">
                           <span>CPU</span>
@@ -951,6 +964,45 @@ export default function NodePage() {
                           )}
                           size="sm"
                           aria-label="内存使用率"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between gap-1 text-xs mb-1">
+                          <span>Swap</span>
+                          <span
+                            className="min-w-0 truncate font-mono"
+                            title={
+                              node.connectionStatus === 'online' && node.systemInfo?.swapTotal
+                                ? `${formatTraffic(node.systemInfo.swapUsed || 0)} / ${formatTraffic(node.systemInfo.swapTotal)}`
+                                : undefined
+                            }
+                          >
+                            {node.connectionStatus !== 'online' || !node.systemInfo
+                              ? '-'
+                              : node.systemInfo.swapUsage === undefined
+                                ? '待更新'
+                                : node.systemInfo.swapTotal
+                                  ? `${node.systemInfo.swapUsage.toFixed(1)}%`
+                                  : '未配置'
+                            }
+                          </span>
+                        </div>
+                        <Progress
+                          value={
+                            node.connectionStatus === 'online' && node.systemInfo?.swapUsage !== undefined
+                              ? node.systemInfo.swapUsage
+                              : 0
+                          }
+                          color={getProgressColor(
+                            node.connectionStatus === 'online' && node.systemInfo?.swapUsage !== undefined
+                              ? node.systemInfo.swapUsage
+                              : 0,
+                            node.connectionStatus !== 'online' ||
+                              node.systemInfo?.swapUsage === undefined ||
+                              !node.systemInfo.swapTotal
+                          )}
+                          size="sm"
+                          aria-label="Swap使用率"
                         />
                       </div>
                     </div>

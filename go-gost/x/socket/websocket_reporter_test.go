@@ -1,6 +1,31 @@
 package socket
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestSystemInfoIncludesSwapMetrics(t *testing.T) {
+	data, err := json.Marshal(SystemInfo{
+		SwapUsage: 25.5,
+		SwapUsed:  1024,
+		SwapTotal: 4096,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	for _, key := range []string{"swap_usage", "swap_used", "swap_total"} {
+		if _, ok := payload[key]; !ok {
+			t.Fatalf("SystemInfo JSON is missing %q: %s", key, data)
+		}
+	}
+}
 
 func TestBuildWebSocketURL(t *testing.T) {
 	tests := []struct {
