@@ -947,7 +947,7 @@ export default function NodePage() {
 
                   {/* 系统监控 */}
                   <div className="space-y-3 mb-4">
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 gap-3">
                       <div>
                         <div className="flex justify-between text-xs mb-1">
                           <span>CPU</span>
@@ -971,11 +971,11 @@ export default function NodePage() {
                       <div>
                         <div className="flex justify-between text-xs mb-1">
                           <span>内存</span>
-                          <span className="font-mono">
+                          <span className="whitespace-nowrap font-mono">
                             {node.connectionStatus === 'online' && node.systemInfo 
                               ? node.systemInfo.memoryTotal
                                 ? `${formatResourceSize(node.systemInfo.memoryUsed)} / ${formatResourceSize(node.systemInfo.memoryTotal)}`
-                                : '待更新'
+                                : '-'
                               : '-'
                             }
                           </span>
@@ -993,18 +993,11 @@ export default function NodePage() {
                       <div>
                         <div className="flex justify-between gap-1 text-xs mb-1">
                           <span>Swap</span>
-                          <span
-                            className="min-w-0 truncate font-mono"
-                            title={
-                              node.connectionStatus === 'online' && node.systemInfo?.swapTotal
-                                ? `${formatResourceSize(node.systemInfo.swapUsed)} / ${formatResourceSize(node.systemInfo.swapTotal)}`
-                                : undefined
-                            }
-                          >
+                          <span className="whitespace-nowrap font-mono">
                             {node.connectionStatus !== 'online' || !node.systemInfo
                               ? '-'
                               : node.systemInfo.swapUsage === undefined
-                                ? '待更新'
+                                ? '-'
                                 : node.systemInfo.swapTotal
                                   ? `${formatResourceSize(node.systemInfo.swapUsed)} / ${formatResourceSize(node.systemInfo.swapTotal)}`
                                   : '未配置'
