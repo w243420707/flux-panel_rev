@@ -276,6 +276,19 @@ export default function NodePage() {
         const nextServerIp = publicIp || publicIpv4 || publicIpv6;
         const isIpv4Literal = (value: string) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value.trim());
         const isIpv6Literal = (value: string) => value.includes(':');
+        const getMetric = (...keys: string[]): number | undefined => {
+          for (const key of keys) {
+            const value = systemInfo?.[key];
+            if (value === null || value === undefined || value === '') {
+              continue;
+            }
+            const numberValue = typeof value === 'number' ? value : Number(value);
+            if (Number.isFinite(numberValue)) {
+              return numberValue;
+            }
+          }
+          return undefined;
+        };
 
         const baseRuntimeIpPatch = hasRuntimeIp ? {
           serverIp: nextServerIp,
@@ -288,36 +301,35 @@ export default function NodePage() {
           });
         }
 
+        const memoryUsage = getMetric("memory_usage", "memoryUsage");
+        const memoryUsed = getMetric("memory_used", "memoryUsed");
+        const memoryTotal = getMetric("memory_total", "memoryTotal");
+        const swapUsage = getMetric("swap_usage", "swapUsage");
+        const swapUsed = getMetric("swap_used", "swapUsed");
+        const swapTotal = getMetric("swap_total", "swapTotal");
         const hasSystemMetrics =
           systemInfo &&
-          (
-            Object.prototype.hasOwnProperty.call(systemInfo, "memory_usage") ||
-            Object.prototype.hasOwnProperty.call(systemInfo, "memory_used") ||
-            Object.prototype.hasOwnProperty.call(systemInfo, "memory_total") ||
-            Object.prototype.hasOwnProperty.call(systemInfo, "swap_usage") ||
-            Object.prototype.hasOwnProperty.call(systemInfo, "swap_used") ||
-            Object.prototype.hasOwnProperty.call(systemInfo, "swap_total") ||
-            Object.prototype.hasOwnProperty.call(systemInfo, "cpu_usage") ||
-            Object.prototype.hasOwnProperty.call(systemInfo, "bytes_received") ||
-            Object.prototype.hasOwnProperty.call(systemInfo, "bytes_transmitted") ||
-            Object.prototype.hasOwnProperty.call(systemInfo, "uptime")
-          );
+          [
+            memoryUsage,
+            memoryUsed,
+            memoryTotal,
+            swapUsage,
+            swapUsed,
+            swapTotal,
+            getMetric("cpu_usage", "cpuUsage"),
+            getMetric("bytes_received", "bytesReceived"),
+            getMetric("bytes_transmitted", "bytesTransmitted"),
+            getMetric("uptime")
+          ].some(value => value !== undefined);
         let nextSystemInfo: NonNullable<Node['systemInfo']> | null = null;
         if (hasSystemMetrics) {
-          const currentUpload = parseInt(systemInfo.bytes_transmitted) || 0;
-          const currentDownload = parseInt(systemInfo.bytes_received) || 0;
-          const currentUptime = parseInt(systemInfo.uptime) || 0;
-          const hasSwapMetrics =
-            Object.prototype.hasOwnProperty.call(systemInfo, "swap_usage") ||
-            Object.prototype.hasOwnProperty.call(systemInfo, "swap_used") ||
-            Object.prototype.hasOwnProperty.call(systemInfo, "swap_total");
-          const hasMemoryMetrics =
-            Object.prototype.hasOwnProperty.call(systemInfo, "memory_used") ||
-            Object.prototype.hasOwnProperty.call(systemInfo, "memory_total");
+          const currentUpload = getMetric("bytes_transmitted", "bytesTransmitted") || 0;
+          const currentDownload = getMetric("bytes_received", "bytesReceived") || 0;
+          const currentUptime = getMetric("uptime") || 0;
           const previousSystemInfo = systemInfoCacheRef.current.get(nodeId);
           // 页面刚连接时后端可能只回放一份快照，优先使用后端缓存的最近速度，避免先显示 0。
-          let uploadSpeed = parseFloat(systemInfo.upload_speed) || 0;
-          let downloadSpeed = parseFloat(systemInfo.download_speed) || 0;
+          let uploadSpeed = getMetric("upload_speed", "uploadSpeed") || 0;
+          let downloadSpeed = getMetric("download_speed", "downloadSpeed") || 0;
 
           if (previousSystemInfo && previousSystemInfo.uptime) {
             const timeDiff = currentUptime - previousSystemInfo.uptime;
@@ -334,13 +346,13 @@ export default function NodePage() {
           }
 
           nextSystemInfo = {
-            cpuUsage: parseFloat(systemInfo.cpu_usage) || 0,
-            memoryUsage: parseFloat(systemInfo.memory_usage) || 0,
-            memoryUsed: hasMemoryMetrics ? parseInt(systemInfo.memory_used) || 0 : undefined,
-            memoryTotal: hasMemoryMetrics ? parseInt(systemInfo.memory_total) || 0 : undefined,
-            swapUsage: hasSwapMetrics ? parseFloat(systemInfo.swap_usage) || 0 : undefined,
-            swapUsed: hasSwapMetrics ? parseInt(systemInfo.swap_used) || 0 : undefined,
-            swapTotal: hasSwapMetrics ? parseInt(systemInfo.swap_total) || 0 : undefined,
+            cpuUsage: getMetric("cpu_usage", "cpuUsage") || 0,
+            memoryUsage: memoryUsage || 0,
+            memoryUsed,
+            memoryTotal,
+            swapUsage,
+            swapUsed,
+            swapTotal,
             uploadTraffic: currentUpload,
             downloadTraffic: currentDownload,
             uploadSpeed,
@@ -469,6 +481,28 @@ export default function NodePage() {
     const value = bytes / Math.pow(1024, exponent);
     const precision = exponent >= 2 ? (value >= 10 ? 0 : 1) : 0;
     return `${value.toFixed(precision)}${units[exponent]}`;
+  };
+
+  const formatMemoryMetric = (systemInfo: NonNullable<Node['systemInfo']>): string => {
+    if (systemInfo.memoryTotal && systemInfo.memoryUsed !== undefined) {
+      return `${formatResourceSize(systemInfo.memoryUsed)} / ${formatResourceSize(systemInfo.memoryTotal)}`;
+    }
+    return Number.isFinite(systemInfo.memoryUsage)
+      ? `${systemInfo.memoryUsage.toFixed(1)}%`
+      : '-';
+  };
+
+  const formatSwapMetric = (systemInfo: NonNullable<Node['systemInfo']>): string => {
+    if (systemInfo.swapUsage === undefined) {
+      return '-';
+    }
+    if (systemInfo.swapTotal !== undefined) {
+      if (!systemInfo.swapTotal) {
+        return '未配置';
+      }
+      return `${formatResourceSize(systemInfo.swapUsed)} / ${formatResourceSize(systemInfo.swapTotal)}`;
+    }
+    return `${systemInfo.swapUsage.toFixed(1)}%`;
   };
 
   // 获取进度条颜色
@@ -972,12 +1006,9 @@ export default function NodePage() {
                         <div className="flex justify-between text-xs mb-1">
                           <span>内存</span>
                           <span className="whitespace-nowrap font-mono">
-                            {node.connectionStatus === 'online' && node.systemInfo 
-                              ? node.systemInfo.memoryTotal
-                                ? `${formatResourceSize(node.systemInfo.memoryUsed)} / ${formatResourceSize(node.systemInfo.memoryTotal)}`
-                                : '-'
-                              : '-'
-                            }
+                            {node.connectionStatus === 'online' && node.systemInfo
+                              ? formatMemoryMetric(node.systemInfo)
+                              : '-'}
                           </span>
                         </div>
                         <Progress
@@ -994,14 +1025,9 @@ export default function NodePage() {
                         <div className="flex justify-between gap-1 text-xs mb-1">
                           <span>Swap</span>
                           <span className="whitespace-nowrap font-mono">
-                            {node.connectionStatus !== 'online' || !node.systemInfo
-                              ? '-'
-                              : node.systemInfo.swapUsage === undefined
-                                ? '-'
-                                : node.systemInfo.swapTotal
-                                  ? `${formatResourceSize(node.systemInfo.swapUsed)} / ${formatResourceSize(node.systemInfo.swapTotal)}`
-                                  : '未配置'
-                            }
+                            {node.connectionStatus === 'online' && node.systemInfo
+                              ? formatSwapMetric(node.systemInfo)
+                              : '-'}
                           </span>
                         </div>
                         <Progress
