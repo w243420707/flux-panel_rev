@@ -61,13 +61,15 @@ public class ProbeSyncController {
 
         List<Map<String, Object>> nodes = new ArrayList<>();
         List<Node> sourceNodes = nodeService.list(new QueryWrapper<Node>()
-                .select("id", "name", "server_ip", "server_ipv4", "server_ipv6", "status", "updated_time"));
+                .select("id", "name", "server_ip", "server_ipv4", "server_ipv6", "change_ip_min_interval_minutes", "change_ip_remote_api", "status", "updated_time"));
         for (Node node : sourceNodes) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", node.getId());
             item.put("name", node.getName());
             item.put("host", resolveProbeHost(node));
             item.put("ports", "22");
+            item.put("changeIpMinIntervalMinutes", node.getChangeIpMinIntervalMinutes());
+            item.put("changeIpRemoteApi", normalize(node.getChangeIpRemoteApi()));
             item.put("status", node.getStatus());
             item.put("updatedAt", node.getUpdatedTime());
             nodes.add(item);

@@ -26,6 +26,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("add tunnel.out_node_ids", () -> ensureColumn(connection, "tunnel", "out_node_ids", "ALTER TABLE tunnel ADD COLUMN out_node_ids LONGTEXT NULL AFTER out_node_id"));
             runStep("add node dual-stack runtime ip columns", () -> addNodeRuntimeIpColumns(connection));
             runStep("add node remote change ip token", () -> addNodeRemoteChangeIpToken(connection));
+            runStep("add node remote change ip settings", () -> addNodeRemoteChangeIpSettings(connection));
             runStep("add node wall monitor columns", () -> addNodeWallMonitorColumns(connection));
             runStep("relax node ip columns", () -> relaxNodeIpColumns(connection));
             runStep("widen tunnel ip columns", () -> widenIpColumns(connection));
@@ -183,6 +184,13 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             statement.executeUpdate("UPDATE node SET remote_change_ip_token = REPLACE(UUID(), '-', '') "
                     + "WHERE remote_change_ip_token IS NULL OR remote_change_ip_token = ''");
         }
+    }
+
+    private void addNodeRemoteChangeIpSettings(Connection connection) throws Exception {
+        ensureColumn(connection, "node", "change_ip_min_interval_minutes",
+                "ALTER TABLE node ADD COLUMN change_ip_min_interval_minutes INT NULL AFTER remote_change_ip_token");
+        ensureColumn(connection, "node", "change_ip_remote_api",
+                "ALTER TABLE node ADD COLUMN change_ip_remote_api VARCHAR(1000) NULL AFTER change_ip_min_interval_minutes");
     }
 
     private void addNodeWallMonitorColumns(Connection connection) throws Exception {

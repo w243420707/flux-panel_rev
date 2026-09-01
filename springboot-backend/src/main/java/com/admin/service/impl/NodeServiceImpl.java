@@ -622,6 +622,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     private Node buildNewNode(NodeDto nodeDto) {
         Node node = new Node();
         BeanUtils.copyProperties(nodeDto, node);
+        node.setChangeIpRemoteApi(normalizeOptionalText(nodeDto.getChangeIpRemoteApi()));
         normalizeNodeAddressFields(node);
 
         // 验证端口范围
@@ -659,6 +660,8 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         node.setName(nodeUpdateDto.getName());
         node.setIp(nodeUpdateDto.getIp());
         node.setServerIp(nodeUpdateDto.getServerIp());
+        node.setChangeIpMinIntervalMinutes(nodeUpdateDto.getChangeIpMinIntervalMinutes());
+        node.setChangeIpRemoteApi(normalizeOptionalText(nodeUpdateDto.getChangeIpRemoteApi()));
         node.setPortSta(nodeUpdateDto.getPortSta());
         node.setPortEnd(nodeUpdateDto.getPortEnd());
         normalizeNodeAddressFields(node);
@@ -668,6 +671,10 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         
         node.setUpdatedTime(System.currentTimeMillis());
         return node;
+    }
+
+    private String normalizeOptionalText(String value) {
+        return StrUtil.isBlank(value) ? null : value.trim();
     }
 
     private void normalizeNodeAddressFields(Node node) {

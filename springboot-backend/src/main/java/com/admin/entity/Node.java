@@ -1,6 +1,7 @@
 package com.admin.entity;
 
 import java.io.Serializable;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.TableField;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -25,6 +26,14 @@ public class Node extends BaseEntity {
 
     /** Token used only by the standalone Android probe callback. */
     private String remoteChangeIpToken;
+
+    /** Minimum delay in minutes between IP change requests after a blocked result. */
+    @TableField(updateStrategy = FieldStrategy.IGNORED)
+    private Integer changeIpMinIntervalMinutes;
+
+    /** External API called by the Android probe to change the node IP. */
+    @TableField(updateStrategy = FieldStrategy.IGNORED)
+    private String changeIpRemoteApi;
 
     @TableField(exist = false)
     private String remoteChangeIpUrl;

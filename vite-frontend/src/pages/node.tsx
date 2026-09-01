@@ -58,6 +58,8 @@ interface Node {
   wallMonitorExternalConsecutiveFailures?: number;
   wallMonitorExternalMessage?: string;
   remoteChangeIpUrl?: string;
+  changeIpMinIntervalMinutes?: number | null;
+  changeIpRemoteApi?: string;
 }
 
 interface NodeForm {
@@ -65,6 +67,8 @@ interface NodeForm {
   name: string;
   ipString: string;
   serverIp: string;
+  changeIpMinIntervalMinutes: string;
+  changeIpRemoteApi: string;
   portSta: number;
   portEnd: number;
 }
@@ -84,6 +88,8 @@ export default function NodePage() {
     name: '',
     ipString: '',
     serverIp: '',
+    changeIpMinIntervalMinutes: '',
+    changeIpRemoteApi: '',
     portSta: 1000,
     portEnd: 65535
   });
@@ -600,6 +606,17 @@ export default function NodePage() {
     if (form.serverIp.trim() && !validateIp(form.serverIp.trim())) {
       newErrors.serverIp = '请输入有效的IPv4、IPv6地址或域名';
     }
+
+    if (form.changeIpMinIntervalMinutes.trim()) {
+      const interval = Number(form.changeIpMinIntervalMinutes);
+      if (!Number.isInteger(interval) || interval < 1) {
+        newErrors.changeIpMinIntervalMinutes = '请输入大于0的整数分钟数';
+      }
+    }
+
+    if (form.changeIpRemoteApi.trim() && !/^https?:\/\/\S+$/i.test(form.changeIpRemoteApi.trim())) {
+      newErrors.changeIpRemoteApi = '请输入有效的 HTTP 或 HTTPS 远程 API 地址';
+    }
     
     if (!form.portSta || form.portSta < 1 || form.portSta > 65535) {
       newErrors.portSta = '端口范围必须在1-65535之间';
@@ -632,6 +649,8 @@ export default function NodePage() {
       name: node.name,
       ipString: node.ip ? node.ip.split(',').map(ip => ip.trim()).join('\n') : '',
       serverIp: node.serverIp || '',
+      changeIpMinIntervalMinutes: node.changeIpMinIntervalMinutes?.toString() || '',
+      changeIpRemoteApi: node.changeIpRemoteApi || '',
       portSta: node.portSta,
       portEnd: node.portEnd
     });
@@ -735,9 +754,15 @@ export default function NodePage() {
         .filter(ip => ip)
         .join(',');
         
+      const changeIpMinIntervalMinutes = form.changeIpMinIntervalMinutes.trim()
+        ? Number(form.changeIpMinIntervalMinutes)
+        : null;
+      const changeIpRemoteApi = form.changeIpRemoteApi.trim();
       const submitData = {
         ...form,
-        ip: ipString
+        ip: ipString,
+        changeIpMinIntervalMinutes,
+        changeIpRemoteApi
       };
       delete (submitData as any).ipString;
       
@@ -746,6 +771,8 @@ export default function NodePage() {
         name: form.name, 
         ip: ipString,
         serverIp: form.serverIp,
+        changeIpMinIntervalMinutes,
+        changeIpRemoteApi,
         portSta: form.portSta,
         portEnd: form.portEnd
       };
@@ -762,6 +789,10 @@ export default function NodePage() {
               name: form.name,
               ip: ipString,
               serverIp: form.serverIp,
+              changeIpMinIntervalMinutes: form.changeIpMinIntervalMinutes.trim()
+                ? Number(form.changeIpMinIntervalMinutes)
+                : null,
+              changeIpRemoteApi: form.changeIpRemoteApi.trim(),
               portSta: form.portSta,
               portEnd: form.portEnd
             } : n
@@ -786,6 +817,8 @@ export default function NodePage() {
       name: '',
       ipString: '',
       serverIp: '',
+      changeIpMinIntervalMinutes: '',
+      changeIpRemoteApi: '',
       portSta: 1000,
       portEnd: 65535
     });
@@ -1189,6 +1222,31 @@ export default function NodePage() {
                   maxRows={5}
                   description="留空时会默认跟随节点公网 IP；填写后用于转发页展示，不影响节点连接面板"
                 />
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="更换IP最小时间间隔（分钟，可选）"
+                    placeholder="例如：30"
+                    type="number"
+                    min={1}
+                    value={form.changeIpMinIntervalMinutes}
+                    onChange={(e) => setForm(prev => ({ ...prev, changeIpMinIntervalMinutes: e.target.value }))}
+                    isInvalid={!!errors.changeIpMinIntervalMinutes}
+                    errorMessage={errors.changeIpMinIntervalMinutes}
+                    variant="bordered"
+                    description="检测到IP被墙后，距离上次换IP至少间隔这么多分钟"
+                  />
+                  <Input
+                    label="更换IP远程API（可选）"
+                    placeholder="https://example.com/api/change-ip"
+                    value={form.changeIpRemoteApi}
+                    onChange={(e) => setForm(prev => ({ ...prev, changeIpRemoteApi: e.target.value }))}
+                    isInvalid={!!errors.changeIpRemoteApi}
+                    errorMessage={errors.changeIpRemoteApi}
+                    variant="bordered"
+                    description="被墙后由探针调用；留空则不调用"
+                  />
+                </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <Input

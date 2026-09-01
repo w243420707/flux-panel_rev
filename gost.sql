@@ -57,6 +57,8 @@ CREATE TABLE `node` (
   `name` varchar(100) NOT NULL,
   `secret` varchar(100) NOT NULL,
   `remote_change_ip_token` varchar(128) NOT NULL DEFAULT '',
+  `change_ip_min_interval_minutes` int(10) DEFAULT NULL,
+  `change_ip_remote_api` varchar(1000) DEFAULT NULL,
   `ip` longtext,
   `server_ip` varchar(100) NOT NULL DEFAULT '',
   `server_ipv4` varchar(100) NOT NULL DEFAULT '',
