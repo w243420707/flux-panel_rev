@@ -5,7 +5,10 @@ import com.admin.common.annotation.RequireRole;
 import com.admin.common.aop.LogAnnotation;
 import com.admin.common.dto.NodeDto;
 import com.admin.common.dto.NodeUpdateDto;
+import com.admin.common.dto.NodeRebootDto;
+import com.admin.common.dto.NodeRebootScheduleDto;
 import com.admin.common.lang.R;
+import com.admin.service.NodeRebootService;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,6 +27,23 @@ import java.util.Map;
 @CrossOrigin
 @RequestMapping("/api/v1/node")
 public class NodeController extends BaseController {
+
+    @Resource
+    private NodeRebootService nodeRebootService;
+
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/reboot")
+    public R reboot(@Validated @RequestBody NodeRebootDto request) {
+        return nodeRebootService.reboot(request.getId());
+    }
+
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/reboot-schedule")
+    public R rebootSchedule(@Validated @RequestBody NodeRebootScheduleDto request) {
+        return nodeRebootService.saveSchedule(request.getId(), request.getIntervalHours().intValueExact());
+    }
 
     @LogAnnotation
     @RequireRole

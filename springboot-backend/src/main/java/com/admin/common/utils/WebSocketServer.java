@@ -7,6 +7,7 @@ import com.admin.common.task.CheckGostConfigAsync;
 import com.admin.entity.Node;
 import com.admin.service.CloudflareDnsSyncService;
 import com.admin.service.NodeService;
+import com.admin.service.NodeRebootService;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +24,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 
 
 @Slf4j
@@ -30,6 +32,9 @@ public class WebSocketServer extends TextWebSocketHandler {
 
     @Resource
     NodeService nodeService;
+
+    @Resource
+    NodeRebootService nodeRebootService;
 
     @Resource
     @org.springframework.context.annotation.Lazy
@@ -40,6 +45,12 @@ public class WebSocketServer extends TextWebSocketHandler {
     
     // 存储节点ID和对应的WebSocket session映射
     private static final ConcurrentHashMap<Long, WebSocketSession> nodeSessions = new ConcurrentHashMap<>();
+    private static final Object[] nodeLifecycleLocks = java.util.stream.IntStream.range(0, 64)
+            .mapToObj(i -> new Object()).toArray();
+
+    private static Object nodeLifecycleLock(Long id) {
+        return nodeLifecycleLocks[Math.floorMod(id.hashCode(), nodeLifecycleLocks.length)];
+    }
 
     // 保存每个节点最近一次系统指标和速度，管理员页面重新连接时立即回放。
     private static final ConcurrentHashMap<Long, LatestSystemInfo> latestSystemInfo = new ConcurrentHashMap<>();
@@ -49,7 +60,9 @@ public class WebSocketServer extends TextWebSocketHandler {
     private static final ConcurrentHashMap<String, Object> sessionLocks = new ConcurrentHashMap<>();
     
     // 存储等待响应的请求，key为requestId，value为CompletableFuture
-    private static final ConcurrentHashMap<String, CompletableFuture<GostDto>> pendingRequests = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, PendingRequest> pendingRequests = new ConcurrentHashMap<>();
+
+    private record PendingRequest(Long nodeId, String sessionId, String commandType, CompletableFuture<GostDto> future) {}
     
     // 缓存加密器实例，避免重复创建
     private static final ConcurrentHashMap<String, AESCrypto> cryptoCache = new ConcurrentHashMap<>();
@@ -99,6 +112,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                     }
                     sendToUser(session, "{\"type\":\"call\"}", nodeSecret);
                 }else if (decryptedPayload.contains("requestId")) {
+                    if (!Objects.equals(type, "1")) return;
                     // 处理命令响应消息
                     try {
                         JSONObject responseJson = JSONObject.parseObject(decryptedPayload);
@@ -107,6 +121,13 @@ public class WebSocketServer extends TextWebSocketHandler {
                         String responseType = responseJson.getString("type");
                         boolean responseSuccess = responseJson.getBooleanValue("success");
                         JSONObject responseData = responseJson.getJSONObject("data");
+
+                        if ("RebootNodeStatus".equals(responseType)) {
+                            if (!responseSuccess) {
+                                nodeRebootService.onExecutionFailure(Long.valueOf(id), requestId, responseMessage);
+                            }
+                            return;
+                        }
 
                         if (!responseSuccess || !"OK".equals(responseMessage)) {
                             log.warn("节点命令执行失败 [nodeId={}, type={}, requestId={}, responseType={}]: {}",
@@ -117,10 +138,14 @@ public class WebSocketServer extends TextWebSocketHandler {
                         }
                         
                         if (requestId != null) {
-                            CompletableFuture<GostDto> future = pendingRequests.remove(requestId);
-
-                            if (future != null) {
+                            PendingRequest pending = pendingRequests.get(requestId);
+                            if (pending != null && pending.nodeId().equals(Long.valueOf(id))
+                                    && pending.sessionId().equals(session.getId())
+                                    && (!"RebootNode".equals(pending.commandType())
+                                        || "RebootNodeResponse".equals(responseType) || "UnknownCommandResponse".equals(responseType))
+                                    && pendingRequests.remove(requestId, pending)) {
                                 GostDto result = new GostDto();
+                                result.setCode(responseSuccess ? 0 : -1);
                                 
                                 // 根据响应类型处理不同的数据
                                 if (("PingResponse".equals(responseType) || "TcpPingResponse".equals(responseType) || "UdpPingResponse".equals(responseType)) && responseData != null) {
@@ -135,7 +160,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                                     }
                                 }
                                 
-                                future.complete(result);
+                                pending.future().complete(result);
                             }
                         }
                     } catch (Exception e) {
@@ -443,6 +468,14 @@ public class WebSocketServer extends TextWebSocketHandler {
     // 建立连接
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
+        Object lock = "1".equals(session.getAttributes().get("type"))
+                ? nodeLifecycleLock(Long.valueOf(session.getAttributes().get("id").toString())) : session;
+        synchronized (lock) {
+            establishConnection(session);
+        }
+    }
+
+    private void establishConnection(WebSocketSession session) {
         try {
             String id = session.getAttributes().get("id").toString();
             String type = session.getAttributes().get("type").toString();
@@ -491,6 +524,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                 // 更新节点状态为在线
                 Node node = nodeService.getById(nodeId);
                 if (node != null) {
+                    boolean previouslyOnline = Integer.valueOf(1).equals(node.getStatus());
                     // 更新状态和版本信息
                     if (hasReportedRuntimeIp) {
                         rememberRuntimeIps(session, nodePublicIp, nodePublicIpv4, nodePublicIpv6);
@@ -503,6 +537,8 @@ public class WebSocketServer extends TextWebSocketHandler {
                     
                     if (updateResult) {
                         log.info("节点 {} 连接建立成功，状态更新为在线，版本: {}", nodeId, version);
+
+                        nodeRebootService.onOnline(nodeId, previouslyOnline);
 
                         cloudflareDnsSyncService.requestSyncAll("node-online");
 
@@ -559,6 +595,14 @@ public class WebSocketServer extends TextWebSocketHandler {
     // 连接关闭后
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+        Object lock = "1".equals(session.getAttributes().get("type"))
+                ? nodeLifecycleLock(Long.valueOf(session.getAttributes().get("id").toString())) : session;
+        synchronized (lock) {
+            closeConnection(session, status);
+        }
+    }
+
+    private void closeConnection(WebSocketSession session, CloseStatus status) {
         try {
             String id = session.getAttributes().get("id").toString();
             String type = session.getAttributes().get("type").toString();
@@ -590,6 +634,12 @@ public class WebSocketServer extends TextWebSocketHandler {
                         return;
                     }
                     clearLatestSystemInfo(nodeId);
+                    // A panel shutdown is not a node outage: preserve future deadlines and the prior online flag.
+                    if (nodeRebootService.isStopping()) {
+                        sessionLocks.remove(sessionId);
+                        return;
+                    }
+                    nodeRebootService.onOffline(nodeId);
                     
                     // 更新节点状态为离线
                     Node node = nodeService.getById(nodeId);
@@ -690,6 +740,16 @@ public class WebSocketServer extends TextWebSocketHandler {
         }
     }
 
+    public static boolean isNodeConnected(Long nodeId) {
+        WebSocketSession session = nodeSessions.get(nodeId);
+        return session != null && session.isOpen();
+    }
+
+    public static String getNodeConnectionId(Long nodeId) {
+        WebSocketSession session = nodeSessions.get(nodeId);
+        return session == null ? null : session.getId();
+    }
+
 
 
     public static GostDto send_msg(Long node_id, Object msg, String type) {
@@ -704,30 +764,44 @@ public class WebSocketServer extends TextWebSocketHandler {
     }
 
     private static GostDto send_msg(Long node_id, Object msg, String type, long timeoutMillis, boolean retryAfterTimeout) {
+        return send_msg(node_id, msg, type, timeoutMillis, retryAfterTimeout, UUID.randomUUID().toString(), null, () -> true);
+    }
+
+    public static GostDto send_msg(Long nodeId, Object msg, String type, long timeoutMillis, String requestId) {
+        return send_msg(nodeId, msg, type, timeoutMillis, false, requestId, null, () -> true);
+    }
+
+    public static GostDto send_msg(Long nodeId, Object msg, String type, long timeoutMillis, String requestId,
+                                   String expectedSessionId, BooleanSupplier stillCurrent) {
+        return send_msg(nodeId, msg, type, timeoutMillis, false, requestId, expectedSessionId, stillCurrent);
+    }
+
+    private static GostDto send_msg(Long node_id, Object msg, String type, long timeoutMillis,
+                                    boolean retryAfterTimeout, String requestId, String expectedSessionId,
+                                    BooleanSupplier stillCurrent) {
         WebSocketSession nodeSession = nodeSessions.get(node_id);
 
         if (nodeSession == null) {
             log.warn("发送节点命令失败 [nodeId={}, type={}]: 节点不在线或会话不存在", node_id, type);
             GostDto result = new GostDto();
+            result.setCode(-1);
             result.setMsg("节点不在线");
             return result;
         }
 
         if (!nodeSession.isOpen()) {
             log.warn("发送节点命令失败 [nodeId={}, type={}]: 连接已断开，清理会话", node_id, type);
-            nodeSessions.remove(node_id);
+            nodeSessions.remove(node_id, nodeSession);
             sessionLocks.remove(nodeSession.getId());
             GostDto result = new GostDto();
+            result.setCode(-1);
             result.setMsg("节点连接已断开");
             return result;
         }
 
-        // 生成唯一的请求ID
-        String requestId = UUID.randomUUID().toString();
-        
         // 创建CompletableFuture用于等待响应
         CompletableFuture<GostDto> future = new CompletableFuture<>();
-        pendingRequests.put(requestId, future);
+        pendingRequests.put(requestId, new PendingRequest(node_id, nodeSession.getId(), type, future));
         long startedAt = System.nanoTime();
         
         // 获取节点密钥用于加密
@@ -738,7 +812,24 @@ public class WebSocketServer extends TextWebSocketHandler {
             data.put("type", type);
             data.put("data", msg);
             data.put("requestId", requestId);
-            if (!sendToUser(nodeSession, data.toJSONString(), nodeSecret)) {
+            boolean sent;
+            if (expectedSessionId != null) {
+                // Lock only the write, never the ACK wait. A stale worker cannot target a newly connected node.
+                synchronized (nodeLifecycleLock(node_id)) {
+                    if (nodeSessions.get(node_id) != nodeSession || !expectedSessionId.equals(nodeSession.getId())
+                            || !stillCurrent.getAsBoolean()) {
+                        pendingRequests.remove(requestId);
+                        GostDto result = new GostDto();
+                        result.setCode(-1);
+                        result.setMsg("节点连接已变更或任务已取消，未发送重启指令");
+                        return result;
+                    }
+                    sent = sendToUser(nodeSession, data.toJSONString(), nodeSecret);
+                }
+            } else {
+                sent = sendToUser(nodeSession, data.toJSONString(), nodeSecret);
+            }
+            if (!sent) {
                 pendingRequests.remove(requestId);
                 GostDto result = new GostDto();
                 result.setMsg("发送命令失败：WebSocket 写入失败");

@@ -66,6 +66,8 @@ CREATE TABLE `node` (
   `port_sta` int(10) NOT NULL,
   `port_end` int(10) NOT NULL,
   `version` varchar(100) DEFAULT NULL,
+  `reboot_interval_hours` int(10) NOT NULL DEFAULT '0',
+  `reboot_next_at` bigint(20) DEFAULT NULL,
   `wall_monitor_enabled` tinyint(1) NOT NULL DEFAULT '1',
   `wall_monitor_status` varchar(32) NOT NULL DEFAULT 'PENDING',
   `wall_monitor_last_check_at` bigint(20) DEFAULT NULL,
@@ -294,7 +296,8 @@ ALTER TABLE `node`
   ADD PRIMARY KEY (`id`),
   ADD KEY `idx_node_secret` (`secret`),
   ADD KEY `idx_node_status` (`status`),
-  ADD KEY `idx_node_wall_monitor_status` (`wall_monitor_status`);
+  ADD KEY `idx_node_wall_monitor_status` (`wall_monitor_status`),
+  ADD KEY `idx_node_reboot_next_at` (`reboot_next_at`);
 
 --
 -- 表的索引 `speed_limit`

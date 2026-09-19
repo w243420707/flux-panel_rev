@@ -27,6 +27,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("add node dual-stack runtime ip columns", () -> addNodeRuntimeIpColumns(connection));
             runStep("add node remote change ip token", () -> addNodeRemoteChangeIpToken(connection));
             runStep("add node remote change ip settings", () -> addNodeRemoteChangeIpSettings(connection));
+            runStep("add node reboot settings", () -> addNodeRebootSettings(connection));
             runStep("add node wall monitor columns", () -> addNodeWallMonitorColumns(connection));
             runStep("relax node ip columns", () -> relaxNodeIpColumns(connection));
             runStep("widen tunnel ip columns", () -> widenIpColumns(connection));
@@ -191,6 +192,15 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 "ALTER TABLE node ADD COLUMN change_ip_min_interval_minutes INT NULL AFTER remote_change_ip_token");
         ensureColumn(connection, "node", "change_ip_remote_api",
                 "ALTER TABLE node ADD COLUMN change_ip_remote_api VARCHAR(1000) NULL AFTER change_ip_min_interval_minutes");
+    }
+
+    private void addNodeRebootSettings(Connection connection) throws Exception {
+        ensureColumn(connection, "node", "reboot_interval_hours",
+                "ALTER TABLE node ADD COLUMN reboot_interval_hours INT NOT NULL DEFAULT 0 AFTER version");
+        ensureColumn(connection, "node", "reboot_next_at",
+                "ALTER TABLE node ADD COLUMN reboot_next_at BIGINT NULL AFTER reboot_interval_hours");
+        ensureIndex(connection, "node", "idx_node_reboot_next_at",
+                "ALTER TABLE node ADD INDEX idx_node_reboot_next_at (reboot_next_at)");
     }
 
     private void addNodeWallMonitorColumns(Connection connection) throws Exception {

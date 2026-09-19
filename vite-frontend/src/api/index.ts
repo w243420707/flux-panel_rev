@@ -28,6 +28,13 @@ export const createNode = (data: any) => Network.post("/node/create", data);
 export const getNodeList = () => Network.post("/node/list");
 export const updateNode = (data: any) => Network.post("/node/update", data);
 export const deleteNode = (id: number) => Network.post("/node/delete", { id });
+export interface NodeRebootSchedule {
+  rebootIntervalHours: number;
+  rebootNextAt: number | null;
+}
+export const rebootNode = (id: number) => Network.post<NodeRebootSchedule>("/node/reboot", { id });
+export const updateNodeRebootSchedule = (id: number, intervalHours: number) =>
+  Network.post<NodeRebootSchedule>("/node/reboot-schedule", { id, intervalHours });
 export type NodeInstallSource = 'github' | 'local';
 export const getNodeInstallCommand = (
   id: number,

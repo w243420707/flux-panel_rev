@@ -137,6 +137,7 @@ type WebSocketReporter struct {
 	publicIPv4     string
 	publicIPv6     string
 	aesCrypto      *crypto.AESCrypto // 新增：AES加密器
+	rebooter       *nodeRebooter
 }
 
 const (
@@ -167,6 +168,7 @@ func NewWebSocketReporter(serverURL string, secret string) *WebSocketReporter {
 		connected:      false,
 		connecting:     false,
 		aesCrypto:      aesCrypto,
+		rebooter:       newNodeRebooter(),
 	}
 }
 
@@ -625,6 +627,10 @@ func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
 	}
 
 	logger.Default().Debugf("收到面板命令 type=%s requestId=%s", cmd.Type, cmd.RequestId)
+	if cmd.Type == "RebootNode" {
+		w.rebooter.handle(w.ctx, cmd, w.sendResponse)
+		return
+	}
 	var err error
 	var response CommandResponse
 
@@ -987,19 +993,19 @@ func (w *WebSocketReporter) handleCall(data interface{}) error {
 }
 
 // sendResponse 发送响应消息到服务端
-func (w *WebSocketReporter) sendResponse(response CommandResponse) {
+func (w *WebSocketReporter) sendResponse(response CommandResponse) error {
 	w.connMutex.Lock()
 	defer w.connMutex.Unlock()
 
 	if w.conn == nil || !w.connected {
 		fmt.Printf("❌ 无法发送响应：连接未建立\n")
-		return
+		return fmt.Errorf("连接未建立")
 	}
 
 	jsonData, err := json.Marshal(response)
 	if err != nil {
 		fmt.Printf("❌ 序列化响应失败: %v\n", err)
-		return
+		return fmt.Errorf("序列化响应失败: %w", err)
 	}
 
 	var messageData []byte
@@ -1042,7 +1048,9 @@ func (w *WebSocketReporter) sendResponse(response CommandResponse) {
 	if err := w.conn.WriteMessage(websocket.TextMessage, messageData); err != nil {
 		fmt.Printf("❌ 发送响应失败: %v\n", err)
 		w.connected = false
+		return fmt.Errorf("发送响应失败: %w", err)
 	}
+	return nil
 }
 
 // sendErrorResponse 发送错误响应

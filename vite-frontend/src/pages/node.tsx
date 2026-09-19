@@ -17,8 +17,11 @@ import {
   getNodeList, 
   updateNode, 
   deleteNode,
+  rebootNode,
+  updateNodeRebootSchedule,
   getNodeInstallCommand,
-  type NodeInstallSource
+  type NodeInstallSource,
+  type NodeRebootSchedule
 } from "@/api";
 
 interface Node {
@@ -60,7 +63,22 @@ interface Node {
   remoteChangeIpUrl?: string;
   changeIpMinIntervalMinutes?: number | null;
   changeIpRemoteApi?: string;
+  rebootIntervalHours?: number;
+  rebootNextAt?: number | null;
 }
+
+interface RebootState {
+  phase: 'sending' | 'waiting' | 'unknown' | 'unconfirmed';
+  startedAt: number;
+  sawOffline: boolean;
+}
+
+const supportsReboot = (version?: string): boolean => {
+  const match = version?.match(/^v?(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) return false;
+  const [, major, minor, patch] = match.map(Number);
+  return major > 3 || (major === 3 && (minor > 1 || (minor === 1 && patch >= 6)));
+};
 
 interface NodeForm {
   id: number | null;
@@ -83,6 +101,14 @@ export default function NodePage() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [nodeToDelete, setNodeToDelete] = useState<Node | null>(null);
+  const [rebootStates, setRebootStates] = useState<Record<number, RebootState>>({});
+  const rebootStatesRef = useRef<Record<number, RebootState>>({});
+  const rebootRequestsRef = useRef(new Set<number>());
+  const [scheduleNodeId, setScheduleNodeId] = useState<number | null>(null);
+  const [scheduleHours, setScheduleHours] = useState('0');
+  const [scheduleError, setScheduleError] = useState('');
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const scheduleSavingRef = useRef(false);
   const [form, setForm] = useState<NodeForm>({
     id: null,
     name: '',
@@ -106,7 +132,11 @@ export default function NodePage() {
   const reconnectAttemptsRef = useRef(0);
   const runtimeIpCacheRef = useRef<Map<number, Partial<Node>>>(new Map());
   const systemInfoCacheRef = useRef<Map<number, NonNullable<Node['systemInfo']>>>(new Map());
+  const statusUpdatedAtRef = useRef<Map<number, { at: number; status: number }>>(new Map());
+  const scheduleUpdatedAtRef = useRef<Map<number, { at: number; fields: NodeRebootSchedule }>>(new Map());
   const nodeListRef = useRef<Node[]>([]);
+  const quietRefreshTimerRef = useRef<number | null>(null);
+  const loadNodesPendingRef = useRef(0);
   const maxReconnectAttempts = 5;
 
   const [totalSpeed, setTotalSpeed] = useState({ upload: 0, download: 0 });
@@ -117,8 +147,33 @@ export default function NodePage() {
     loadNodes();
     
     return () => {
+      if (quietRefreshTimerRef.current !== null) {
+        window.clearTimeout(quietRefreshTimerRef.current);
+      }
       closeWebSocket();
     };
+  }, []);
+
+  useEffect(() => {
+    const refreshTimer = window.setInterval(() => {
+      let changed = false;
+      const next = { ...rebootStatesRef.current };
+      Object.entries(next).forEach(([id, state]) => {
+        if (state.phase !== 'unconfirmed' && Date.now() - state.startedAt >= 120000) {
+          next[Number(id)] = { ...state, phase: 'unconfirmed' };
+          changed = true;
+        }
+      });
+      if (changed) {
+        rebootStatesRef.current = next;
+        setRebootStates(next);
+      }
+      if (changed || Object.values(next).some(state => state.phase !== 'unconfirmed') ||
+          nodeListRef.current.some(node => (node.rebootIntervalHours || 0) > 0)) {
+        void loadNodes(true);
+      }
+    }, 30000);
+    return () => window.clearInterval(refreshTimer);
   }, []);
 
   useEffect(() => {
@@ -143,17 +198,29 @@ export default function NodePage() {
   }, []);
 
   // 加载节点列表
-  const loadNodes = async () => {
-    setLoading(true);
+  const loadNodes = async (quiet = false) => {
+    if (quiet && loadNodesPendingRef.current > 0) return;
+    loadNodesPendingRef.current++;
+    const requestedAt = Date.now();
+    if (!quiet) setLoading(true);
     try {
       const res = await getNodeList();
       if (res.code === 0) {
-        const nextNodes = res.data.map((node: any) => ({
-          ...node,
-          connectionStatus: node.status === 1 ? 'online' : 'offline',
-          systemInfo: systemInfoCacheRef.current.get(node.id) || null,
-          copyLoading: false,
-        }));
+        const currentNodes = new Map(nodeListRef.current.map(node => [node.id, node]));
+        const nextNodes = res.data.map((node: Node) => {
+          const current = currentNodes.get(node.id);
+          const latestStatus = statusUpdatedAtRef.current.get(node.id);
+          const latestSchedule = scheduleUpdatedAtRef.current.get(node.id);
+          const status = latestStatus && latestStatus.at >= requestedAt ? latestStatus.status : node.status;
+          return {
+            ...node,
+            ...(latestSchedule && latestSchedule.at >= requestedAt ? latestSchedule.fields : {}),
+            status,
+            connectionStatus: status === 1 ? 'online' : 'offline',
+            systemInfo: systemInfoCacheRef.current.get(node.id) || null,
+            copyLoading: current?.copyLoading || false,
+          };
+        });
         const nodeIds = new Set(nextNodes.map((node: Node) => node.id));
         runtimeIpCacheRef.current.forEach((_, nodeId) => {
           if (!nodeIds.has(nodeId)) {
@@ -169,13 +236,51 @@ export default function NodePage() {
           const cachedRuntime = runtimeIpCacheRef.current.get(node.id);
           return cachedRuntime ? { ...node, ...cachedRuntime } : node;
         }));
+        nextNodes.forEach((node: Node) => observeRebootStatus(node.id, node.connectionStatus, requestedAt));
       } else {
-        toast.error(res.msg || '加载节点列表失败');
+        if (!quiet) toast.error(res.msg || '加载节点列表失败');
       }
     } catch (error) {
-      toast.error('网络错误，请重试');
+      if (!quiet) toast.error('网络错误，请重试');
     } finally {
-      setLoading(false);
+      loadNodesPendingRef.current--;
+      if (!quiet) setLoading(false);
+    }
+  };
+
+  const refreshNodesQuietly = () => {
+    if (quietRefreshTimerRef.current !== null) return;
+    quietRefreshTimerRef.current = window.setTimeout(() => {
+      quietRefreshTimerRef.current = null;
+      void loadNodes(true);
+    }, 500);
+  };
+
+  const setNodeRebootState = (id: number, state?: RebootState) => {
+    const next = { ...rebootStatesRef.current };
+    if (state) next[id] = state;
+    else delete next[id];
+    rebootStatesRef.current = next;
+    setRebootStates(next);
+  };
+
+  const applyRebootSchedule = (id: number, data: NodeRebootSchedule, requestedAt = Date.now()) => {
+    const cached = scheduleUpdatedAtRef.current.get(id);
+    if (cached && cached.at > requestedAt) return;
+    const fields = { rebootIntervalHours: data.rebootIntervalHours, rebootNextAt: data.rebootNextAt };
+    scheduleUpdatedAtRef.current.set(id, { at: Date.now(), fields });
+    setNodeList(prev => prev.map(node => node.id === id ? { ...node, ...fields } : node));
+  };
+
+  const observeRebootStatus = (id: number, status: Node['connectionStatus'], observedAt = Date.now()) => {
+    const state = rebootStatesRef.current[id];
+    if (!state || observedAt < state.startedAt) return;
+    if (status === 'offline' && !state.sawOffline) {
+      setNodeRebootState(id, { ...state, sawOffline: true });
+    } else if (status === 'online' && state.sawOffline) {
+      setNodeRebootState(id);
+      const name = nodeListRef.current.find(node => node.id === id)?.name || '节点';
+      toast.success(`${name} 已重新上线`);
     }
   };
 
@@ -200,6 +305,7 @@ export default function NodePage() {
       
       websocketRef.current.onopen = () => {
         reconnectAttemptsRef.current = 0;
+        refreshNodesQuietly();
       };
       
       websocketRef.current.onmessage = (event) => {
@@ -230,26 +336,39 @@ export default function NodePage() {
     
     if (type === 'status') {
       const nextConnectionStatus = messageData === 1 ? 'online' : 'offline';
+      statusUpdatedAtRef.current.set(Number(id), { at: Date.now(), status: messageData === 1 ? 1 : 0 });
       if (nextConnectionStatus === 'offline') {
         systemInfoCacheRef.current.delete(Number(id));
       }
-      const cachedRuntime = runtimeIpCacheRef.current.get(Number(id));
-      if (cachedRuntime) {
-        runtimeIpCacheRef.current.set(Number(id), {
-          ...cachedRuntime,
-          connectionStatus: nextConnectionStatus,
-        });
-      }
+      observeRebootStatus(Number(id), nextConnectionStatus);
       setNodeList(prev => prev.map(node => {
         if (node.id == id) {
           return {
             ...node,
+            status: messageData === 1 ? 1 : 0,
             connectionStatus: nextConnectionStatus,
             systemInfo: node.systemInfo
           };
         }
         return node;
       }));
+      refreshNodesQuietly();
+    } else if (type === 'reboot' || type === 'rebootSchedule') {
+      const nodeId = Number(id);
+      applyRebootSchedule(nodeId, messageData);
+      if (type === 'reboot') {
+        const current = rebootStatesRef.current[nodeId];
+        if (messageData.status === 'failed') {
+          setNodeRebootState(nodeId);
+          toast.error(messageData.message || '节点未能执行重启');
+        } else if (messageData.status === 'accepted' || messageData.status === 'unknown') {
+          setNodeRebootState(nodeId, {
+            startedAt: current?.startedAt || Date.now(),
+            sawOffline: current?.sawOffline || false,
+            phase: messageData.status === 'accepted' ? 'waiting' : 'unknown',
+          });
+        }
+      }
     } else if (type === 'wallMonitor') {
       setNodeList(prev => prev.map(node => {
         if (node.id == id) {
@@ -556,6 +675,12 @@ export default function NodePage() {
     return new Date(timestamp).toLocaleString();
   };
 
+  const getRebootNextLabel = (node?: Node): string => {
+    if (!node || !node.rebootIntervalHours) return '已关闭';
+    if (node.rebootNextAt) return formatMonitorTime(node.rebootNextAt);
+    return node.connectionStatus === 'online' ? '等待重新上线或重新保存' : '等待节点上线后计时';
+  };
+
   // 验证IP地址格式
   const validateIp = (ip: string): boolean => {
     if (!ip || !ip.trim()) return false;
@@ -663,6 +788,85 @@ export default function NodePage() {
     setDeleteModalOpen(true);
   };
 
+  const isRebootPending = (id: number) => {
+    const state = rebootStatesRef.current[id];
+    return rebootRequestsRef.current.has(id) || Boolean(state && state.phase !== 'unconfirmed');
+  };
+
+  const handleReboot = async (node: Node) => {
+    if (isRebootPending(node.id) || node.connectionStatus !== 'online' || !supportsReboot(node.version)) return;
+    rebootRequestsRef.current.add(node.id);
+    const requestedAt = Date.now();
+    setNodeRebootState(node.id, { phase: 'sending', startedAt: requestedAt, sawOffline: false });
+    try {
+      const res = await rebootNode(node.id);
+      const current = rebootStatesRef.current[node.id];
+      if (res.code === 0) {
+        if (res.data) applyRebootSchedule(node.id, res.data, requestedAt);
+        if (current) setNodeRebootState(node.id, { ...current, phase: 'waiting' });
+        if (current) toast.success(`${node.name} 已收到重启指令，正在等待节点重新上线`);
+      } else if (res.code === -2 || (res.code === -1 && /timeout|network|网络|结果未知|request failed|aborted|econn/i.test(res.msg || ''))) {
+        if (current) setNodeRebootState(node.id, { ...current, phase: 'unknown' });
+        if (current) toast.error('未确认节点是否收到重启指令，请等待状态更新，不要重复点击');
+      } else {
+        setNodeRebootState(node.id);
+        toast.error(res.msg || '发送重启指令失败');
+      }
+    } catch {
+      const current = rebootStatesRef.current[node.id];
+      if (current) setNodeRebootState(node.id, { ...current, phase: 'unknown' });
+      if (current) toast.error('网络中断，重启结果未知，请等待节点状态更新');
+    } finally {
+      rebootRequestsRef.current.delete(node.id);
+      setRebootStates({ ...rebootStatesRef.current });
+      refreshNodesQuietly();
+    }
+  };
+
+  const openRebootSchedule = (node: Node) => {
+    setScheduleNodeId(node.id);
+    setScheduleHours(String(node.rebootIntervalHours || 0));
+    setScheduleError('');
+  };
+
+  const saveRebootSchedule = async () => {
+    if (scheduleNodeId === null || scheduleSavingRef.current) return;
+    const intervalHours = Number(scheduleHours);
+    if (!/^\d+$/.test(scheduleHours) || !Number.isInteger(intervalHours) || intervalHours < 0 || intervalHours > 720) {
+      setScheduleError('请输入 0–720 的整数小时数，0 表示关闭');
+      return;
+    }
+    const node = nodeListRef.current.find(item => item.id === scheduleNodeId);
+    if (!node) {
+      setScheduleError('节点已不存在，请关闭后刷新列表');
+      return;
+    }
+    if (intervalHours > 0 && !supportsReboot(node.version)) {
+      setScheduleError('请先将节点升级至 3.1.6 或以上版本');
+      return;
+    }
+    scheduleSavingRef.current = true;
+    const requestedAt = Date.now();
+    setScheduleLoading(true);
+    setScheduleError('');
+    try {
+      const res = await updateNodeRebootSchedule(node.id, intervalHours);
+      if (res.code === 0) {
+        applyRebootSchedule(node.id, res.data, requestedAt);
+        toast.success(intervalHours === 0 ? '定时重启已关闭' : '定时重启已保存');
+        setScheduleNodeId(null);
+      } else {
+        setScheduleError(res.msg || '保存失败，请重试');
+      }
+    } catch {
+      setScheduleError('网络错误，请检查连接后重试');
+    } finally {
+      scheduleSavingRef.current = false;
+      setScheduleLoading(false);
+      refreshNodesQuietly();
+    }
+  };
+
   const confirmDelete = async () => {
     if (!nodeToDelete) return;
     
@@ -673,6 +877,9 @@ export default function NodePage() {
         toast.success('删除成功');
         systemInfoCacheRef.current.delete(nodeToDelete.id);
         runtimeIpCacheRef.current.delete(nodeToDelete.id);
+        statusUpdatedAtRef.current.delete(nodeToDelete.id);
+        scheduleUpdatedAtRef.current.delete(nodeToDelete.id);
+        setNodeRebootState(nodeToDelete.id);
         setNodeList(prev => prev.filter(n => n.id !== nodeToDelete.id));
         setDeleteModalOpen(false);
         setNodeToDelete(null);
@@ -835,6 +1042,8 @@ export default function NodePage() {
   const getNodePrimaryAddress = (node: Node): string => {
     return node.serverIp || node.serverIpv4 || node.serverIpv6 || node.ip || '待自动识别';
   };
+
+  const scheduleNode = nodeList.find(node => node.id === scheduleNodeId);
 
   return (
     
@@ -1129,6 +1338,17 @@ export default function NodePage() {
 
                   {/* 操作按钮 */}
                   <div className="space-y-1.5">
+                    <div className="mb-2 text-xs text-default-500">
+                      <div className="flex justify-between gap-2">
+                        <span>定时重启</span>
+                        <span>{(node.rebootIntervalHours || 0) > 0 ? `每 ${node.rebootIntervalHours} 小时 + 随机延迟` : '已关闭'}</span>
+                      </div>
+                      {(node.rebootIntervalHours || 0) > 0 && (
+                        <p className="mt-1">
+                          下次：{getRebootNextLabel(node)}
+                        </p>
+                      )}
+                    </div>
                     <div className="grid grid-cols-2 gap-1.5">
                       <Button
                         size="sm"
@@ -1153,6 +1373,29 @@ export default function NodePage() {
                       <Button
                         size="sm"
                         variant="flat"
+                        color="warning"
+                        onPress={() => handleReboot(node)}
+                        isDisabled={node.connectionStatus !== 'online' || !supportsReboot(node.version) || isRebootPending(node.id)}
+                        isLoading={rebootStates[node.id]?.phase === 'sending'}
+                        title="点击立即重启 VPS，连接会短暂中断"
+                        className="flex-1 min-h-8"
+                      >
+                        {rebootStates[node.id]?.phase === 'sending' ? '发送中…'
+                          : rebootStates[node.id]?.phase === 'waiting' ? '重启中…'
+                            : rebootStates[node.id]?.phase === 'unknown' ? '等待状态…' : '重启 VPS'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="flat"
+                        color="default"
+                        onPress={() => openRebootSchedule(node)}
+                        className="flex-1 min-h-8"
+                      >
+                        定时重启
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="flat"
                         color="primary"
                         onPress={() => handleEdit(node)}
                         className="flex-1 min-h-8"
@@ -1169,12 +1412,73 @@ export default function NodePage() {
                         删除
                       </Button>
                     </div>
+                    {!supportsReboot(node.version) ? (
+                      <p className="text-xs text-default-500">重启功能需要节点 3.1.6 或以上版本，请先升级节点。</p>
+                    ) : rebootStates[node.id]?.phase === 'unknown' ? (
+                      <p className="text-xs text-warning-600">结果未知，请等待节点状态更新，勿重复操作。</p>
+                    ) : rebootStates[node.id]?.phase === 'unconfirmed' ? (
+                      <p className="text-xs text-warning-600">尚未确认重启完成，请检查节点后再操作。</p>
+                    ) : rebootStates[node.id]?.phase === 'waiting' ? (
+                      <p className="text-xs text-default-500">节点已收到指令，等待重新上线。</p>
+                    ) : node.connectionStatus !== 'online' ? (
+                      <p className="text-xs text-default-500">节点离线，暂时无法发送重启指令。</p>
+                    ) : null}
                   </div>
                 </CardBody>
               </Card>
             ))}
           </div>
         )}
+
+        {/* 定时重启设置 */}
+        <Modal
+          isOpen={scheduleNodeId !== null}
+          onClose={() => { if (!scheduleSavingRef.current) setScheduleNodeId(null); }}
+          isDismissable={!scheduleLoading}
+          isKeyboardDismissDisabled={scheduleLoading}
+          hideCloseButton={scheduleLoading}
+          size="md"
+          scrollBehavior="outside"
+          backdrop="blur"
+          placement="center"
+        >
+          <ModalContent>
+            <ModalHeader>定时重启 - {scheduleNode?.name || '节点'}</ModalHeader>
+            <ModalBody>
+              <Input
+                label="重启间隔（小时）"
+                type="number"
+                min={0}
+                max={720}
+                step={1}
+                value={scheduleHours}
+                onValueChange={(value) => { setScheduleHours(value); setScheduleError(''); }}
+                isDisabled={scheduleLoading}
+                isInvalid={Boolean(scheduleError)}
+                errorMessage={scheduleError}
+                variant="bordered"
+                description="请输入 0–720 的整数，0 表示关闭定时重启。"
+              />
+              <p className="text-sm text-default-500">
+                每轮在所填间隔后，额外随机等待 0–59 分 59 秒再重启 VPS。节点离线时暂停，重新上线后开始下一轮计时。
+              </p>
+              <p className="text-sm text-default-500">
+                当前计划：{getRebootNextLabel(scheduleNode)}
+              </p>
+              {scheduleNode && !supportsReboot(scheduleNode.version) && (
+                <p className="text-sm text-warning-600">请先将节点升级至 3.1.6 或以上版本；现在仍可填写 0 关闭已有计划。</p>
+              )}
+            </ModalBody>
+            <ModalFooter>
+              <Button variant="flat" isDisabled={scheduleLoading} onPress={() => setScheduleNodeId(null)}>
+                取消
+              </Button>
+              <Button color="primary" isLoading={scheduleLoading} onPress={saveRebootSchedule}>
+                保存
+              </Button>
+            </ModalFooter>
+          </ModalContent>
+        </Modal>
 
         {/* 新增/编辑节点对话框 */}
         <Modal 
