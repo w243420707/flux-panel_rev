@@ -9,9 +9,9 @@ func TestSystemInfoIncludesSwapMetrics(t *testing.T) {
 	data, err := json.Marshal(SystemInfo{
 		MemoryUsed:  512 * 1024 * 1024,
 		MemoryTotal: 2 * 1024 * 1024 * 1024,
-		SwapUsage: 25.5,
-		SwapUsed:  1024,
-		SwapTotal: 4096,
+		SwapUsage:   25.5,
+		SwapUsed:    1024,
+		SwapTotal:   4096,
 	})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
@@ -41,17 +41,17 @@ func TestBuildWebSocketURL(t *testing.T) {
 		{
 			name:    "https panel uses wss",
 			addr:    "https://zf.114431.xyz",
-			wantURL: "wss://zf.114431.xyz/system-info?secret=secret&type=1&version=1.2.0",
+			wantURL: "wss://zf.114431.xyz/system-info?secret=secret&type=1&usage=1&version=1.2.0",
 		},
 		{
 			name:    "bare host keeps ws fallback",
 			addr:    "zf.114431.xyz",
-			wantURL: "ws://zf.114431.xyz/system-info?secret=secret&type=1&version=1.2.0",
+			wantURL: "ws://zf.114431.xyz/system-info?secret=secret&type=1&usage=1&version=1.2.0",
 		},
 		{
 			name:    "http panel keeps explicit port",
 			addr:    "http://127.0.0.1:6366",
-			wantURL: "ws://127.0.0.1:6366/system-info?secret=secret&type=1&version=1.2.0",
+			wantURL: "ws://127.0.0.1:6366/system-info?secret=secret&type=1&usage=1&version=1.2.0",
 		},
 		{
 			name:       "public ip is appended",
@@ -59,7 +59,7 @@ func TestBuildWebSocketURL(t *testing.T) {
 			publicIp:   "1.2.3.4",
 			publicIpv4: "1.2.3.4",
 			publicIpv6: "2001:db8::1",
-			wantURL:    "wss://zf.114431.xyz/system-info?publicIp=1.2.3.4&publicIpv4=1.2.3.4&publicIpv6=2001%3Adb8%3A%3A1&secret=secret&type=1&version=1.2.0",
+			wantURL:    "wss://zf.114431.xyz/system-info?publicIp=1.2.3.4&publicIpv4=1.2.3.4&publicIpv6=2001%3Adb8%3A%3A1&secret=secret&type=1&usage=1&version=1.2.0",
 		},
 	}
 

@@ -22,6 +22,7 @@ type nodeRebooter struct {
 	response  CommandResponse
 	prepare   func() (func(context.Context) error, error)
 	wait      func(context.Context) error
+	before    func() error
 }
 
 func newNodeRebooter() *nodeRebooter {
@@ -92,6 +93,9 @@ func (r *nodeRebooter) handle(ctx context.Context, cmd CommandMessage, send func
 
 func (r *nodeRebooter) execute(ctx context.Context, requestID string, execute func(context.Context) error, send func(CommandResponse) error) {
 	err := r.wait(ctx)
+	if err == nil && r.before != nil {
+		err = r.before()
+	}
 	if err == nil {
 		err = execute(ctx)
 	}

@@ -48,6 +48,12 @@ public class Node extends BaseEntity {
 
     private String version;
 
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private Long currentUsageId;
+
+    @TableField(exist = false)
+    private Object vpsUsage;
+
     // Only the reboot scheduler updates these columns; ordinary node/IP updates must not overwrite them.
     @TableField(updateStrategy = FieldStrategy.NEVER)
     private Integer rebootIntervalHours;

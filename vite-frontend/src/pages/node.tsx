@@ -19,9 +19,13 @@ import {
   deleteNode,
   rebootNode,
   updateNodeRebootSchedule,
+  getNodeUsageHistory,
+  confirmNodeUsage,
   getNodeInstallCommand,
   type NodeInstallSource,
-  type NodeRebootSchedule
+  type NodeRebootSchedule,
+  type VpsUsage,
+  type VpsUsageRecord
 } from "@/api";
 
 interface Node {
@@ -65,6 +69,7 @@ interface Node {
   changeIpRemoteApi?: string;
   rebootIntervalHours?: number;
   rebootNextAt?: number | null;
+  vpsUsage?: VpsUsage;
 }
 
 interface RebootState {
@@ -73,12 +78,14 @@ interface RebootState {
   sawOffline: boolean;
 }
 
-const supportsReboot = (version?: string): boolean => {
+const supportsNodeVersion = (version: string | undefined, minimumPatch: number): boolean => {
   const match = version?.match(/^v?(\d+)\.(\d+)\.(\d+)$/);
   if (!match) return false;
   const [, major, minor, patch] = match.map(Number);
-  return major > 3 || (major === 3 && (minor > 1 || (minor === 1 && patch >= 6)));
+  return major > 3 || (major === 3 && (minor > 1 || (minor === 1 && patch >= minimumPatch)));
 };
+
+const supportsReboot = (version?: string) => supportsNodeVersion(version, 6);
 
 interface NodeForm {
   id: number | null;
@@ -109,6 +116,13 @@ export default function NodePage() {
   const [scheduleError, setScheduleError] = useState('');
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const scheduleSavingRef = useRef(false);
+  const [usageHistoryNodeId, setUsageHistoryNodeId] = useState<number | null>(null);
+  const [usageHistoryRecords, setUsageHistoryRecords] = useState<VpsUsageRecord[]>([]);
+  const [usageHistoryLoading, setUsageHistoryLoading] = useState(false);
+  const [usageHistoryError, setUsageHistoryError] = useState('');
+  const [usageConfirmLoading, setUsageConfirmLoading] = useState<'same' | 'replace' | null>(null);
+  const usageHistoryRef = useRef({ nodeId: null as number | null, request: 0, confirming: false });
+  const [usageNow, setUsageNow] = useState(() => Date.now());
   const [form, setForm] = useState<NodeForm>({
     id: null,
     name: '',
@@ -134,6 +148,7 @@ export default function NodePage() {
   const systemInfoCacheRef = useRef<Map<number, NonNullable<Node['systemInfo']>>>(new Map());
   const statusUpdatedAtRef = useRef<Map<number, { at: number; status: number }>>(new Map());
   const scheduleUpdatedAtRef = useRef<Map<number, { at: number; fields: NodeRebootSchedule }>>(new Map());
+  const usageUpdatedAtRef = useRef<Map<number, { at: number; value: VpsUsage }>>(new Map());
   const nodeListRef = useRef<Node[]>([]);
   const quietRefreshTimerRef = useRef<number | null>(null);
   const loadNodesPendingRef = useRef(0);
@@ -152,6 +167,11 @@ export default function NodePage() {
       }
       closeWebSocket();
     };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setUsageNow(Date.now()), 60000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -211,10 +231,12 @@ export default function NodePage() {
           const current = currentNodes.get(node.id);
           const latestStatus = statusUpdatedAtRef.current.get(node.id);
           const latestSchedule = scheduleUpdatedAtRef.current.get(node.id);
+          const latestUsage = usageUpdatedAtRef.current.get(node.id);
           const status = latestStatus && latestStatus.at >= requestedAt ? latestStatus.status : node.status;
           return {
             ...node,
             ...(latestSchedule && latestSchedule.at >= requestedAt ? latestSchedule.fields : {}),
+            vpsUsage: latestUsage && latestUsage.at >= requestedAt ? latestUsage.value : node.vpsUsage,
             status,
             connectionStatus: status === 1 ? 'online' : 'offline',
             systemInfo: systemInfoCacheRef.current.get(node.id) || null,
@@ -236,6 +258,12 @@ export default function NodePage() {
           const cachedRuntime = runtimeIpCacheRef.current.get(node.id);
           return cachedRuntime ? { ...node, ...cachedRuntime } : node;
         }));
+        const historyNodeId = usageHistoryRef.current.nodeId;
+        if (historyNodeId !== null) {
+          const previousUsageId = currentNodes.get(historyNodeId)?.vpsUsage?.current?.id;
+          const nextUsageId = nextNodes.find((node: Node) => node.id === historyNodeId)?.vpsUsage?.current?.id;
+          if (nextUsageId !== previousUsageId) void loadUsageHistory(historyNodeId, true);
+        }
         nextNodes.forEach((node: Node) => observeRebootStatus(node.id, node.connectionStatus, requestedAt));
       } else {
         if (!quiet) toast.error(res.msg || '加载节点列表失败');
@@ -270,6 +298,14 @@ export default function NodePage() {
     const fields = { rebootIntervalHours: data.rebootIntervalHours, rebootNextAt: data.rebootNextAt };
     scheduleUpdatedAtRef.current.set(id, { at: Date.now(), fields });
     setNodeList(prev => prev.map(node => node.id === id ? { ...node, ...fields } : node));
+  };
+
+  const applyVpsUsage = (id: number, data: VpsUsage, requestedAt = Date.now()) => {
+    const cached = usageUpdatedAtRef.current.get(id);
+    if (cached && cached.at > requestedAt) return;
+    const value = { status: data.status, current: data.current, pending: data.pending };
+    usageUpdatedAtRef.current.set(id, { at: Date.now(), value });
+    setNodeList(prev => prev.map(node => node.id === id ? { ...node, vpsUsage: value } : node));
   };
 
   const observeRebootStatus = (id: number, status: Node['connectionStatus'], observedAt = Date.now()) => {
@@ -368,6 +404,13 @@ export default function NodePage() {
             phase: messageData.status === 'accepted' ? 'waiting' : 'unknown',
           });
         }
+      }
+    } else if (type === 'usage') {
+      const nodeId = Number(id);
+      const previous = usageUpdatedAtRef.current.get(nodeId)?.value || nodeListRef.current.find(node => node.id === nodeId)?.vpsUsage;
+      applyVpsUsage(nodeId, messageData);
+      if (usageHistoryRef.current.nodeId === nodeId && previous?.current?.id !== messageData.current?.id) {
+        void loadUsageHistory(nodeId, true);
       }
     } else if (type === 'wallMonitor') {
       setNodeList(prev => prev.map(node => {
@@ -681,6 +724,11 @@ export default function NodePage() {
     return node.connectionStatus === 'online' ? '等待重新上线或重新保存' : '等待节点上线后计时';
   };
 
+  const formatUsageDuration = (record: VpsUsageRecord): string => {
+    const seconds = Math.max(0, Math.floor(((record.replacedAt ?? usageNow) - record.startedAt) / 1000));
+    return seconds < 60 ? '不足1分钟' : formatUptime(seconds);
+  };
+
   // 验证IP地址格式
   const validateIp = (ip: string): boolean => {
     if (!ip || !ip.trim()) return false;
@@ -867,6 +915,77 @@ export default function NodePage() {
     }
   };
 
+  const loadUsageHistory = async (id: number, quiet = false) => {
+    const request = ++usageHistoryRef.current.request;
+    const requestedAt = Date.now();
+    if (!quiet) setUsageHistoryLoading(true);
+    try {
+      const res = await getNodeUsageHistory(id);
+      if (usageHistoryRef.current.nodeId !== id || usageHistoryRef.current.request !== request) return;
+      if (res.code === 0) {
+        applyVpsUsage(id, res.data, requestedAt);
+        setUsageHistoryRecords(res.data.records.slice(0, 3));
+      } else {
+        setUsageHistoryError(res.msg || '加载使用记录失败');
+      }
+    } catch {
+      if (usageHistoryRef.current.nodeId === id && usageHistoryRef.current.request === request) {
+        setUsageHistoryError('网络错误，暂时无法加载使用记录');
+      }
+    } finally {
+      if (usageHistoryRef.current.nodeId === id && usageHistoryRef.current.request === request) {
+        setUsageHistoryLoading(false);
+      }
+    }
+  };
+
+  const openUsageHistory = (node: Node) => {
+    usageHistoryRef.current.nodeId = node.id;
+    setUsageHistoryNodeId(node.id);
+    setUsageHistoryRecords([]);
+    setUsageHistoryError('');
+    setUsageNow(Date.now());
+    void loadUsageHistory(node.id);
+  };
+
+  const closeUsageHistory = () => {
+    if (usageHistoryRef.current.confirming) return;
+    usageHistoryRef.current.nodeId = null;
+    setUsageHistoryNodeId(null);
+  };
+
+  const handleConfirmUsage = async (decision: 'same' | 'replace') => {
+    const { nodeId, confirming } = usageHistoryRef.current;
+    if (nodeId === null || confirming) return;
+    const usage = nodeListRef.current.find(node => node.id === nodeId)?.vpsUsage;
+    if (!usage?.pending || (decision === 'same' && (!usage.current || !usage.pending.canKeepCurrent))) return;
+    usageHistoryRef.current.confirming = true;
+    setUsageConfirmLoading(decision);
+    setUsageHistoryError('');
+    const requestedAt = Date.now();
+    try {
+      const res = await confirmNodeUsage({
+        id: nodeId,
+        expectedUsageId: usage.current?.id ?? null,
+        candidateId: usage.pending.candidateId,
+        decision,
+      });
+      if (res.code === 0) {
+        applyVpsUsage(nodeId, res.data, requestedAt);
+        toast.success(decision === 'same' ? '已继续累计当前 VPS 的使用记录' : '已开始新的 VPS 使用记录');
+      } else {
+        const networkError = res.code === -1 && /timeout|network|request failed|aborted|econn/i.test(res.msg || '');
+        setUsageHistoryError(networkError ? '确认结果未知，正在刷新最新状态，请勿重复操作' : res.msg || '确认失败，已重新获取最新状态');
+      }
+    } catch {
+      setUsageHistoryError('确认结果未知，正在刷新最新状态，请勿重复操作');
+    } finally {
+      await loadUsageHistory(nodeId, true);
+      usageHistoryRef.current.confirming = false;
+      setUsageConfirmLoading(null);
+    }
+  };
+
   const confirmDelete = async () => {
     if (!nodeToDelete) return;
     
@@ -879,6 +998,7 @@ export default function NodePage() {
         runtimeIpCacheRef.current.delete(nodeToDelete.id);
         statusUpdatedAtRef.current.delete(nodeToDelete.id);
         scheduleUpdatedAtRef.current.delete(nodeToDelete.id);
+        usageUpdatedAtRef.current.delete(nodeToDelete.id);
         setNodeRebootState(nodeToDelete.id);
         setNodeList(prev => prev.filter(n => n.id !== nodeToDelete.id));
         setDeleteModalOpen(false);
@@ -1044,6 +1164,13 @@ export default function NodePage() {
   };
 
   const scheduleNode = nodeList.find(node => node.id === scheduleNodeId);
+  const usageHistoryNode = nodeList.find(node => node.id === usageHistoryNodeId);
+  const currentUsage = usageHistoryNode?.vpsUsage?.current;
+  const visibleUsageRecords = [
+    ...(currentUsage ? [currentUsage] : []),
+    ...usageHistoryRecords.filter(record => record.id !== currentUsage?.id && record.replacedAt !== null),
+  ].slice(0, 3);
+  const pendingUsage = usageHistoryNode?.vpsUsage?.pending;
 
   return (
     
@@ -1172,7 +1299,7 @@ export default function NodePage() {
                       <span className="text-xs">{node.version || '未知'}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-default-600">开机时间</span>
+                      <span className="text-default-600">本次开机时间</span>
                       <span className="text-xs">
                         {node.connectionStatus === 'online' && node.systemInfo 
                           ? formatUptime(node.systemInfo.uptime)
@@ -1316,24 +1443,48 @@ export default function NodePage() {
                     {/* 流量统计 */}
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       <div className="text-center p-2 bg-primary-50 dark:bg-primary-100/20 rounded border border-primary-200 dark:border-primary-300/20">
-                        <div className="text-primary-600 dark:text-primary-400 mb-0.5">↑ 上行流量</div>
+                        <div className="text-primary-600 dark:text-primary-400 mb-0.5">
+                          {node.vpsUsage?.current || supportsNodeVersion(node.version, 7) ? '累计上传' : '↑ 上行流量'}
+                        </div>
                         <div className="font-mono text-primary-700 dark:text-primary-300">
-                          {node.connectionStatus === 'online' && node.systemInfo 
-                            ? formatTraffic(node.systemInfo.uploadTraffic) 
-                            : '-'
-                          }
+                          {node.vpsUsage?.current ? formatTraffic(node.vpsUsage.current.uploadBytes)
+                            : !supportsNodeVersion(node.version, 7) && node.connectionStatus === 'online' && node.systemInfo
+                              ? formatTraffic(node.systemInfo.uploadTraffic) : '-'}
                         </div>
                       </div>
                       <div className="text-center p-2 bg-success-50 dark:bg-success-100/20 rounded border border-success-200 dark:border-success-300/20">
-                        <div className="text-success-600 dark:text-success-400 mb-0.5">↓ 下行流量</div>
+                        <div className="text-success-600 dark:text-success-400 mb-0.5">
+                          {node.vpsUsage?.current || supportsNodeVersion(node.version, 7) ? '累计下载' : '↓ 下行流量'}
+                        </div>
                         <div className="font-mono text-success-700 dark:text-success-300">
-                          {node.connectionStatus === 'online' && node.systemInfo 
-                            ? formatTraffic(node.systemInfo.downloadTraffic) 
-                            : '-'
-                          }
+                          {node.vpsUsage?.current ? formatTraffic(node.vpsUsage.current.downloadBytes)
+                            : !supportsNodeVersion(node.version, 7) && node.connectionStatus === 'online' && node.systemInfo
+                              ? formatTraffic(node.systemInfo.downloadTraffic) : '-'}
                         </div>
                       </div>
                     </div>
+                    {(node.vpsUsage?.current || supportsNodeVersion(node.version, 7)) && (
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between gap-2">
+                          <span className="text-default-500">累计总流量</span>
+                          <span className="font-mono">{node.vpsUsage?.current ? formatTraffic(node.vpsUsage.current.totalBytes) : '-'}</span>
+                        </div>
+                        <div className="flex justify-between gap-2">
+                          <span className="text-default-500">累计使用时长</span>
+                          <span>{node.vpsUsage?.current ? formatUsageDuration(node.vpsUsage.current) : '-'}</span>
+                        </div>
+                      </div>
+                    )}
+                    {!supportsNodeVersion(node.version, 7) ? (
+                      <p className="text-xs text-default-500">升级节点至 3.1.7 后启用累计统计。</p>
+                    ) : node.vpsUsage?.pending ? (
+                      <p className="text-xs text-warning-600">VPS 身份待确认，请在使用记录中选择是否更换或重装。</p>
+                    ) : !node.vpsUsage?.current ? (
+                      <p className="text-xs text-default-500">等待节点上报累计统计。</p>
+                    ) : null}
+                    <Button size="sm" variant="flat" className="w-full min-h-8" onPress={() => openUsageHistory(node)}>
+                      VPS 使用记录{node.vpsUsage?.pending ? ' · 待确认' : ''}
+                    </Button>
                   </div>
 
                   {/* 操作按钮 */}
@@ -1429,6 +1580,86 @@ export default function NodePage() {
             ))}
           </div>
         )}
+
+        {/* VPS 当前与最近两份历史记录 */}
+        <Modal
+          isOpen={usageHistoryNodeId !== null}
+          onClose={closeUsageHistory}
+          isDismissable={!usageConfirmLoading}
+          isKeyboardDismissDisabled={Boolean(usageConfirmLoading)}
+          hideCloseButton={Boolean(usageConfirmLoading)}
+          size="2xl"
+          scrollBehavior="inside"
+          backdrop="blur"
+          placement="center"
+        >
+          <ModalContent>
+            <ModalHeader>VPS 使用记录 - {usageHistoryNode?.name || '节点'}</ModalHeader>
+            <ModalBody className="gap-4">
+              <p className="text-sm text-default-500">
+                保留当前 VPS 和最近 2 份历史记录。首次启用从 0 开始累计；重启、更新和更换 IP 会继续累计，离线时间也计入使用时长。
+              </p>
+              {usageHistoryError && <p role="alert" className="text-sm text-danger">{usageHistoryError}</p>}
+              {pendingUsage && (
+                <div className="space-y-2 border-b border-divider pb-4">
+                  <p className="text-sm font-medium text-warning-600">待确认 VPS 身份</p>
+                  <p className="text-sm break-words">地址：{pendingUsage.address || '未上报'}</p>
+                  <p className="text-sm text-default-500">发现时间：{formatMonitorTime(pendingUsage.detectedAt)}</p>
+                  <p className="text-sm text-default-600">{pendingUsage.reason}</p>
+                  <p className="text-xs text-default-500">确认更换或重装后会开始新记录；超出 3 份时删除最早一份。</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="flat"
+                      color="primary"
+                      isDisabled={!currentUsage || !pendingUsage.canKeepCurrent || Boolean(usageConfirmLoading)}
+                      isLoading={usageConfirmLoading === 'same'}
+                      onPress={() => handleConfirmUsage('same')}
+                    >
+                      仍是同一台
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="flat"
+                      color="warning"
+                      isDisabled={Boolean(usageConfirmLoading)}
+                      isLoading={usageConfirmLoading === 'replace'}
+                      onPress={() => handleConfirmUsage('replace')}
+                    >
+                      已更换／重装
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {usageHistoryLoading ? (
+                <div className="flex items-center gap-2 py-4 text-sm text-default-500"><Spinner size="sm" />正在加载记录…</div>
+              ) : visibleUsageRecords.length ? visibleUsageRecords.map((record, index) => (
+                <div key={record.id} className="space-y-2 border-b border-divider pb-4 last:border-0">
+                  <div className="flex flex-wrap justify-between gap-2 text-sm">
+                    <span className="font-medium">{record.replacedAt === null ? '当前 VPS'
+                      : index - (currentUsage ? 1 : 0) === 0 ? '上一台 VPS' : '上上一台 VPS'}</span>
+                    <span className="break-all font-mono text-xs text-default-500">{record.address || '未上报地址'}</span>
+                  </div>
+                  <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
+                    <div className="flex justify-between gap-2"><dt className="text-default-500">开始时间</dt><dd>{formatMonitorTime(record.startedAt)}</dd></div>
+                    <div className="flex justify-between gap-2"><dt className="text-default-500">更换时间</dt><dd>{record.replacedAt ? formatMonitorTime(record.replacedAt) : '使用中'}</dd></div>
+                    <div className="flex justify-between gap-2"><dt className="text-default-500">累计上传</dt><dd>{formatTraffic(record.uploadBytes)}</dd></div>
+                    <div className="flex justify-between gap-2"><dt className="text-default-500">累计下载</dt><dd>{formatTraffic(record.downloadBytes)}</dd></div>
+                    <div className="flex justify-between gap-2"><dt className="text-default-500">累计总流量</dt><dd>{formatTraffic(record.totalBytes)}</dd></div>
+                    <div className="flex justify-between gap-2"><dt className="text-default-500">使用时长</dt><dd>{formatUsageDuration(record)}</dd></div>
+                  </dl>
+                </div>
+              )) : (
+                <p className="py-4 text-sm text-default-500">
+                  {supportsNodeVersion(usageHistoryNode?.version, 7) ? '暂无使用记录，等待节点上报或完成身份确认。' : '升级节点至 3.1.7 后启用累计统计。'}
+                </p>
+              )}
+            </ModalBody>
+            <ModalFooter>
+              <Button variant="flat" isDisabled={Boolean(usageConfirmLoading)} onPress={closeUsageHistory}>关闭</Button>
+            </ModalFooter>
+          </ModalContent>
+        </Modal>
 
         {/* 定时重启设置 */}
         <Modal
@@ -1626,7 +1857,7 @@ export default function NodePage() {
                 </ModalHeader>
                 <ModalBody>
                   <p>确定要删除节点 <strong>"{nodeToDelete?.name}"</strong> 吗？</p>
-                  <p className="text-small text-default-500">此操作不可恢复，请谨慎操作。</p>
+                  <p className="text-small text-default-500">该节点最多 3 份 VPS 使用记录也会一并删除，此操作不可恢复。</p>
                 </ModalBody>
                 <ModalFooter>
                   <Button variant="light" onPress={onClose}>

@@ -51,6 +51,7 @@ public class WebSocketInterceptor extends HttpSessionHandshakeInterceptor {
             attributes.put("id", node.getId());
             attributes.put("nodeSecret", secret);
             attributes.put("nodeVersion", version);
+            attributes.put("usageCapable", "1".equals(serverHttpRequest.getServletRequest().getParameter("usage")));
             attributes.put("clientIp", clientIp);
             attributes.put("nodePublicIp", publicIp);
             attributes.put("nodePublicIpv4", publicIpv4);
@@ -61,6 +62,7 @@ public class WebSocketInterceptor extends HttpSessionHandshakeInterceptor {
             boolean b = JwtUtil.validateToken(secret);
             if (!b) return false;
             attributes.put("id", JwtUtil.getUserIdFromToken(secret));
+            attributes.put("administrator", Integer.valueOf(0).equals(JwtUtil.getRoleIdFromToken(secret)));
         }
         attributes.put("type", type);
         return true;

@@ -39,6 +39,8 @@ type SystemInfo struct {
 	PublicIP         string  `json:"public_ip,omitempty"`
 	PublicIPv4       string  `json:"public_ipv4,omitempty"`
 	PublicIPv6       string  `json:"public_ipv6,omitempty"`
+
+	VPSUsage *VPSUsage `json:"vps_usage,omitempty"`
 }
 
 // NetworkStats 网络统计信息
@@ -138,6 +140,7 @@ type WebSocketReporter struct {
 	publicIPv6     string
 	aesCrypto      *crypto.AESCrypto // 新增：AES加密器
 	rebooter       *nodeRebooter
+	usage          *usageCollector
 }
 
 const (
@@ -169,6 +172,7 @@ func NewWebSocketReporter(serverURL string, secret string) *WebSocketReporter {
 		connecting:     false,
 		aesCrypto:      aesCrypto,
 		rebooter:       newNodeRebooter(),
+		usage:          newUsageCollector(usageStatePath),
 	}
 }
 
@@ -182,14 +186,20 @@ func NewWebSocketReporterWithConfig(addr string, secret string, version string) 
 
 // Start 启动WebSocket报告器
 func (w *WebSocketReporter) Start() {
+	w.usage.start(w.ctx)
+	w.rebooter.before = w.usage.flush
 	go w.run()
 }
 
 // Stop 停止WebSocket报告器
 func (w *WebSocketReporter) Stop() {
 	w.cancel()
-	if w.conn != nil {
-		w.conn.Close()
+	w.usage.stop()
+	w.connMutex.Lock()
+	conn := w.conn
+	w.connMutex.Unlock()
+	if conn != nil {
+		conn.Close()
 	}
 
 }
@@ -319,6 +329,13 @@ func (w *WebSocketReporter) handleConnection() {
 	// 启动消息接收goroutine
 	go w.receiveMessages()
 
+	// Identity admission cannot depend on the panel issuing a command first.
+	w.usage.sampleAndLog()
+	if err := w.sendSystemInfo(w.collectSystemInfo()); err != nil {
+		logger.Default().Warnf("首次节点信息发送失败: %v", err)
+		return
+	}
+
 	refreshDone := make(chan struct{})
 	go w.refreshPublicIPs(refreshDone)
 	defer close(refreshDone)
@@ -379,6 +396,7 @@ func (w *WebSocketReporter) collectSystemInfo() SystemInfo {
 		PublicIP:         publicIP,
 		PublicIPv4:       publicIPv4,
 		PublicIPv6:       publicIPv6,
+		VPSUsage:         w.usage.snapshot(),
 	}
 }
 
@@ -1172,6 +1190,7 @@ func buildWebSocketURL(addr string, secret string, version string, publicIP stri
 	q.Set("type", "1")
 	q.Set("secret", secret)
 	q.Set("version", version)
+	q.Set("usage", "1")
 	if publicIP != "" {
 		q.Set("publicIp", publicIP)
 	}

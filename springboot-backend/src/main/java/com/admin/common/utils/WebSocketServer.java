@@ -3,11 +3,14 @@ package com.admin.common.utils;
 
 import com.admin.common.dto.GostConfigDto;
 import com.admin.common.dto.GostDto;
+import com.admin.common.dto.UsageSnapshot;
 import com.admin.common.task.CheckGostConfigAsync;
 import com.admin.entity.Node;
 import com.admin.service.CloudflareDnsSyncService;
 import com.admin.service.NodeService;
 import com.admin.service.NodeRebootService;
+import com.admin.service.NodeUsageService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +40,9 @@ public class WebSocketServer extends TextWebSocketHandler {
     NodeRebootService nodeRebootService;
 
     @Resource
+    NodeUsageService nodeUsageService;
+
+    @Resource
     @org.springframework.context.annotation.Lazy
     CloudflareDnsSyncService cloudflareDnsSyncService;
 
@@ -45,10 +51,13 @@ public class WebSocketServer extends TextWebSocketHandler {
     
     // 存储节点ID和对应的WebSocket session映射
     private static final ConcurrentHashMap<Long, WebSocketSession> nodeSessions = new ConcurrentHashMap<>();
+    // One unapproved replacement per node; it cannot change live metadata or receive commands.
+    private static final ConcurrentHashMap<Long, WebSocketSession> usageCandidateSessions = new ConcurrentHashMap<>();
+    private static final ObjectMapper usageJson = new ObjectMapper();
     private static final Object[] nodeLifecycleLocks = java.util.stream.IntStream.range(0, 64)
             .mapToObj(i -> new Object()).toArray();
 
-    private static Object nodeLifecycleLock(Long id) {
+    public static Object nodeLifecycleLock(Long id) {
         return nodeLifecycleLocks[Math.floorMod(id.hashCode(), nodeLifecycleLocks.length)];
     }
 
@@ -87,6 +96,14 @@ public class WebSocketServer extends TextWebSocketHandler {
     //接受客户端消息
     @Override
     public void handleTextMessage(WebSocketSession session, TextMessage message) {
+        Object lock = "1".equals(session.getAttributes().get("type"))
+                ? nodeLifecycleLock(Long.valueOf(session.getAttributes().get("id").toString())) : session;
+        synchronized (lock) {
+            processTextMessage(session, message);
+        }
+    }
+
+    private void processTextMessage(WebSocketSession session, TextMessage message) {
         try {
             if (StringUtils.isNoneBlank(message.getPayload())) {
                 
@@ -97,7 +114,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                 if (Objects.equals(type, "1")) {
                     Long nodeId = Long.valueOf(id);
                     WebSocketSession currentSession = nodeSessions.get(nodeId);
-                    if (currentSession == null || !currentSession.equals(session) || !session.isOpen()) {
+                    if ((currentSession != session && usageCandidateSessions.get(nodeId) != session) || !session.isOpen()) {
                         log.debug("忽略节点 {} 的旧 WebSocket 消息，sessionId={}", nodeId, session.getId());
                         return;
                     }
@@ -108,11 +125,16 @@ public class WebSocketServer extends TextWebSocketHandler {
 
                 if (decryptedPayload.contains("memory_usage")){
                     if (Objects.equals(type, "1")) {
+                        JSONObject metrics = JSONObject.parseObject(decryptedPayload);
+                        if (!acceptUsageInfo(Long.valueOf(id), session, metrics)) return;
+                        metrics.remove("vps_usage");
+                        decryptedPayload = metrics.toJSONString();
                         handleNodeSystemInfo(id, session, decryptedPayload);
                     }
                     sendToUser(session, "{\"type\":\"call\"}", nodeSecret);
                 }else if (decryptedPayload.contains("requestId")) {
                     if (!Objects.equals(type, "1")) return;
+                    if (nodeSessions.get(Long.valueOf(id)) != session) return;
                     // 处理命令响应消息
                     try {
                         JSONObject responseJson = JSONObject.parseObject(decryptedPayload);
@@ -175,7 +197,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                     return;
                 }
 
-                if (Objects.equals(type, "1")) {
+                if (Objects.equals(type, "1") && nodeSessions.get(Long.valueOf(id)) == session) {
                     JSONObject jsonObject = new JSONObject();
                     jsonObject.put("id", id);
                     jsonObject.put("type", "info");
@@ -192,6 +214,73 @@ public class WebSocketServer extends TextWebSocketHandler {
             }
         } catch (Exception e) {
             log.error("处理WebSocket消息时发生异常: {}", e.getMessage(), e);
+        }
+    }
+
+    private boolean acceptUsageInfo(Long nodeId, WebSocketSession session, JSONObject metrics) {
+        try {
+            if (usageCandidateSessions.get(nodeId) == session) {
+                UsageSnapshot snapshot = UsageSnapshot.from(metrics.getJSONObject("vps_usage"));
+                session.getAttributes().put("usageSnapshot", snapshot);
+                String address = firstNonBlank(metrics.getString("public_ip"), metrics.getString("public_ipv4"),
+                        metrics.getString("public_ipv6"), (String) session.getAttributes().get("clientIp"));
+                NodeUsageService.AdmissionDecision decision = nodeUsageService.admit(nodeId, session.getId(), snapshot,
+                        isNodeConnected(nodeId), address);
+                if (decision.accepted()) activateUsageCandidate(nodeId, session.getId(), decision.usageId());
+                broadcastUsage(nodeId, decision.summary());
+                return decision.accepted() && nodeSessions.get(nodeId) == session;
+            }
+            if (nodeSessions.get(nodeId) != session) return false;
+            Object usageId = session.getAttributes().get("usageId");
+            if (usageId != null && metrics.getJSONObject("vps_usage") != null) {
+                UsageSnapshot sample = UsageSnapshot.from(metrics.getJSONObject("vps_usage"));
+                UsageSnapshot bound = (UsageSnapshot) session.getAttributes().get("usageSnapshot");
+                if (bound == null || !bound.meterEpoch().equals(sample.meterEpoch())
+                        || changedIdentity(bound.hardwareId(), sample.hardwareId())
+                        || changedIdentity(bound.systemId(), sample.systemId())) {
+                    session.close(CloseStatus.POLICY_VIOLATION.withReason("Usage identity changed; reconnect"));
+                    return false;
+                }
+                broadcastUsage(nodeId, nodeUsageService.acceptSample(nodeId, (Long) usageId, sample));
+            }
+            return true;
+        } catch (IllegalArgumentException e) {
+            log.debug("忽略无效的 VPS 累计信息，nodeId={}: {}", nodeId, e.getMessage());
+            return nodeSessions.get(nodeId) == session;
+        } catch (Exception e) {
+            log.warn("保存 VPS 累计信息失败，nodeId={}: {}", nodeId, e.getMessage());
+            return nodeSessions.get(nodeId) == session;
+        }
+    }
+
+    private static boolean changedIdentity(String previous, String current) {
+        return previous != null && current != null && !previous.isEmpty() && !current.isEmpty() && !previous.equals(current);
+    }
+
+    public static boolean hasUsageCandidateConnection(Long nodeId) {
+        WebSocketSession candidate = usageCandidateSessions.get(nodeId);
+        return candidate != null && candidate.isOpen() && candidate.getAttributes().get("usageSnapshot") != null;
+    }
+
+    public void activateUsageCandidate(Long nodeId, String sessionId, Long usageId) {
+        synchronized (nodeLifecycleLock(nodeId)) {
+            WebSocketSession candidate = usageCandidateSessions.get(nodeId);
+            if (candidate == null || !candidate.getId().equals(sessionId) || !candidate.isOpen()) return;
+            candidate.getAttributes().put("usageId", usageId);
+            usageCandidateSessions.remove(nodeId, candidate);
+            establishConnection(candidate);
+        }
+    }
+
+    public static void broadcastUsage(Long nodeId, NodeUsageService.UsageSummary summary) {
+        if (summary == null) return;
+        try {
+            String message = usageJson.writeValueAsString(java.util.Map.of("id", nodeId, "type", "usage", "data", summary));
+            for (WebSocketSession session : activeSessions) {
+                if (Boolean.TRUE.equals(session.getAttributes().get("administrator"))) sendToUser(session, message);
+            }
+        } catch (Exception e) {
+            log.warn("广播 VPS 累计信息失败，nodeId={}: {}", nodeId, e.getMessage());
         }
     }
 
@@ -379,6 +468,8 @@ public class WebSocketServer extends TextWebSocketHandler {
             return;
         }
 
+        WebSocketSession candidate = usageCandidateSessions.remove(nodeId);
+        if (candidate != null) closeQuietly(candidate, "Node deleted");
         WebSocketSession session = nodeSessions.remove(nodeId);
         clearLatestSystemInfo(nodeId);
         if (session == null) {
@@ -471,7 +562,36 @@ public class WebSocketServer extends TextWebSocketHandler {
         Object lock = "1".equals(session.getAttributes().get("type"))
                 ? nodeLifecycleLock(Long.valueOf(session.getAttributes().get("id").toString())) : session;
         synchronized (lock) {
+            if ("1".equals(session.getAttributes().get("type"))) {
+                Long nodeId = Long.valueOf(session.getAttributes().get("id").toString());
+                Node node = nodeService.getById(nodeId);
+                if (node == null || !Objects.equals(node.getSecret(), session.getAttributes().get("nodeSecret"))) {
+                    closeQuietly(session, "Node authorization changed");
+                    return;
+                }
+                if (Boolean.TRUE.equals(session.getAttributes().get("usageCapable"))) {
+                    WebSocketSession previous = usageCandidateSessions.put(nodeId, session);
+                    if (previous != null && previous != session) {
+                        nodeUsageService.discardCandidate(nodeId, previous.getId());
+                        closeQuietly(previous, "Replaced pending connection");
+                    }
+                    return;
+                }
+                if (node.getCurrentUsageId() != null) {
+                    closeQuietly(session, "Upgrade node to 3.1.7 to verify VPS identity");
+                    return;
+                }
+            }
             establishConnection(session);
+        }
+    }
+
+    private static void closeQuietly(WebSocketSession session, String reason) {
+        sessionLocks.remove(session.getId());
+        try {
+            if (session.isOpen()) session.close(CloseStatus.POLICY_VIOLATION.withReason(reason));
+        } catch (Exception e) {
+            log.debug("关闭节点连接失败: {}", e.getMessage());
         }
     }
 
@@ -617,6 +737,13 @@ public class WebSocketServer extends TextWebSocketHandler {
             } else {
                 // 客户端节点连接关闭
                 Long nodeId = Long.valueOf(id);
+
+                if (usageCandidateSessions.remove(nodeId, session)) {
+                    nodeUsageService.discardCandidate(nodeId, sessionId);
+                    broadcastUsage(nodeId, nodeUsageService.summary(nodeId));
+                    sessionLocks.remove(sessionId);
+                    return;
+                }
                 
                 // 验证当前会话是否还是活跃会话（关键：这里会自动过滤掉被覆盖的旧连接）
                 WebSocketSession currentSession = nodeSessions.get(nodeId);

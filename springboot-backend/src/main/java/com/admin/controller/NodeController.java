@@ -7,8 +7,11 @@ import com.admin.common.dto.NodeDto;
 import com.admin.common.dto.NodeUpdateDto;
 import com.admin.common.dto.NodeRebootDto;
 import com.admin.common.dto.NodeRebootScheduleDto;
+import com.admin.common.dto.NodeUsageConfirmDto;
 import com.admin.common.lang.R;
+import com.admin.common.utils.WebSocketServer;
 import com.admin.service.NodeRebootService;
+import com.admin.service.NodeUsageService;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,6 +33,38 @@ public class NodeController extends BaseController {
 
     @Resource
     private NodeRebootService nodeRebootService;
+
+    @Resource
+    private NodeUsageService nodeUsageService;
+
+    @Resource(name = "myHandler")
+    private WebSocketServer webSocketServer;
+
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/usage-history")
+    public R usageHistory(@Validated @RequestBody NodeRebootDto request) {
+        return nodeUsageService.history(request.getId());
+    }
+
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/usage-confirm")
+    public R confirmUsage(@Validated @RequestBody NodeUsageConfirmDto request) {
+        synchronized (WebSocketServer.nodeLifecycleLock(request.getId())) {
+            if (!WebSocketServer.hasUsageCandidateConnection(request.getId())) {
+                return R.err("待确认的节点已断开，请刷新后重试");
+            }
+            try {
+                NodeUsageService.ConfirmationResult result = nodeUsageService.confirm(request);
+                webSocketServer.activateUsageCandidate(request.getId(), result.acceptedSessionId(), result.usageId());
+                WebSocketServer.broadcastUsage(request.getId(), result.summary());
+                return R.ok(result.summary());
+            } catch (IllegalArgumentException e) {
+                return R.err(e.getMessage());
+            }
+        }
+    }
 
     @LogAnnotation
     @RequireRole

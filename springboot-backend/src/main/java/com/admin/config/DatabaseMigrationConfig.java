@@ -28,6 +28,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("add node remote change ip token", () -> addNodeRemoteChangeIpToken(connection));
             runStep("add node remote change ip settings", () -> addNodeRemoteChangeIpSettings(connection));
             runStep("add node reboot settings", () -> addNodeRebootSettings(connection));
+            runStep("create node VPS usage storage", () -> addNodeUsageStorage(connection));
             runStep("add node wall monitor columns", () -> addNodeWallMonitorColumns(connection));
             runStep("relax node ip columns", () -> relaxNodeIpColumns(connection));
             runStep("widen tunnel ip columns", () -> widenIpColumns(connection));
@@ -192,6 +193,14 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 "ALTER TABLE node ADD COLUMN change_ip_min_interval_minutes INT NULL AFTER remote_change_ip_token");
         ensureColumn(connection, "node", "change_ip_remote_api",
                 "ALTER TABLE node ADD COLUMN change_ip_remote_api VARCHAR(1000) NULL AFTER change_ip_min_interval_minutes");
+    }
+
+    private void addNodeUsageStorage(Connection connection) throws Exception {
+        ensureColumn(connection, "node", "current_usage_id",
+                "ALTER TABLE node ADD COLUMN current_usage_id BIGINT NULL AFTER version");
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(NodeUsageSchema.CREATE_TABLE);
+        }
     }
 
     private void addNodeRebootSettings(Connection connection) throws Exception {

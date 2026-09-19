@@ -66,6 +66,7 @@ CREATE TABLE `node` (
   `port_sta` int(10) NOT NULL,
   `port_end` int(10) NOT NULL,
   `version` varchar(100) DEFAULT NULL,
+  `current_usage_id` bigint(20) DEFAULT NULL,
   `reboot_interval_hours` int(10) NOT NULL DEFAULT '0',
   `reboot_next_at` bigint(20) DEFAULT NULL,
   `wall_monitor_enabled` tinyint(1) NOT NULL DEFAULT '1',
@@ -425,6 +426,28 @@ ALTER TABLE `cloudflare_dns_setting`
 --
 ALTER TABLE `cloudflare_dns_binding`
   MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+-- VPS usage has a hard retention of three rows per node, enforced by the rotation transaction.
+CREATE TABLE IF NOT EXISTS node_vps_usage (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  node_id INT NOT NULL,
+  hardware_id CHAR(64) NOT NULL DEFAULT '',
+  system_id CHAR(64) NOT NULL DEFAULT '',
+  mac_id CHAR(64) NOT NULL DEFAULT '',
+  installation_id VARCHAR(36) NOT NULL DEFAULT '',
+  weak_identity_approved TINYINT NOT NULL DEFAULT 0,
+  started_at BIGINT NOT NULL,
+  replaced_at BIGINT NULL,
+  address VARCHAR(255) NOT NULL DEFAULT '',
+  upload_bytes BIGINT NOT NULL DEFAULT 0,
+  download_bytes BIGINT NOT NULL DEFAULT 0,
+  meter_epoch VARCHAR(36) NOT NULL,
+  last_sequence BIGINT NOT NULL,
+  checkpoint_upload_bytes BIGINT NOT NULL,
+  checkpoint_download_bytes BIGINT NOT NULL,
+  last_reported_at BIGINT NOT NULL,
+  KEY idx_node_vps_usage_node (node_id, id),
+  CONSTRAINT fk_node_vps_usage_node FOREIGN KEY (node_id) REFERENCES node(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

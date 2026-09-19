@@ -18,6 +18,7 @@ import com.admin.service.CloudflareDnsSettingService;
 import com.admin.service.CloudflareDnsSyncService;
 import com.admin.service.ForwardService;
 import com.admin.service.NodeService;
+import com.admin.service.NodeUsageService;
 import com.admin.service.TunnelService;
 import com.admin.service.ViteConfigService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -98,6 +99,9 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     ViteConfigService viteConfigService;
 
     @Resource
+    private NodeUsageService nodeUsageService;
+
+    @Resource
     @Lazy
     private CloudflareDnsSettingService cloudflareDnsSettingService;
 
@@ -144,6 +148,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         List<Node> nodeList = this.list();
         String remoteChangeIpBaseUrl = resolveRemoteChangeIpBaseUrl();
         nodeList.forEach(node -> {
+            node.setVpsUsage(nodeUsageService.summary(node.getId()));
             if (StrUtil.isNotBlank(remoteChangeIpBaseUrl)
                     && StrUtil.isNotBlank(node.getRemoteChangeIpToken())) {
                 node.setRemoteChangeIpUrl(remoteChangeIpBaseUrl
@@ -392,12 +397,15 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         }
 
         // 3. 执行删除操作
-        WebSocketServer.disconnectNode(id);
-        boolean result = this.removeById(id);
-        if (result) {
-            WebSocketServer.clearLatestSystemInfo(id);
+        synchronized (WebSocketServer.nodeLifecycleLock(id)) {
+            WebSocketServer.disconnectNode(id);
+            boolean result = this.removeById(id);
+            if (result) {
+                WebSocketServer.clearLatestSystemInfo(id);
+                nodeUsageService.forget(id);
+            }
+            return result ? R.ok(SUCCESS_DELETE_MSG) : R.err(ERROR_DELETE_MSG);
         }
-        return result ? R.ok(SUCCESS_DELETE_MSG) : R.err(ERROR_DELETE_MSG);
     }
 
     /**

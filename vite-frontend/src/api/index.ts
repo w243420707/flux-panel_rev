@@ -35,6 +35,39 @@ export interface NodeRebootSchedule {
 export const rebootNode = (id: number) => Network.post<NodeRebootSchedule>("/node/reboot", { id });
 export const updateNodeRebootSchedule = (id: number, intervalHours: number) =>
   Network.post<NodeRebootSchedule>("/node/reboot-schedule", { id, intervalHours });
+export interface VpsUsageRecord {
+  id: number;
+  startedAt: number;
+  replacedAt: number | null;
+  uploadBytes: number;
+  downloadBytes: number;
+  totalBytes: number;
+  durationSeconds: number;
+  lastReportedAt: number | null;
+  address: string;
+}
+export interface VpsUsageCandidate {
+  candidateId: string;
+  detectedAt: number;
+  address: string;
+  reason: string;
+  canKeepCurrent: boolean;
+}
+export interface VpsUsage {
+  status: 'active' | 'pending' | 'unsupported';
+  current: VpsUsageRecord | null;
+  pending: VpsUsageCandidate | null;
+}
+export interface VpsUsageHistory extends VpsUsage {
+  records: VpsUsageRecord[];
+}
+export const getNodeUsageHistory = (id: number) => Network.post<VpsUsageHistory>("/node/usage-history", { id });
+export const confirmNodeUsage = (data: {
+  id: number;
+  expectedUsageId: number | null;
+  candidateId: string;
+  decision: 'same' | 'replace';
+}) => Network.post<VpsUsage>("/node/usage-confirm", data);
 export type NodeInstallSource = 'github' | 'local';
 export const getNodeInstallCommand = (
   id: number,
