@@ -1,4 +1,4 @@
-import{u as k,r as t,j as e,b as d,a as o,df as f,z as n,dg as w,dh as P,di as A,dj as m,dk as C}from"./index-wTIjQ0EV.js";import{c as h,a as g}from"./chunk-QNLCCAKT-D1uA2wRh.js";const L=()=>{const j=k(),[i,u]=t.useState([]),[l,c]=t.useState(""),[a,x]=t.useState(""),r=s=>{u(s)},y=async()=>{window.setPanelAddresses=r,f()},p=async()=>{if(!l.trim()||!a.trim()){n.error("请输入名称和地址");return}if(!w(a.trim())){n.error(`地址格式不正确，请检查：
+import{u as k,r as t,j as e,b as d,a as o,df as f,z as n,dg as w,dh as P,di as A,dj as m,dk as C}from"./index-BbIW8G29.js";import{c as h,a as g}from"./chunk-QNLCCAKT-HXCxc34H.js";const L=()=>{const j=k(),[i,u]=t.useState([]),[l,c]=t.useState(""),[a,x]=t.useState(""),r=s=>{u(s)},y=async()=>{window.setPanelAddresses=r,f()},p=async()=>{if(!l.trim()||!a.trim()){n.error("请输入名称和地址");return}if(!w(a.trim())){n.error(`地址格式不正确，请检查：
 • 必须是完整的URL格式
 • 必须以 http:// 或 https:// 开头
 • 支持域名、IPv4、IPv6 地址

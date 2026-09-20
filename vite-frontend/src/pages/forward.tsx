@@ -172,6 +172,7 @@ export default function ForwardPage() {
       return 'direct';
     }
   });
+  const [searchQuery, setSearchQuery] = useState('');
   
   // 拖拽排序相关状态
   const [forwardOrder, setForwardOrder] = useState<number[]>([]);
@@ -1337,6 +1338,23 @@ export default function ForwardPage() {
     })
   );
 
+  const getSearchText = (forward: Forward): string => {
+    const status = getStatusDisplay(forward.status).text;
+    const strategy = getStrategyDisplay(forward.strategy).text;
+    return [
+      forward.id,
+      forward.name,
+      forward.tunnelName,
+      forward.inIp,
+      forward.inPort,
+      forward.remoteAddr,
+      forward.userName,
+      forward.strategy,
+      strategy,
+      status,
+    ].filter((value) => value !== undefined && value !== null).join(' ');
+  };
+
   // 根据排序顺序获取转发列表
   const getSortedForwards = (): Forward[] => {
     // 确保 forwards 数组存在且有效
@@ -1351,6 +1369,13 @@ export default function ForwardPage() {
       if (currentUserId !== null) {
         filteredForwards = forwards.filter(forward => forward.userId === currentUserId);
       }
+    }
+
+    const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
+    if (normalizedQuery) {
+      filteredForwards = filteredForwards.filter((forward) =>
+        getSearchText(forward).toLocaleLowerCase().includes(normalizedQuery)
+      );
     }
     
     // 确保过滤后的转发列表有效
@@ -1652,6 +1677,10 @@ export default function ForwardPage() {
   }
 
   const userGroups = groupForwardsByUserAndTunnel();
+  const visibleForwards = getSortedForwards();
+  const hasSearchQuery = searchQuery.trim().length > 0;
+  const noResultsText = hasSearchQuery ? '没有匹配的转发' : '暂无转发配置';
+  const noResultsHint = hasSearchQuery ? '请尝试搜索名称、隧道、地址或用户。' : '还没有创建任何转发配置，点击上方按钮开始创建';
 
   return (
     
@@ -1661,6 +1690,18 @@ export default function ForwardPage() {
           <div className="flex-1">
           </div>
           <div className="flex items-center justify-end gap-2 flex-wrap">
+            <Input
+              aria-label="搜索转发"
+              placeholder="搜索转发名称、隧道、地址或用户"
+              value={searchQuery}
+              onValueChange={setSearchQuery}
+              isClearable
+              onClear={() => setSearchQuery('')}
+              size="sm"
+              variant="bordered"
+              className="w-full sm:w-64 lg:w-72"
+              classNames={{ inputWrapper: 'min-h-8 h-8' }}
+            />
             {batchDeleteMode && (
               <>
                 <Chip color={selectedForwardIds.length > 0 ? 'danger' : 'default'} variant="flat" size="sm">
@@ -1848,8 +1889,8 @@ export default function ForwardPage() {
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-foreground">暂无转发配置</h3>
-                    <p className="text-default-500 text-sm mt-1">还没有创建任何转发配置，点击上方按钮开始创建</p>
+                    <h3 className="text-lg font-semibold text-foreground">{noResultsText}</h3>
+                    <p className="text-default-500 text-sm mt-1">{noResultsHint}</p>
                   </div>
                 </div>
               </CardBody>
@@ -1857,7 +1898,7 @@ export default function ForwardPage() {
           )
         ) : (
           /* 直接显示模式 */
-          forwards.length > 0 ? (
+          visibleForwards.length > 0 ? (
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
@@ -1865,11 +1906,11 @@ export default function ForwardPage() {
               onDragStart={() => {}} // 添加空的 onDragStart 处理器
             >
               <SortableContext
-                items={getSortedForwards().map(f => f.id || 0).filter(id => id > 0)}
+                items={visibleForwards.map(f => f.id || 0).filter(id => id > 0)}
                 strategy={rectSortingStrategy}
               >
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-                  {getSortedForwards().map((forward) => (
+                  {visibleForwards.map((forward) => (
                     forward && forward.id ? (
                       <SortableForwardCard key={forward.id} forward={forward} />
                     ) : null
@@ -1888,8 +1929,8 @@ export default function ForwardPage() {
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-foreground">暂无转发配置</h3>
-                    <p className="text-default-500 text-sm mt-1">还没有创建任何转发配置，点击上方按钮开始创建</p>
+                    <h3 className="text-lg font-semibold text-foreground">{noResultsText}</h3>
+                    <p className="text-default-500 text-sm mt-1">{noResultsHint}</p>
                   </div>
                 </div>
               </CardBody>
