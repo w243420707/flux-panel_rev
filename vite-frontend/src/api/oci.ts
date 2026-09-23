@@ -22,6 +22,10 @@ export interface OciTestResult {
   instanceCount: number;
 }
 
+export interface OciPrivateKeyResult {
+  privateKey: string;
+}
+
 export interface OciInstance {
   instanceOcid: string;
   displayName: string;
@@ -37,6 +41,9 @@ export const saveOciAccount = (data: OciAccountPayload) =>
 
 export const deleteOciAccount = (id: number) =>
   Network.post<void>("/oci/account/delete", { id });
+
+export const getOciAccountPrivateKey = (id: number) =>
+  Network.post<OciPrivateKeyResult>("/oci/account/private-key", { id });
 
 export const testOciAccount = (id: number) =>
   Network.post<OciTestResult>("/oci/account/test", { id });

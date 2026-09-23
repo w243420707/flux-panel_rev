@@ -39,6 +39,17 @@ public class OciAccountController {
     }
 
     @RequireRole
+    @PostMapping("/private-key")
+    public R privateKey(@RequestBody OciAccountIdDto dto) {
+        try {
+            return R.ok(java.util.Map.of("privateKey",
+                    ociAccountService.getPrivateKey(dto == null ? null : dto.getId())));
+        } catch (IllegalArgumentException e) {
+            return R.err(e.getMessage());
+        }
+    }
+
+    @RequireRole
     @PostMapping("/test")
     public R test(@RequestBody OciAccountIdDto dto) {
         try {

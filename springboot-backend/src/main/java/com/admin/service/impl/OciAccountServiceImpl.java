@@ -126,6 +126,11 @@ public class OciAccountServiceImpl implements OciAccountService {
     }
 
     @Override
+    public String getPrivateKey(Long id) {
+        return decryptPrivateKey(requireAccount(id));
+    }
+
+    @Override
     public OciAccountTestResult testAccount(Long id) {
         OciAccount account = requireAccount(id);
         List<OciInstanceView> instances = ociCloudService.listInstances(account, decryptPrivateKey(account));

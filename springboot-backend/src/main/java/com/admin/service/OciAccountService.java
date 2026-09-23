@@ -12,6 +12,7 @@ public interface OciAccountService {
     List<Map<String, Object>> listAccounts();
     R saveAccount(OciAccountSaveDto dto);
     R deleteAccount(Long id);
+    String getPrivateKey(Long id);
     OciAccountTestResult testAccount(Long id);
     List<OciInstanceView> listInstances(Long accountId);
     boolean accountExists(Long accountId);

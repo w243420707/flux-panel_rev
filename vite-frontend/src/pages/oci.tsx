@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Alert } from "@heroui/alert";
 import { Button } from "@heroui/button";
 import { Chip } from "@heroui/chip";
 import { Input, Textarea } from "@heroui/input";
@@ -9,6 +8,7 @@ import toast from "react-hot-toast";
 
 import {
   deleteOciAccount,
+  getOciAccountPrivateKey,
   listOciAccounts,
   listOciInstances,
   saveOciAccount,
@@ -46,6 +46,7 @@ export default function OciPage() {
   const [instances, setInstances] = useState<OciInstance[]>([]);
   const [instancesLoading, setInstancesLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [privateKeyLoadingId, setPrivateKeyLoadingId] = useState<number | null>(null);
 
   useEffect(() => {
     void loadAccounts();
@@ -72,7 +73,7 @@ export default function OciPage() {
     setFormOpen(true);
   };
 
-  const openEdit = (account: OciAccountSummary) => {
+  const openEdit = async (account: OciAccountSummary) => {
     setForm({
       id: account.id,
       name: account.name,
@@ -80,6 +81,21 @@ export default function OciPage() {
       privateKey: "",
     });
     setFormOpen(true);
+    setPrivateKeyLoadingId(account.id);
+    try {
+      const response = await getOciAccountPrivateKey(account.id);
+      if (response.code === 0 && response.data?.privateKey) {
+        setForm(current => current.id === account.id
+          ? { ...current, privateKey: response.data.privateKey }
+          : current);
+      } else {
+        toast.error(response.msg || "读取 OCI 私钥失败");
+      }
+    } catch {
+      toast.error("读取 OCI 私钥失败");
+    } finally {
+      setPrivateKeyLoadingId(null);
+    }
   };
 
   const updateField = (field: keyof OciAccountPayload, value: string) => {
@@ -189,10 +205,6 @@ export default function OciPage() {
         </Button>
       </header>
 
-      <Alert color="warning" variant="flat" className="mb-5">
-        私钥仅在新增或更新时提交，列表不会返回私钥。编辑时留空表示保留已保存的私钥。
-      </Alert>
-
       {loading ? (
         <div className="flex min-h-48 items-center justify-center">
           <Spinner label="正在加载账号" />
@@ -245,7 +257,7 @@ export default function OciPage() {
                   >
                     测试连接
                   </Button>
-                  <Button size="sm" variant="flat" onPress={() => openEdit(account)}>
+                  <Button size="sm" variant="flat" onPress={() => void openEdit(account)} isLoading={privateKeyLoadingId === account.id}>
                     编辑
                   </Button>
                   <Button
@@ -287,7 +299,7 @@ export default function OciPage() {
                   />
                   <Textarea
                     label="Private Key"
-                    placeholder={form.id ? "留空则保留当前私钥" : "粘贴 OCI API Signing Key 私钥"}
+                    placeholder={privateKeyLoadingId === form.id ? "正在读取私钥..." : "粘贴 OCI API Signing Key 私钥"}
                     value={form.privateKey}
                     onValueChange={(value) => updateField("privateKey", value)}
                     minRows={8}
