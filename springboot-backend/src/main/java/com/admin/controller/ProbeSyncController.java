@@ -9,6 +9,7 @@ import com.admin.entity.Node;
 import com.admin.entity.ViteConfig;
 import com.admin.service.NodeService;
 import com.admin.service.NodeWallMonitorService;
+import com.admin.service.OciChangeIpService;
 import com.admin.service.ViteConfigService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.springframework.util.StringUtils;
@@ -32,6 +33,9 @@ public class ProbeSyncController {
 
     @Resource
     private NodeWallMonitorService nodeWallMonitorService;
+
+    @Resource
+    private OciChangeIpService ociChangeIpService;
 
     @RequireRole
     @PostMapping("/api/v1/probe-sync/key")
@@ -61,15 +65,13 @@ public class ProbeSyncController {
 
         List<Map<String, Object>> nodes = new ArrayList<>();
         List<Node> sourceNodes = nodeService.list(new QueryWrapper<Node>()
-                .select("id", "name", "server_ip", "server_ipv4", "server_ipv6", "change_ip_min_interval_minutes", "change_ip_remote_api", "status", "updated_time"));
+                .select("id", "name", "server_ip", "server_ipv4", "server_ipv6", "status", "updated_time"));
         for (Node node : sourceNodes) {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", node.getId());
             item.put("name", node.getName());
             item.put("host", resolveProbeHost(node));
             item.put("ports", "22");
-            item.put("changeIpMinIntervalMinutes", node.getChangeIpMinIntervalMinutes());
-            item.put("changeIpRemoteApi", normalize(node.getChangeIpRemoteApi()));
             item.put("status", node.getStatus());
             item.put("updatedAt", node.getUpdatedTime());
             nodes.add(item);
@@ -108,6 +110,9 @@ public class ProbeSyncController {
             if (markResult.getCode() != 0) {
                 ignored++;
                 continue;
+            }
+            if (Boolean.FALSE.equals(result.getReachable())) {
+                ociChangeIpService.requestAfterUnreachableReport(result.getNodeId());
             }
             accepted++;
         }

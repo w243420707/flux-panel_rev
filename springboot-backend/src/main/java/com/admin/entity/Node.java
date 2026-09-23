@@ -31,9 +31,19 @@ public class Node extends BaseEntity {
     @TableField(updateStrategy = FieldStrategy.IGNORED)
     private Integer changeIpMinIntervalMinutes;
 
-    /** External API called by the Android probe to change the node IP. */
+    private Integer oracleNode;
+
     @TableField(updateStrategy = FieldStrategy.IGNORED)
-    private String changeIpRemoteApi;
+    private Long ociAccountId;
+
+    @TableField(updateStrategy = FieldStrategy.IGNORED)
+    private String ociInstanceOcid;
+
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private Long changeIpLastAttemptAt;
+
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private String changeIpLastResult;
 
     @TableField(exist = false)
     private String remoteChangeIpUrl;

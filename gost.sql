@@ -59,6 +59,11 @@ CREATE TABLE `node` (
   `remote_change_ip_token` varchar(128) NOT NULL DEFAULT '',
   `change_ip_min_interval_minutes` int(10) DEFAULT NULL,
   `change_ip_remote_api` varchar(1000) DEFAULT NULL,
+  `oracle_node` tinyint(1) NOT NULL DEFAULT '0',
+  `oci_account_id` bigint(20) DEFAULT NULL,
+  `oci_instance_ocid` varchar(255) DEFAULT NULL,
+  `change_ip_last_attempt_at` bigint(20) DEFAULT NULL,
+  `change_ip_last_result` varchar(16) NOT NULL DEFAULT 'UNKNOWN',
   `ip` longtext,
   `server_ip` varchar(100) NOT NULL DEFAULT '',
   `server_ipv4` varchar(100) NOT NULL DEFAULT '',
@@ -448,6 +453,21 @@ CREATE TABLE IF NOT EXISTS node_vps_usage (
   KEY idx_node_vps_usage_node (node_id, id),
   CONSTRAINT fk_node_vps_usage_node FOREIGN KEY (node_id) REFERENCES node(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `oci_account` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `name` varchar(120) NOT NULL,
+  `user_ocid` varchar(255) NOT NULL,
+  `tenancy_ocid` varchar(255) NOT NULL,
+  `fingerprint` varchar(64) NOT NULL,
+  `region` varchar(80) NOT NULL,
+  `private_key_encrypted` longtext NOT NULL,
+  `created_time` bigint(20) DEFAULT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(10) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

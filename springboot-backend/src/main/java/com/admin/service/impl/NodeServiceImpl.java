@@ -13,6 +13,7 @@ import com.admin.entity.Node;
 import com.admin.entity.Tunnel;
 import com.admin.entity.ViteConfig;
 import com.admin.mapper.NodeMapper;
+import com.admin.service.OciAccountService;
 import com.admin.mapper.TunnelMapper;
 import com.admin.service.CloudflareDnsSettingService;
 import com.admin.service.CloudflareDnsSyncService;
@@ -29,6 +30,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import javax.annotation.Resource;
 import java.net.Inet4Address;
@@ -102,6 +104,9 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     private NodeUsageService nodeUsageService;
 
     @Resource
+    private OciAccountService ociAccountService;
+
+    @Resource
     @Lazy
     private CloudflareDnsSettingService cloudflareDnsSettingService;
 
@@ -130,9 +135,13 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
      */
     @Override
     public R createNode(NodeDto nodeDto) {
-        Node node = buildNewNode(nodeDto);
-        boolean result = this.save(node);
-        return result ? R.ok(SUCCESS_CREATE_MSG) : R.err(ERROR_CREATE_MSG);
+        try {
+            Node node = buildNewNode(nodeDto);
+            boolean result = this.save(node);
+            return result ? R.ok(SUCCESS_CREATE_MSG) : R.err(ERROR_CREATE_MSG);
+        } catch (IllegalArgumentException e) {
+            return R.err(e.getMessage());
+        }
     }
 
 
@@ -174,7 +183,12 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
         // 2. 构建更新对象并执行更新
         Node previousNode = this.getById(nodeUpdateDto.getId());
-        Node updateNode = buildUpdateNode(nodeUpdateDto);
+        Node updateNode;
+        try {
+            updateNode = buildUpdateNode(nodeUpdateDto);
+        } catch (IllegalArgumentException e) {
+            return R.err(e.getMessage());
+        }
         if (hasNodeAddressChanged(previousNode, updateNode)) {
             resetExternalProbeState(updateNode, "节点地址已变化，等待 APK 重新确认");
         }
@@ -630,7 +644,8 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     private Node buildNewNode(NodeDto nodeDto) {
         Node node = new Node();
         BeanUtils.copyProperties(nodeDto, node);
-        node.setChangeIpRemoteApi(normalizeOptionalText(nodeDto.getChangeIpRemoteApi()));
+        applyOciBinding(node, nodeDto.getOracleNode(), nodeDto.getOciAccountId(), nodeDto.getOciInstanceOcid());
+        node.setChangeIpMinIntervalMinutes(normalizeChangeIpInterval(nodeDto.getChangeIpMinIntervalMinutes()));
         normalizeNodeAddressFields(node);
 
         // 验证端口范围
@@ -668,8 +683,8 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         node.setName(nodeUpdateDto.getName());
         node.setIp(nodeUpdateDto.getIp());
         node.setServerIp(nodeUpdateDto.getServerIp());
-        node.setChangeIpMinIntervalMinutes(nodeUpdateDto.getChangeIpMinIntervalMinutes());
-        node.setChangeIpRemoteApi(normalizeOptionalText(nodeUpdateDto.getChangeIpRemoteApi()));
+        node.setChangeIpMinIntervalMinutes(normalizeChangeIpInterval(nodeUpdateDto.getChangeIpMinIntervalMinutes()));
+        applyOciBinding(node, nodeUpdateDto.getOracleNode(), nodeUpdateDto.getOciAccountId(), nodeUpdateDto.getOciInstanceOcid());
         node.setPortSta(nodeUpdateDto.getPortSta());
         node.setPortEnd(nodeUpdateDto.getPortEnd());
         normalizeNodeAddressFields(node);
@@ -683,6 +698,33 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
     private String normalizeOptionalText(String value) {
         return StrUtil.isBlank(value) ? null : value.trim();
+    }
+
+    private Integer normalizeChangeIpInterval(Integer value) {
+        if (value != null && value < 3) {
+            throw new IllegalArgumentException("换 IP 最小间隔不能低于 3 分钟");
+        }
+        return value == null ? 3 : value;
+    }
+
+    private void applyOciBinding(Node node, Integer oracleNode, Long accountId, String instanceOcid) {
+        boolean enabled = oracleNode != null && oracleNode == 1;
+        node.setOracleNode(enabled ? 1 : 0);
+        if (!enabled) {
+            node.setOciAccountId(null);
+            node.setOciInstanceOcid(null);
+            return;
+        }
+        String normalizedOcid = normalizeOptionalText(instanceOcid);
+        if (accountId == null || !StringUtils.hasText(normalizedOcid)
+                || !ociAccountService.accountExists(accountId)) {
+            throw new IllegalArgumentException("Oracle 节点必须选择有效的 OCI 账号和实例");
+        }
+        if (!normalizedOcid.startsWith("ocid1.instance.")) {
+            throw new IllegalArgumentException("OCI 实例 OCID 格式无效");
+        }
+        node.setOciAccountId(accountId);
+        node.setOciInstanceOcid(normalizedOcid);
     }
 
     private void normalizeNodeAddressFields(Node node) {

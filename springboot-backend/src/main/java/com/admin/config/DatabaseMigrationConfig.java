@@ -27,6 +27,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("add node dual-stack runtime ip columns", () -> addNodeRuntimeIpColumns(connection));
             runStep("add node remote change ip token", () -> addNodeRemoteChangeIpToken(connection));
             runStep("add node remote change ip settings", () -> addNodeRemoteChangeIpSettings(connection));
+            runStep("add OCI account and node binding", () -> addOciStorage(connection));
             runStep("add node reboot settings", () -> addNodeRebootSettings(connection));
             runStep("create node VPS usage storage", () -> addNodeUsageStorage(connection));
             runStep("add node wall monitor columns", () -> addNodeWallMonitorColumns(connection));
@@ -193,6 +194,33 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 "ALTER TABLE node ADD COLUMN change_ip_min_interval_minutes INT NULL AFTER remote_change_ip_token");
         ensureColumn(connection, "node", "change_ip_remote_api",
                 "ALTER TABLE node ADD COLUMN change_ip_remote_api VARCHAR(1000) NULL AFTER change_ip_min_interval_minutes");
+    }
+
+    private void addOciStorage(Connection connection) throws Exception {
+        ensureColumn(connection, "node", "oracle_node",
+                "ALTER TABLE node ADD COLUMN oracle_node TINYINT NOT NULL DEFAULT 0 AFTER change_ip_remote_api");
+        ensureColumn(connection, "node", "oci_account_id",
+                "ALTER TABLE node ADD COLUMN oci_account_id BIGINT NULL AFTER oracle_node");
+        ensureColumn(connection, "node", "oci_instance_ocid",
+                "ALTER TABLE node ADD COLUMN oci_instance_ocid VARCHAR(255) NULL AFTER oci_account_id");
+        ensureColumn(connection, "node", "change_ip_last_attempt_at",
+                "ALTER TABLE node ADD COLUMN change_ip_last_attempt_at BIGINT NULL AFTER oci_instance_ocid");
+        ensureColumn(connection, "node", "change_ip_last_result",
+                "ALTER TABLE node ADD COLUMN change_ip_last_result VARCHAR(16) NOT NULL DEFAULT 'UNKNOWN' AFTER change_ip_last_attempt_at");
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE IF NOT EXISTS oci_account ("
+                    + "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                    + "name VARCHAR(120) NOT NULL,"
+                    + "user_ocid VARCHAR(255) NOT NULL,"
+                    + "tenancy_ocid VARCHAR(255) NOT NULL,"
+                    + "fingerprint VARCHAR(64) NOT NULL,"
+                    + "region VARCHAR(80) NOT NULL,"
+                    + "private_key_encrypted LONGTEXT NOT NULL,"
+                    + "created_time BIGINT NULL, updated_time BIGINT NULL, status INT NULL"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            statement.executeUpdate("UPDATE node SET change_ip_min_interval_minutes = 3 "
+                    + "WHERE change_ip_min_interval_minutes IS NOT NULL AND change_ip_min_interval_minutes < 3");
+        }
     }
 
     private void addNodeUsageStorage(Connection connection) throws Exception {

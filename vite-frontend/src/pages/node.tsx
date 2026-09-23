@@ -8,8 +8,16 @@ import { Chip } from "@heroui/chip";
 import { Spinner } from "@heroui/spinner";
 import { Alert } from "@heroui/alert";
 import { Progress } from "@heroui/progress";
+import { Select, SelectItem } from "@heroui/select";
+import { Switch } from "@heroui/switch";
 import toast from 'react-hot-toast';
 import axios from 'axios';
+import {
+  listOciAccounts,
+  listOciInstances,
+  type OciAccountSummary,
+  type OciInstance,
+} from "@/api/oci";
 
 
 import { 
@@ -65,8 +73,12 @@ interface Node {
   wallMonitorExternalConsecutiveFailures?: number;
   wallMonitorExternalMessage?: string;
   remoteChangeIpUrl?: string;
+  oracleNode?: boolean | number;
+  ociAccountId?: number | null;
+  ociInstanceOcid?: string | null;
   changeIpMinIntervalMinutes?: number | null;
-  changeIpRemoteApi?: string;
+  changeIpLastAttemptAt?: number | null;
+  changeIpLastResult?: 'PENDING' | 'SUCCEEDED' | 'FAILED' | string | null;
   rebootIntervalHours?: number;
   rebootNextAt?: number | null;
   vpsUsage?: VpsUsage;
@@ -92,8 +104,10 @@ interface NodeForm {
   name: string;
   ipString: string;
   serverIp: string;
+  oracleNode: boolean;
+  ociAccountId: number | null;
+  ociInstanceOcid: string;
   changeIpMinIntervalMinutes: string;
-  changeIpRemoteApi: string;
   portSta: number;
   portEnd: number;
 }
@@ -128,12 +142,18 @@ export default function NodePage() {
     name: '',
     ipString: '',
     serverIp: '',
+    oracleNode: false,
+    ociAccountId: null,
+    ociInstanceOcid: '',
     changeIpMinIntervalMinutes: '',
-    changeIpRemoteApi: '',
     portSta: 1000,
     portEnd: 65535
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [ociAccounts, setOciAccounts] = useState<OciAccountSummary[]>([]);
+  const [ociAccountsLoading, setOciAccountsLoading] = useState(false);
+  const [ociInstances, setOciInstances] = useState<OciInstance[]>([]);
+  const [ociInstancesLoading, setOciInstancesLoading] = useState(false);
   
   // 安装命令相关状态
   const [installCommandModal, setInstallCommandModal] = useState(false);
@@ -148,10 +168,12 @@ export default function NodePage() {
   const systemInfoCacheRef = useRef<Map<number, NonNullable<Node['systemInfo']>>>(new Map());
   const statusUpdatedAtRef = useRef<Map<number, { at: number; status: number }>>(new Map());
   const scheduleUpdatedAtRef = useRef<Map<number, { at: number; fields: NodeRebootSchedule }>>(new Map());
+  const changeIpUpdatedAtRef = useRef<Map<number, { at: number; fields: Pick<Node, 'changeIpLastAttemptAt' | 'changeIpLastResult'> }>>(new Map());
   const usageUpdatedAtRef = useRef<Map<number, { at: number; value: VpsUsage }>>(new Map());
   const nodeListRef = useRef<Node[]>([]);
   const quietRefreshTimerRef = useRef<number | null>(null);
   const loadNodesPendingRef = useRef(0);
+  const ociInstancesRequestRef = useRef(0);
   const maxReconnectAttempts = 5;
 
   const [totalSpeed, setTotalSpeed] = useState({ upload: 0, download: 0 });
@@ -173,6 +195,60 @@ export default function NodePage() {
     const timer = window.setInterval(() => setUsageNow(Date.now()), 60000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!dialogVisible || !form.oracleNode) return;
+    let active = true;
+    setOciAccountsLoading(true);
+    listOciAccounts()
+      .then((res: any) => {
+        if (!active) return;
+        if (res.code === 0) {
+          setOciAccounts(Array.isArray(res.data) ? res.data : []);
+        } else {
+          setOciAccounts([]);
+          toast.error(res.msg || '加载 OCI 账号失败');
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setOciAccounts([]);
+        toast.error('加载 OCI 账号失败');
+      })
+      .finally(() => {
+        if (active) setOciAccountsLoading(false);
+      });
+    return () => { active = false; };
+  }, [dialogVisible, form.oracleNode]);
+
+  useEffect(() => {
+    const requestId = ++ociInstancesRequestRef.current;
+    if (!dialogVisible || !form.ociAccountId) {
+      setOciInstances([]);
+      setOciInstancesLoading(false);
+      return;
+    }
+    setOciInstances([]);
+    setOciInstancesLoading(true);
+    listOciInstances(form.ociAccountId)
+      .then((res: any) => {
+        if (requestId !== ociInstancesRequestRef.current) return;
+        if (res.code === 0) {
+          setOciInstances(Array.isArray(res.data) ? res.data : []);
+        } else {
+          setOciInstances([]);
+          toast.error(res.msg || '加载 OCI 实例失败');
+        }
+      })
+      .catch(() => {
+        if (requestId !== ociInstancesRequestRef.current) return;
+        setOciInstances([]);
+        toast.error('加载 OCI 实例失败');
+      })
+      .finally(() => {
+        if (requestId === ociInstancesRequestRef.current) setOciInstancesLoading(false);
+      });
+  }, [dialogVisible, form.ociAccountId]);
 
   useEffect(() => {
     const refreshTimer = window.setInterval(() => {
@@ -231,11 +307,13 @@ export default function NodePage() {
           const current = currentNodes.get(node.id);
           const latestStatus = statusUpdatedAtRef.current.get(node.id);
           const latestSchedule = scheduleUpdatedAtRef.current.get(node.id);
+          const latestChangeIp = changeIpUpdatedAtRef.current.get(node.id);
           const latestUsage = usageUpdatedAtRef.current.get(node.id);
           const status = latestStatus && latestStatus.at >= requestedAt ? latestStatus.status : node.status;
           return {
             ...node,
             ...(latestSchedule && latestSchedule.at >= requestedAt ? latestSchedule.fields : {}),
+            ...(latestChangeIp && latestChangeIp.at >= requestedAt ? latestChangeIp.fields : {}),
             vpsUsage: latestUsage && latestUsage.at >= requestedAt ? latestUsage.value : node.vpsUsage,
             status,
             connectionStatus: status === 1 ? 'online' : 'offline',
@@ -297,6 +375,17 @@ export default function NodePage() {
     if (cached && cached.at > requestedAt) return;
     const fields = { rebootIntervalHours: data.rebootIntervalHours, rebootNextAt: data.rebootNextAt };
     scheduleUpdatedAtRef.current.set(id, { at: Date.now(), fields });
+    setNodeList(prev => prev.map(node => node.id === id ? { ...node, ...fields } : node));
+  };
+
+  const applyChangeIpStatus = (id: number, data: Pick<Node, 'changeIpLastAttemptAt' | 'changeIpLastResult'>, requestedAt = Date.now()) => {
+    const cached = changeIpUpdatedAtRef.current.get(id);
+    if (cached && cached.at > requestedAt) return;
+    const fields = {
+      changeIpLastAttemptAt: data.changeIpLastAttemptAt,
+      changeIpLastResult: data.changeIpLastResult,
+    };
+    changeIpUpdatedAtRef.current.set(id, { at: Date.now(), fields });
     setNodeList(prev => prev.map(node => node.id === id ? { ...node, ...fields } : node));
   };
 
@@ -412,12 +501,16 @@ export default function NodePage() {
       if (usageHistoryRef.current.nodeId === nodeId && previous?.current?.id !== messageData.current?.id) {
         void loadUsageHistory(nodeId, true);
       }
+    } else if (type === 'changeIp') {
+      applyChangeIpStatus(Number(id), messageData);
     } else if (type === 'wallMonitor') {
+      const monitorUpdates = { ...messageData };
+      delete monitorUpdates.remoteChangeIpUrl;
       setNodeList(prev => prev.map(node => {
         if (node.id == id) {
           return {
             ...node,
-            ...messageData,
+            ...monitorUpdates,
           };
         }
         return node;
@@ -718,6 +811,18 @@ export default function NodePage() {
     return new Date(timestamp).toLocaleString();
   };
 
+  const getChangeIpAttemptStatus = (node: Node): {
+    label: string;
+    color: "default" | "primary" | "secondary" | "success" | "warning" | "danger";
+  } => {
+    if (!(node.oracleNode === true || node.oracleNode === 1)) return { label: "未启用", color: "default" };
+    if (!node.ociAccountId || !node.ociInstanceOcid) return { label: "未绑定实例", color: "default" };
+    if (node.changeIpLastResult === "SUCCEEDED") return { label: "已更换", color: "success" };
+    if (node.changeIpLastResult === "FAILED") return { label: "失败", color: "danger" };
+    if (node.changeIpLastResult === "PENDING") return { label: "处理中", color: "warning" };
+    return { label: "待触发", color: "secondary" };
+  };
+
   const getRebootNextLabel = (node?: Node): string => {
     if (!node || !node.rebootIntervalHours) return '已关闭';
     if (node.rebootNextAt) return formatMonitorTime(node.rebootNextAt);
@@ -780,15 +885,16 @@ export default function NodePage() {
       newErrors.serverIp = '请输入有效的IPv4、IPv6地址或域名';
     }
 
-    if (form.changeIpMinIntervalMinutes.trim()) {
-      const interval = Number(form.changeIpMinIntervalMinutes);
-      if (!Number.isInteger(interval) || interval < 1) {
-        newErrors.changeIpMinIntervalMinutes = '请输入大于0的整数分钟数';
-      }
+    const interval = form.changeIpMinIntervalMinutes.trim()
+      ? Number(form.changeIpMinIntervalMinutes)
+      : 3;
+    if (!Number.isInteger(interval) || interval < 3) {
+      newErrors.changeIpMinIntervalMinutes = '最小间隔不能低于 3 分钟';
     }
 
-    if (form.changeIpRemoteApi.trim() && !/^https?:\/\/\S+$/i.test(form.changeIpRemoteApi.trim())) {
-      newErrors.changeIpRemoteApi = '请输入有效的 HTTP 或 HTTPS 远程 API 地址';
+    if (form.oracleNode) {
+      if (!form.ociAccountId) newErrors.ociAccountId = '请选择 OCI 账号';
+      if (!form.ociInstanceOcid.trim()) newErrors.ociInstanceOcid = '请选择 OCI 实例';
     }
     
     if (!form.portSta || form.portSta < 1 || form.portSta > 65535) {
@@ -822,8 +928,10 @@ export default function NodePage() {
       name: node.name,
       ipString: node.ip ? node.ip.split(',').map(ip => ip.trim()).join('\n') : '',
       serverIp: node.serverIp || '',
+      oracleNode: node.oracleNode === true || node.oracleNode === 1,
+      ociAccountId: node.ociAccountId ?? null,
+      ociInstanceOcid: node.ociInstanceOcid || '',
       changeIpMinIntervalMinutes: node.changeIpMinIntervalMinutes?.toString() || '',
-      changeIpRemoteApi: node.changeIpRemoteApi || '',
       portSta: node.portSta,
       portEnd: node.portEnd
     });
@@ -998,6 +1106,7 @@ export default function NodePage() {
         runtimeIpCacheRef.current.delete(nodeToDelete.id);
         statusUpdatedAtRef.current.delete(nodeToDelete.id);
         scheduleUpdatedAtRef.current.delete(nodeToDelete.id);
+        changeIpUpdatedAtRef.current.delete(nodeToDelete.id);
         usageUpdatedAtRef.current.delete(nodeToDelete.id);
         setNodeRebootState(nodeToDelete.id);
         setNodeList(prev => prev.filter(n => n.id !== nodeToDelete.id));
@@ -1055,19 +1164,6 @@ export default function NodePage() {
     }
   };
 
-  const handleCopyRemoteChangeIpUrl = async (node: Node) => {
-    if (!node.remoteChangeIpUrl) {
-      toast.error('当前节点没有可用的远程 API 地址');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(node.remoteChangeIpUrl);
-      toast.success('远程换 IP API 已复制');
-    } catch (error) {
-      toast.error('复制失败，请使用 HTTPS 访问面板后重试');
-    }
-  };
-
   // 提交表单
   const handleSubmit = async () => {
     if (!validateForm()) return;
@@ -1084,12 +1180,13 @@ export default function NodePage() {
       const changeIpMinIntervalMinutes = form.changeIpMinIntervalMinutes.trim()
         ? Number(form.changeIpMinIntervalMinutes)
         : null;
-      const changeIpRemoteApi = form.changeIpRemoteApi.trim();
       const submitData = {
         ...form,
         ip: ipString,
         changeIpMinIntervalMinutes,
-        changeIpRemoteApi
+        oracleNode: form.oracleNode ? 1 : 0,
+        ociAccountId: form.oracleNode ? form.ociAccountId : null,
+        ociInstanceOcid: form.oracleNode ? form.ociInstanceOcid : null,
       };
       delete (submitData as any).ipString;
       
@@ -1099,7 +1196,9 @@ export default function NodePage() {
         ip: ipString,
         serverIp: form.serverIp,
         changeIpMinIntervalMinutes,
-        changeIpRemoteApi,
+        oracleNode: form.oracleNode ? 1 : 0,
+        ociAccountId: form.oracleNode ? form.ociAccountId : null,
+        ociInstanceOcid: form.oracleNode ? form.ociInstanceOcid : null,
         portSta: form.portSta,
         portEnd: form.portEnd
       };
@@ -1116,10 +1215,12 @@ export default function NodePage() {
               name: form.name,
               ip: ipString,
               serverIp: form.serverIp,
+              oracleNode: form.oracleNode ? 1 : 0,
+              ociAccountId: form.oracleNode ? form.ociAccountId : null,
+              ociInstanceOcid: form.oracleNode ? form.ociInstanceOcid : null,
               changeIpMinIntervalMinutes: form.changeIpMinIntervalMinutes.trim()
                 ? Number(form.changeIpMinIntervalMinutes)
                 : null,
-              changeIpRemoteApi: form.changeIpRemoteApi.trim(),
               portSta: form.portSta,
               portEnd: form.portEnd
             } : n
@@ -1144,8 +1245,10 @@ export default function NodePage() {
       name: '',
       ipString: '',
       serverIp: '',
+      oracleNode: false,
+      ociAccountId: null,
+      ociInstanceOcid: '',
       changeIpMinIntervalMinutes: '',
-      changeIpRemoteApi: '',
       portSta: 1000,
       portEnd: 65535
     });
@@ -1161,6 +1264,19 @@ export default function NodePage() {
 
   const getNodePrimaryAddress = (node: Node): string => {
     return node.serverIp || node.serverIpv4 || node.serverIpv6 || node.ip || '待自动识别';
+  };
+
+  const handleCopyRemoteChangeIpUrl = async (node: Node) => {
+    if (!node.remoteChangeIpUrl) {
+      toast.error('当前节点没有可用的 APK 回调地址');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(node.remoteChangeIpUrl);
+      toast.success('独立 APK 回调地址已复制');
+    } catch {
+      toast.error('复制失败，请使用 HTTPS 访问面板后重试');
+    }
   };
 
   const scheduleNode = nodeList.find(node => node.id === scheduleNodeId);
@@ -1328,6 +1444,18 @@ export default function NodePage() {
                       <div className="mt-1 flex items-center justify-between gap-2 text-default-400">
                         <span>来源：独立 APK</span>
                         <span>{formatMonitorTime(node.wallMonitorExternalLastCheckAt)}</span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between gap-2 text-default-400">
+                        <span>Oracle 自动换 IP</span>
+                        <Chip color={getChangeIpAttemptStatus(node).color} variant="flat" size="sm">
+                          {getChangeIpAttemptStatus(node).label}
+                        </Chip>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2 text-default-400">
+                        <span>{node.changeIpLastAttemptAt ? '最近操作时间' : '最小间隔'} </span>
+                        <span>{node.changeIpLastAttemptAt
+                          ? formatMonitorTime(node.changeIpLastAttemptAt)
+                          : `${node.changeIpMinIntervalMinutes || 3} 分钟`}</span>
                       </div>
                       {node.remoteChangeIpUrl && (
                         <div className="mt-2 flex items-center gap-2">
@@ -1758,28 +1886,88 @@ export default function NodePage() {
                   description="留空时会默认跟随节点公网 IP；填写后用于转发页展示，不影响节点连接面板"
                 />
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-4 rounded border border-default-200 p-3">
+                  <Switch
+                    isSelected={form.oracleNode}
+                    onValueChange={(enabled) => setForm(prev => ({
+                      ...prev,
+                      oracleNode: enabled,
+                      ociAccountId: enabled ? prev.ociAccountId : null,
+                      ociInstanceOcid: enabled ? prev.ociInstanceOcid : '',
+                    }))}
+                    color="primary"
+                  >
+                    <span className="text-sm">是否为 Oracle 节点</span>
+                  </Switch>
+
+                  {form.oracleNode && (
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <Select
+                        label="OCI 账号"
+                        placeholder={ociAccountsLoading ? '正在加载账号...' : '选择 OCI 账号'}
+                        selectedKeys={form.ociAccountId ? [String(form.ociAccountId)] : []}
+                        onSelectionChange={(keys) => {
+                          const key = Array.from(keys)[0] as string | undefined;
+                          const accountId = key ? Number(key) : null;
+                          setForm(prev => ({ ...prev, ociAccountId: accountId, ociInstanceOcid: '' }));
+                          setErrors(prev => ({ ...prev, ociAccountId: '', ociInstanceOcid: '' }));
+                        }}
+                        isLoading={ociAccountsLoading}
+                        isDisabled={ociAccountsLoading || ociAccounts.length === 0}
+                        isInvalid={!!errors.ociAccountId}
+                        errorMessage={errors.ociAccountId}
+                        variant="bordered"
+                      >
+                        {ociAccounts.map(account => (
+                          <SelectItem key={String(account.id)} textValue={account.name}>
+                            {account.name}{account.region ? ` · ${account.region}` : ''}
+                          </SelectItem>
+                        ))}
+                      </Select>
+
+                      <Select
+                        label="OCI 实例"
+                        placeholder={!form.ociAccountId ? '请先选择 OCI 账号' : ociInstancesLoading ? '正在加载实例...' : '选择 OCI 实例'}
+                        selectedKeys={form.ociInstanceOcid ? [form.ociInstanceOcid] : []}
+                        onSelectionChange={(keys) => {
+                          const ocid = Array.from(keys)[0] as string | undefined;
+                          setForm(prev => ({ ...prev, ociInstanceOcid: ocid || '' }));
+                          setErrors(prev => ({ ...prev, ociInstanceOcid: '' }));
+                        }}
+                        isLoading={ociInstancesLoading}
+                        isDisabled={!form.ociAccountId || ociInstancesLoading || ociInstances.length === 0}
+                        isInvalid={!!errors.ociInstanceOcid}
+                        errorMessage={errors.ociInstanceOcid}
+                        variant="bordered"
+                      >
+                        {ociInstances.map(instance => (
+                          <SelectItem
+                            key={instance.instanceOcid}
+                            textValue={`${instance.displayName} ${instance.publicIp || ''} ${instance.instanceOcid.slice(-8)}`}
+                          >
+                            <div className="flex min-w-0 flex-col">
+                              <span className="truncate">{instance.displayName}</span>
+                              <span className="truncate text-xs text-default-500">
+                                {instance.publicIp || '无公网 IP'} · OCID …{instance.instanceOcid.slice(-8)}
+                              </span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </Select>
+                    </div>
+                  )}
+
                   <Input
-                    label="更换IP最小时间间隔（分钟，可选）"
-                    placeholder="例如：30"
+                    label="换 IP 最小间隔（分钟）"
+                    placeholder="留空默认 3 分钟"
                     type="number"
-                    min={1}
+                    min={3}
                     value={form.changeIpMinIntervalMinutes}
                     onChange={(e) => setForm(prev => ({ ...prev, changeIpMinIntervalMinutes: e.target.value }))}
                     isInvalid={!!errors.changeIpMinIntervalMinutes}
                     errorMessage={errors.changeIpMinIntervalMinutes}
                     variant="bordered"
-                    description="检测到IP被墙后，距离上次换IP至少间隔这么多分钟"
-                  />
-                  <Input
-                    label="更换IP远程API（可选）"
-                    placeholder="https://example.com/api/change-ip"
-                    value={form.changeIpRemoteApi}
-                    onChange={(e) => setForm(prev => ({ ...prev, changeIpRemoteApi: e.target.value }))}
-                    isInvalid={!!errors.changeIpRemoteApi}
-                    errorMessage={errors.changeIpRemoteApi}
-                    variant="bordered"
-                    description="被墙后由探针调用；留空则不调用"
+                    description="留空按 3 分钟；填写时不能低于 3 分钟。仅 Oracle 节点在 APK 报告不可达时尝试换 IP。"
                   />
                 </div>
 

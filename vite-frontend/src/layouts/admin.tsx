@@ -98,6 +98,17 @@ export default function AdminLayout({
       adminOnly: true
     },
     {
+      path: '/oci',
+      label: 'Oracle 账号',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3.5c4.7 0 8.5 1.9 8.5 4.25S16.7 12 12 12 3.5 10.1 3.5 7.75 7.3 3.5 12 3.5Z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3.5 7.75v8.5c0 2.35 3.8 4.25 8.5 4.25s8.5-1.9 8.5-4.25v-8.5M3.5 12c0 2.35 3.8 4.25 8.5 4.25s8.5-1.9 8.5-4.25" />
+        </svg>
+      ),
+      adminOnly: true
+    },
+    {
       path: '/limit',
       label: '限速管理',
       icon: (

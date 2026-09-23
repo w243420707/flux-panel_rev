@@ -62,6 +62,7 @@ services:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
+      OCI_ENCRYPTION_KEY: ${OCI_ENCRYPTION_KEY:-${JWT_SECRET}}
       LOG_DIR: /app/logs
       NODE_ASSETS_DIR: /opt/flux-panel/node-assets
       NODE_ASSET_BASE_URL: ${NODE_ASSET_BASE_URL:-https://raw.githubusercontent.com/w243420707/flux-panel-node-assets/refs/heads/main}
