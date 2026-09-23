@@ -28,7 +28,7 @@
         </dependency>
         <dependency>
             <groupId>com.oracle.oci.sdk</groupId>
-            <artifactId>oci-java-sdk-common-httpclient-jersey3</artifactId>
+            <artifactId>oci-java-sdk-common-httpclient-jersey</artifactId>
         </dependency>
 
         <dependency>
