@@ -1,0 +1,1 @@
+import{d9 as t}from"./index-3xoADP7k.js";const o=()=>t.post("/oci/account/list"),n=c=>t.post("/oci/account/save",c),a=c=>t.post("/oci/account/delete",{id:c}),i=c=>t.post("/oci/account/test",{id:c}),e=c=>t.post("/oci/account/instances",{accountId:c});export{e as a,a as d,o as l,n as s,i as t};

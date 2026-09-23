@@ -1,5 +1,6 @@
 package com.admin.service;
 
+import com.admin.entity.Node;
 import com.admin.mapper.NodeMapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
@@ -32,6 +33,7 @@ class NodeChangeIpDatabaseTest {
         jdbc = new JdbcTemplate(source);
         jdbc.execute("CREATE TABLE node (id BIGINT PRIMARY KEY, oracle_node INT NOT NULL, "
                 + "oci_account_id BIGINT, oci_instance_ocid VARCHAR(255), "
+                + "wall_monitor_status VARCHAR(32), "
                 + "change_ip_min_interval_minutes INT, change_ip_last_attempt_at BIGINT, "
                 + "change_ip_last_result VARCHAR(16) NOT NULL DEFAULT 'UNKNOWN')");
         jdbc.update("INSERT INTO node (id, oracle_node, oci_account_id, oci_instance_ocid) VALUES (?, 1, 2, 'ocid1.instance.test')",
@@ -98,5 +100,21 @@ class NodeChangeIpDatabaseTest {
         assertEquals(0, nodes.finishChangeIpAttempt(NODE_ID, 1_000_000, "FAILED"));
         assertEquals("PENDING", jdbc.queryForObject(
                 "SELECT change_ip_last_result FROM node WHERE id = ?", String.class, NODE_ID));
+    }
+
+    @Test
+    void partialNodeStatusUpdatesDoNotClearOciBindingButExplicitUnbindDoes() {
+        Node partial = new Node();
+        partial.setId(NODE_ID);
+        partial.setWallMonitorStatus("OK");
+
+        assertEquals(1, nodes.updateById(partial));
+        assertEquals(2L, jdbc.queryForObject("SELECT oci_account_id FROM node WHERE id = ?", Long.class, NODE_ID));
+        assertEquals("ocid1.instance.test", jdbc.queryForObject(
+                "SELECT oci_instance_ocid FROM node WHERE id = ?", String.class, NODE_ID));
+
+        assertEquals(1, nodes.updateOciBinding(NODE_ID, 0, null, null));
+        assertNull(jdbc.queryForObject("SELECT oci_account_id FROM node WHERE id = ?", Long.class, NODE_ID));
+        assertNull(jdbc.queryForObject("SELECT oci_instance_ocid FROM node WHERE id = ?", String.class, NODE_ID));
     }
 }

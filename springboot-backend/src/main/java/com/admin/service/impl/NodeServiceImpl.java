@@ -196,6 +196,10 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         if (!result) {
             return R.err(ERROR_UPDATE_MSG);
         }
+        if (baseMapper.updateOciBinding(updateNode.getId(), updateNode.getOracleNode(),
+                updateNode.getOciAccountId(), updateNode.getOciInstanceOcid()) != 1) {
+            return R.err(ERROR_UPDATE_MSG);
+        }
 
         // 更新隧道入口ip
         List<Tunnel> inNodeId = tunnelService.list(new QueryWrapper<Tunnel>().eq("in_node_id", updateNode.getId()));

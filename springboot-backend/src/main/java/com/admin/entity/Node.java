@@ -28,15 +28,15 @@ public class Node extends BaseEntity {
     private String remoteChangeIpToken;
 
     /** Minimum delay in minutes between IP change requests after a blocked result. */
-    @TableField(updateStrategy = FieldStrategy.IGNORED)
+    @TableField(updateStrategy = FieldStrategy.NOT_NULL)
     private Integer changeIpMinIntervalMinutes;
 
     private Integer oracleNode;
 
-    @TableField(updateStrategy = FieldStrategy.IGNORED)
+    @TableField(updateStrategy = FieldStrategy.NOT_NULL)
     private Long ociAccountId;
 
-    @TableField(updateStrategy = FieldStrategy.IGNORED)
+    @TableField(updateStrategy = FieldStrategy.NOT_NULL)
     private String ociInstanceOcid;
 
     @TableField(updateStrategy = FieldStrategy.NEVER)

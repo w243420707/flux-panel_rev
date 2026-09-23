@@ -45,6 +45,13 @@ public interface NodeMapper extends BaseMapper<Node> {
                               @Param("attemptAt") long attemptAt,
                               @Param("result") String result);
 
+    @Update("UPDATE node SET oracle_node = #{oracleNode}, oci_account_id = #{accountId}, "
+            + "oci_instance_ocid = #{instanceOcid} WHERE id = #{id}")
+    int updateOciBinding(@Param("id") Long id,
+                         @Param("oracleNode") int oracleNode,
+                         @Param("accountId") Long accountId,
+                         @Param("instanceOcid") String instanceOcid);
+
     @Select("SELECT COUNT(*) FROM node WHERE oci_account_id = #{accountId}")
     int countNodesUsingOciAccount(@Param("accountId") Long accountId);
 
