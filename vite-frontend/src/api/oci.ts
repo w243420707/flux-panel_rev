@@ -13,10 +13,7 @@ export interface OciAccountSummary {
 export interface OciAccountPayload {
   id?: number;
   name: string;
-  userOcid: string;
-  tenancyOcid: string;
-  fingerprint: string;
-  region: string;
+  configText: string;
   privateKey: string;
 }
 

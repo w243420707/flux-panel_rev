@@ -107,7 +107,7 @@ APK 必须运行在大陆网络出口，海外 VPS 或海外模拟器不能代�
 
 ### Oracle Cloud 自动换 IP
 
-管理员先在“Oracle 账号”中添加 OCI 用户 OCID、Tenancy OCID、API Key 指纹、区域和对应的 PEM 私钥，并测试连接。私钥加密保存在面板数据库中，不会下发给 APK；部署目录 `.env` 中的 `OCI_ENCRYPTION_KEY` 必须随数据库一起备份。
+管理员先在“Oracle 账号”中填写账号名称、OCI config 内容和对应的 PEM 私钥，并测试连接。面板会从 config 自动读取 User OCID、Tenancy OCID、API Key 指纹和区域。私钥加密保存在面板数据库中，不会下发给 APK；部署目录 `.env` 中的 `OCI_ENCRYPTION_KEY` 必须随数据库一起备份。
 
 编辑节点时打开“是否为 Oracle 节点”，选择 OCI 账号和具体实例。实例通过 OCID 绑定，公网 IP 变化后仍指向同一实例。OCI API 用户需要读取实例、网卡、私有 IP，并具有在目标 compartment 使用私有 IP 的权限；可参考 [Oracle Core Services Policy Reference](https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/corepolicyreference.htm) 配置。
 
@@ -168,6 +168,11 @@ Swap 是内存不足时的缓冲，可以降低节点进程被 OOM 强制终止�
 - TCP 和 UDP 服务会同时创建，使用 UDP 场景时请确认 VPS 防火墙和安全组已放行对应 UDP 端口。
 
 ## 更新日志
+
+### 2026-09-23 v1.3.69
+
+- OCI 账号表单精简为账号名称、OCI config 内容、Private Key 三项；自动解析 config 中的账号信息，编辑时私钥可留空以保留原值。
+- 更新前端版本及预构建页面资源。
 
 ### 2026-09-23 v1.3.68
 

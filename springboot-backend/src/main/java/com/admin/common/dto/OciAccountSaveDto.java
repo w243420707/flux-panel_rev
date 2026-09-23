@@ -6,9 +6,6 @@ import lombok.Data;
 public class OciAccountSaveDto {
     private Long id;
     private String name;
-    private String userOcid;
-    private String tenancyOcid;
-    private String fingerprint;
-    private String region;
+    private String configText;
     private String privateKey;
 }

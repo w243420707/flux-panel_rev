@@ -20,14 +20,20 @@ import {
 
 const emptyForm: OciAccountPayload = {
   name: "",
-  userOcid: "",
-  tenancyOcid: "",
-  fingerprint: "",
-  region: "",
+  configText: "",
   privateKey: "",
 };
 
 const formatOcidTail = (ocid: string) => ocid.slice(-8);
+
+const buildConfigText = (account: OciAccountSummary) =>
+  [
+    "[DEFAULT]",
+    `user=${account.userOcid}`,
+    `fingerprint=${account.fingerprint}`,
+    `tenancy=${account.tenancyOcid}`,
+    `region=${account.region}`,
+  ].join("\n");
 
 export default function OciPage() {
   const [accounts, setAccounts] = useState<OciAccountSummary[]>([]);
@@ -70,10 +76,7 @@ export default function OciPage() {
     setForm({
       id: account.id,
       name: account.name,
-      userOcid: account.userOcid,
-      tenancyOcid: account.tenancyOcid,
-      fingerprint: account.fingerprint,
-      region: account.region,
+      configText: buildConfigText(account),
       privateKey: "",
     });
     setFormOpen(true);
@@ -84,9 +87,8 @@ export default function OciPage() {
   };
 
   const handleSave = async () => {
-    const requiredFields = [form.name, form.userOcid, form.tenancyOcid, form.fingerprint, form.region];
-    if (requiredFields.some((value) => !value.trim())) {
-      toast.error("请完整填写账号名称、OCID、指纹和区域");
+    if (!form.name.trim() || !form.configText.trim()) {
+      toast.error("请填写账号名称和 OCI config 内容");
       return;
     }
     if (!form.id && !form.privateKey.trim()) {
@@ -99,10 +101,8 @@ export default function OciPage() {
       const response = await saveOciAccount({
         ...form,
         name: form.name.trim(),
-        userOcid: form.userOcid.trim(),
-        tenancyOcid: form.tenancyOcid.trim(),
-        fingerprint: form.fingerprint.trim(),
-        region: form.region.trim(),
+        configText: form.configText.trim(),
+        privateKey: form.privateKey.trim(),
       });
       if (response.code === 0) {
         toast.success(form.id ? "OCI 账号已更新" : "OCI 账号已添加");
@@ -270,49 +270,28 @@ export default function OciPage() {
             <>
               <ModalHeader>{form.id ? "编辑 OCI 账号" : "新增 OCI 账号"}</ModalHeader>
               <ModalBody>
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4">
                   <Input
                     label="账号名称"
                     value={form.name}
                     onValueChange={(value) => updateField("name", value)}
                     variant="bordered"
                   />
-                  <Input
-                    label="区域"
-                    placeholder="例如 us-phoenix-1"
-                    value={form.region}
-                    onValueChange={(value) => updateField("region", value)}
+                  <Textarea
+                    label="OCI config 内容"
+                    placeholder={'[DEFAULT]\nuser=ocid1.user...\nfingerprint=...\ntenancy=ocid1.tenancy...\nregion=eu-madrid-1\nkey_file=...'}
+                    value={form.configText}
+                    onValueChange={(value) => updateField("configText", value)}
+                    minRows={6}
                     variant="bordered"
-                  />
-                  <Input
-                    label="User OCID"
-                    value={form.userOcid}
-                    onValueChange={(value) => updateField("userOcid", value)}
-                    variant="bordered"
-                    className="sm:col-span-2"
-                  />
-                  <Input
-                    label="Tenancy OCID"
-                    value={form.tenancyOcid}
-                    onValueChange={(value) => updateField("tenancyOcid", value)}
-                    variant="bordered"
-                    className="sm:col-span-2"
-                  />
-                  <Input
-                    label="API Key 指纹"
-                    value={form.fingerprint}
-                    onValueChange={(value) => updateField("fingerprint", value)}
-                    variant="bordered"
-                    className="sm:col-span-2"
                   />
                   <Textarea
-                    label="私钥 PEM"
+                    label="Private Key"
                     placeholder={form.id ? "留空则保留当前私钥" : "粘贴 OCI API Signing Key 私钥"}
                     value={form.privateKey}
                     onValueChange={(value) => updateField("privateKey", value)}
-                    minRows={5}
+                    minRows={8}
                     variant="bordered"
-                    className="sm:col-span-2"
                     isRequired={!form.id}
                   />
                 </div>

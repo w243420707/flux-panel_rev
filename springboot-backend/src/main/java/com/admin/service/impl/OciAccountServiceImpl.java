@@ -21,6 +21,7 @@ import javax.annotation.Resource;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -66,15 +67,19 @@ public class OciAccountServiceImpl implements OciAccountService {
     public R saveAccount(OciAccountSaveDto dto) {
         if (dto == null) return R.err("OCI 账号数据无效");
         String name = trim(dto.getName());
-        String userOcid = trim(dto.getUserOcid());
-        String tenancyOcid = trim(dto.getTenancyOcid());
-        String fingerprint = trim(dto.getFingerprint());
-        String region = trim(dto.getRegion());
+        OciConfig config;
+        try {
+            config = parseConfig(dto.getConfigText());
+        } catch (IllegalArgumentException e) {
+            return R.err(e.getMessage());
+        }
         String privateKey = dto.getPrivateKey() == null ? "" : dto.getPrivateKey().trim();
         if (!StringUtils.hasText(name) || name.length() > 120
-                || !userOcid.startsWith("ocid1.user.") || !tenancyOcid.startsWith("ocid1.tenancy.")
-                || !FINGERPRINT.matcher(fingerprint).matches() || !REGION.matcher(region).matches()) {
-            return R.err("请检查账号名称、User OCID、Tenancy OCID、指纹和区域格式");
+                || !config.userOcid().startsWith("ocid1.user.")
+                || !config.tenancyOcid().startsWith("ocid1.tenancy.")
+                || !FINGERPRINT.matcher(config.fingerprint()).matches()
+                || !REGION.matcher(config.region()).matches()) {
+            return R.err("请检查账号名称以及 OCI 配置中的 User OCID、Tenancy OCID、指纹和区域格式");
         }
 
         OciAccount account = dto.getId() == null ? new OciAccount() : accountMapper.selectById(dto.getId());
@@ -90,10 +95,10 @@ public class OciAccountServiceImpl implements OciAccountService {
         }
 
         account.setName(name);
-        account.setUserOcid(userOcid);
-        account.setTenancyOcid(tenancyOcid);
-        account.setFingerprint(fingerprint);
-        account.setRegion(region);
+        account.setUserOcid(config.userOcid());
+        account.setTenancyOcid(config.tenancyOcid());
+        account.setFingerprint(config.fingerprint());
+        account.setRegion(config.region());
         if (StringUtils.hasText(privateKey)) {
             account.setPrivateKeyEncrypted(crypto().encrypt(privateKey.replace("\r\n", "\n")));
         }
@@ -160,4 +165,66 @@ public class OciAccountServiceImpl implements OciAccountService {
     private String trim(String value) {
         return value == null ? "" : value.trim();
     }
+
+    private OciConfig parseConfig(String configText) {
+        if (!StringUtils.hasText(configText)) {
+            throw new IllegalArgumentException("请粘贴 OCI config 内容，至少需要包含 [DEFAULT] 配置段");
+        }
+
+        Map<String, String> defaults = new LinkedHashMap<>();
+        boolean inDefault = false;
+        boolean foundDefault = false;
+        for (String rawLine : configText.split("\\R", -1)) {
+            String line = rawLine.trim();
+            if (line.isEmpty() || line.startsWith("#") || line.startsWith(";")) continue;
+
+            if (line.startsWith("[")) {
+                if (!line.endsWith("]") || line.length() < 3) {
+                    throw new IllegalArgumentException("OCI 配置分区格式无效，请检查方括号是否完整");
+                }
+                String section = line.substring(1, line.length() - 1).trim();
+                if (section.isEmpty()) {
+                    throw new IllegalArgumentException("OCI 配置分区名称不能为空");
+                }
+                inDefault = "DEFAULT".equalsIgnoreCase(section);
+                foundDefault |= inDefault;
+                continue;
+            }
+
+            if (!inDefault) continue;
+            int separator = line.indexOf('=');
+            if (separator <= 0) {
+                throw new IllegalArgumentException("OCI 配置格式无效，请检查是否为“名称=内容”格式");
+            }
+
+            String key = line.substring(0, separator).trim().toLowerCase(Locale.ROOT);
+            String value = stripInlineComment(line.substring(separator + 1)).trim();
+            if (!key.isEmpty()) defaults.put(key, value);
+        }
+
+        if (!foundDefault) {
+            throw new IllegalArgumentException("OCI 配置中没有找到 [DEFAULT] 配置段");
+        }
+        String userOcid = defaults.get("user");
+        String fingerprint = defaults.get("fingerprint");
+        String tenancyOcid = defaults.get("tenancy");
+        String region = defaults.get("region");
+        if (!StringUtils.hasText(userOcid) || !StringUtils.hasText(fingerprint)
+                || !StringUtils.hasText(tenancyOcid) || !StringUtils.hasText(region)) {
+            throw new IllegalArgumentException("[DEFAULT] 配置段缺少必填项，请检查 user、fingerprint、tenancy 和 region");
+        }
+        return new OciConfig(userOcid, tenancyOcid, fingerprint, region);
+    }
+
+    private String stripInlineComment(String value) {
+        for (int i = 1; i < value.length(); i++) {
+            char current = value.charAt(i);
+            if ((current == '#' || current == ';') && Character.isWhitespace(value.charAt(i - 1))) {
+                return value.substring(0, i);
+            }
+        }
+        return value;
+    }
+
+    private record OciConfig(String userOcid, String tenancyOcid, String fingerprint, String region) {}
 }
