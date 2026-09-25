@@ -1378,6 +1378,14 @@ export default function NodePage() {
                       <p className="text-xs text-default-500 truncate">{getNodePrimaryAddress(node)}</p>
                     </div>
                     <div className="flex items-center gap-1.5 ml-2">
+                      <Chip
+                        color={getWallMonitorColor(node)}
+                        variant="flat"
+                        size="sm"
+                        className="text-xs"
+                      >
+                        {getWallMonitorLabel(node)}
+                      </Chip>
                       <Chip 
                         color={node.connectionStatus === 'online' ? 'success' : 'danger'} 
                         variant="flat" 
@@ -1392,19 +1400,6 @@ export default function NodePage() {
 
                 <CardBody className="pt-0 pb-3">
                   <div className="space-y-3">
-                    <div className="rounded border border-default-200 bg-default-50 dark:bg-default-100/20 p-2 text-xs">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-default-600">被墙状态</span>
-                        <Chip
-                          color={getWallMonitorColor(node)}
-                          variant="flat"
-                          size="sm"
-                          className="text-xs"
-                        >
-                          {getWallMonitorLabel(node)}
-                        </Chip>
-                      </div>
-                    </div>
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       <div className="rounded bg-default-50 p-2 text-center dark:bg-default-100">
                         <div className="text-default-600 mb-0.5">上传速度</div>
