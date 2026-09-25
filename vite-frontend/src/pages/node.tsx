@@ -776,16 +776,49 @@ export default function NodePage() {
     return `${systemInfo.swapUsage.toFixed(1)}%`;
   };
 
+  const clampMetric = (value: number): number => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+
   const getMetricCircleClass = (value: number, offline = false): string => {
-    const color = getProgressColor(value, offline);
+    const color = getProgressColor(clampMetric(value), offline);
     return {
-      default: 'border-default-300 text-default-500',
-      primary: 'border-primary-500 text-primary-500',
-      secondary: 'border-secondary-500 text-secondary-500',
-      success: 'border-success-500 text-success-500',
-      warning: 'border-warning-500 text-warning-500',
-      danger: 'border-danger-500 text-danger-500',
+      default: 'text-default-400',
+      primary: 'text-primary-500',
+      secondary: 'text-secondary-500',
+      success: 'text-success-500',
+      warning: 'text-warning-500',
+      danger: 'text-danger-500',
     }[color];
+  };
+
+  const MetricRing = ({ label, value, offline = false, unavailable = false }: {
+    label: string;
+    value: number;
+    offline?: boolean;
+    unavailable?: boolean;
+  }) => {
+    const percentage = unavailable || offline ? 0 : clampMetric(value);
+    const radius = 15;
+    const circumference = 2 * Math.PI * radius;
+    return (
+      <div className="relative h-9 w-9" title={`${label}: ${unavailable ? '未配置' : offline ? '离线' : `${percentage.toFixed(1)}%`}`} aria-label={label}>
+        <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90" aria-hidden="true">
+          <circle cx="18" cy="18" r={radius} fill="none" stroke="currentColor" strokeWidth="3" className="text-default-200 dark:text-default-700" />
+          <circle
+            cx="18"
+            cy="18"
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+            className={getMetricCircleClass(percentage, offline || unavailable)}
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference * (1 - percentage / 100)}
+          />
+        </svg>
+        <span className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-default-600 dark:text-default-300">{label}</span>
+      </div>
+    );
   };
 
   // 获取进度条颜色
@@ -1443,36 +1476,22 @@ export default function NodePage() {
                       </div>
                     </div>
                     <div className="flex items-center justify-around rounded border border-default-200 bg-default-50 px-2 py-1.5 dark:bg-default-100/20">
-                      <div
-                        className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-[9px] font-semibold ${getMetricCircleClass(
-                          node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.cpuUsage : 0,
-                          node.connectionStatus !== 'online'
-                        )}`}
-                        title="CPU"
-                        aria-label="CPU"
-                      >
-                        CPU
-                      </div>
-                      <div
-                        className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-[9px] font-semibold ${getMetricCircleClass(
-                          node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.memoryUsage : 0,
-                          node.connectionStatus !== 'online'
-                        )}`}
-                        title="内存"
-                        aria-label="内存"
-                      >
-                        内存
-                      </div>
-                      <div
-                        className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-[8px] font-semibold ${getMetricCircleClass(
-                          node.connectionStatus === 'online' && node.systemInfo?.swapUsage !== undefined ? node.systemInfo.swapUsage : 0,
-                          node.connectionStatus !== 'online' || node.systemInfo?.swapUsage === undefined || !node.systemInfo.swapTotal
-                        )}`}
-                        title="Swap"
-                        aria-label="Swap"
-                      >
-                        Swap
-                      </div>
+                      <MetricRing
+                        label="CPU"
+                        value={node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.cpuUsage : 0}
+                        offline={node.connectionStatus !== 'online'}
+                      />
+                      <MetricRing
+                        label="内存"
+                        value={node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.memoryUsage : 0}
+                        offline={node.connectionStatus !== 'online'}
+                      />
+                      <MetricRing
+                        label="Swap"
+                        value={node.connectionStatus === 'online' && node.systemInfo?.swapUsage !== undefined ? node.systemInfo.swapUsage : 0}
+                        offline={node.connectionStatus !== 'online'}
+                        unavailable={node.systemInfo?.swapUsage === undefined || !node.systemInfo.swapTotal}
+                      />
                     </div>
                     <Button
                       size="sm"
