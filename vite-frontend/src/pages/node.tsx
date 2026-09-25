@@ -816,7 +816,9 @@ export default function NodePage() {
             strokeDashoffset={circumference * (1 - percentage / 100)}
           />
         </svg>
-        <span className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-default-600 dark:text-default-300">{label}</span>
+        <span className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-default-600 dark:text-default-300">
+          {unavailable || offline ? '-' : `${percentage.toFixed(0)}%`}
+        </span>
       </div>
     );
   };
