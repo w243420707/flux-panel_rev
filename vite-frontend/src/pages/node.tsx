@@ -186,6 +186,14 @@ export default function NodePage() {
     });
   };
 
+  const expandAllNodeDetails = () => {
+    setExpandedNodeIds(new Set(nodeListRef.current.map(node => node.id)));
+  };
+
+  const collapseAllNodeDetails = () => {
+    setExpandedNodeIds(new Set());
+  };
+
   const [totalSpeed, setTotalSpeed] = useState({ upload: 0, download: 0 });
   nodeListRef.current = nodeList;
 
@@ -1374,6 +1382,26 @@ export default function NodePage() {
             </Chip>
         </div>
 
+        <Button
+              size="sm"
+              variant="flat"
+              color="default"
+              className="shrink-0"
+              onPress={expandAllNodeDetails}
+              isDisabled={nodeList.length === 0}
+            >
+              全部展开
+            </Button>
+        <Button
+              size="sm"
+              variant="flat"
+              color="default"
+              className="shrink-0"
+              onPress={collapseAllNodeDetails}
+              isDisabled={expandedNodeIds.size === 0}
+            >
+              全部收起
+            </Button>
         <Button
               size="sm"
               variant="flat"
