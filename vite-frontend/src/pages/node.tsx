@@ -114,6 +114,7 @@ interface NodeForm {
 
 export default function NodePage() {
   const [nodeList, setNodeList] = useState<Node[]>([]);
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<number>>(() => new Set());
   const [loading, setLoading] = useState(false);
   const [dialogVisible, setDialogVisible] = useState(false);
   const [dialogTitle, setDialogTitle] = useState('');
@@ -175,6 +176,15 @@ export default function NodePage() {
   const loadNodesPendingRef = useRef(0);
   const ociInstancesRequestRef = useRef(0);
   const maxReconnectAttempts = 5;
+
+  const toggleNodeDetails = (nodeId: number) => {
+    setExpandedNodeIds(previous => {
+      const next = new Set(previous);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  };
 
   const [totalSpeed, setTotalSpeed] = useState({ upload: 0, download: 0 });
   nodeListRef.current = nodeList;
@@ -1108,6 +1118,11 @@ export default function NodePage() {
         scheduleUpdatedAtRef.current.delete(nodeToDelete.id);
         changeIpUpdatedAtRef.current.delete(nodeToDelete.id);
         usageUpdatedAtRef.current.delete(nodeToDelete.id);
+        setExpandedNodeIds(previous => {
+          const next = new Set(previous);
+          next.delete(nodeToDelete.id);
+          return next;
+        });
         setNodeRebootState(nodeToDelete.id);
         setNodeList(prev => prev.filter(n => n.id !== nodeToDelete.id));
         setDeleteModalOpen(false);
@@ -1376,6 +1391,71 @@ export default function NodePage() {
                 </CardHeader>
 
                 <CardBody className="pt-0 pb-3">
+                  <div className="space-y-3">
+                    <div className="rounded border border-default-200 bg-default-50 dark:bg-default-100/20 p-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-default-600">被墙状态</span>
+                        <Chip
+                          color={getWallMonitorColor(node)}
+                          variant="flat"
+                          size="sm"
+                          className="text-xs"
+                        >
+                          {getWallMonitorLabel(node)}
+                        </Chip>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded bg-default-50 p-2 text-center dark:bg-default-100">
+                        <div className="text-default-600 mb-0.5">上传速度</div>
+                        <div className="font-mono">
+                          {node.connectionStatus === 'online' && node.systemInfo
+                            ? formatSpeed(node.systemInfo.uploadSpeed)
+                            : '-'}
+                        </div>
+                      </div>
+                      <div className="rounded bg-default-50 p-2 text-center dark:bg-default-100">
+                        <div className="text-default-600 mb-0.5">下载速度</div>
+                        <div className="font-mono">
+                          {node.connectionStatus === 'online' && node.systemInfo
+                            ? formatSpeed(node.systemInfo.downloadSpeed)
+                            : '-'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between gap-2">
+                        <span className="text-default-500">累计总流量</span>
+                        <span className="font-mono">
+                          {node.vpsUsage?.current ? formatTraffic(node.vpsUsage.current.totalBytes) : '-'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="text-default-500">累计使用时长</span>
+                        <span>{node.vpsUsage?.current ? formatUsageDuration(node.vpsUsage.current) : '-'}</span>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="light"
+                      className="w-full min-h-8 justify-between px-2 text-default-500"
+                      onPress={() => toggleNodeDetails(node.id)}
+                      aria-expanded={expandedNodeIds.has(node.id)}
+                    >
+                      <span>{expandedNodeIds.has(node.id) ? '收起详情' : '更多详情'}</span>
+                      <svg
+                        className={`h-4 w-4 transition-transform ${expandedNodeIds.has(node.id) ? 'rotate-180' : ''}`}
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.51a.75.75 0 01-1.08 0l-4.25-4.51a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                      </svg>
+                    </Button>
+                  </div>
+
+                  {expandedNodeIds.has(node.id) && (
+                    <div className="mt-3 space-y-3 border-t border-divider pt-3">
                   {/* 基础信息 */}
                   <div className="space-y-2 mb-4">
                     <div className="flex justify-between items-center text-sm min-w-0">
@@ -1703,6 +1783,8 @@ export default function NodePage() {
                       <p className="text-xs text-default-500">节点离线，暂时无法发送重启指令。</p>
                     ) : null}
                   </div>
+                  </div>
+                  )}
                 </CardBody>
               </Card>
             ))}
