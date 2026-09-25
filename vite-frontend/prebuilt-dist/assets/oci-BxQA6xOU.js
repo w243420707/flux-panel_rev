@@ -1,0 +1,1 @@
+import{dc as t}from"./index-B4tR6FCQ.js";const s=()=>t.post("/oci/account/list"),n=c=>t.post("/oci/account/save",c),a=c=>t.post("/oci/account/delete",{id:c}),e=c=>t.post("/oci/account/private-key",{id:c}),i=c=>t.post("/oci/account/test",{id:c}),u=c=>t.post("/oci/account/instances",{accountId:c});export{u as a,a as d,e as g,s as l,n as s,i as t};

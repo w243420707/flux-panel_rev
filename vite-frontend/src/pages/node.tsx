@@ -776,6 +776,18 @@ export default function NodePage() {
     return `${systemInfo.swapUsage.toFixed(1)}%`;
   };
 
+  const getMetricCircleClass = (value: number, offline = false): string => {
+    const color = getProgressColor(value, offline);
+    return {
+      default: 'border-default-300 text-default-500',
+      primary: 'border-primary-500 text-primary-500',
+      secondary: 'border-secondary-500 text-secondary-500',
+      success: 'border-success-500 text-success-500',
+      warning: 'border-warning-500 text-warning-500',
+      danger: 'border-danger-500 text-danger-500',
+    }[color];
+  };
+
   // 获取进度条颜色
   const getProgressColor = (value: number, offline = false): "default" | "primary" | "secondary" | "success" | "warning" | "danger" => {
     if (offline) return "default";
@@ -1430,57 +1442,36 @@ export default function NodePage() {
                         <span>{node.vpsUsage?.current ? formatUsageDuration(node.vpsUsage.current) : '-'}</span>
                       </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 rounded border border-default-200 bg-default-50 p-2 dark:bg-default-100/20">
-                      <div className="min-w-0">
-                        <div className="flex items-center justify-between gap-1 text-[11px]">
-                          <span className="text-default-600">CPU</span>
-                          <span className="truncate font-mono">
-                            {node.connectionStatus === 'online' && node.systemInfo ? `${node.systemInfo.cpuUsage.toFixed(1)}%` : '-'}
-                          </span>
-                        </div>
-                        <Progress
-                          value={node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.cpuUsage : 0}
-                          color={getProgressColor(
-                            node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.cpuUsage : 0,
-                            node.connectionStatus !== 'online'
-                          )}
-                          size="sm"
-                          aria-label="CPU使用率"
-                        />
+                    <div className="flex items-center justify-around rounded border border-default-200 bg-default-50 px-2 py-1.5 dark:bg-default-100/20">
+                      <div
+                        className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-[9px] font-semibold ${getMetricCircleClass(
+                          node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.cpuUsage : 0,
+                          node.connectionStatus !== 'online'
+                        )}`}
+                        title="CPU"
+                        aria-label="CPU"
+                      >
+                        CPU
                       </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center justify-between gap-1 text-[11px]">
-                          <span className="text-default-600">内存</span>
-                          <span className="truncate font-mono">
-                            {node.connectionStatus === 'online' && node.systemInfo ? formatMemoryMetric(node.systemInfo) : '-'}
-                          </span>
-                        </div>
-                        <Progress
-                          value={node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.memoryUsage : 0}
-                          color={getProgressColor(
-                            node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.memoryUsage : 0,
-                            node.connectionStatus !== 'online'
-                          )}
-                          size="sm"
-                          aria-label="内存使用率"
-                        />
+                      <div
+                        className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-[9px] font-semibold ${getMetricCircleClass(
+                          node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.memoryUsage : 0,
+                          node.connectionStatus !== 'online'
+                        )}`}
+                        title="内存"
+                        aria-label="内存"
+                      >
+                        内存
                       </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center justify-between gap-1 text-[11px]">
-                          <span className="text-default-600">Swap</span>
-                          <span className="truncate font-mono">
-                            {node.connectionStatus === 'online' && node.systemInfo ? formatSwapMetric(node.systemInfo) : '-'}
-                          </span>
-                        </div>
-                        <Progress
-                          value={node.connectionStatus === 'online' && node.systemInfo?.swapUsage !== undefined ? node.systemInfo.swapUsage : 0}
-                          color={getProgressColor(
-                            node.connectionStatus === 'online' && node.systemInfo?.swapUsage !== undefined ? node.systemInfo.swapUsage : 0,
-                            node.connectionStatus !== 'online' || node.systemInfo?.swapUsage === undefined || !node.systemInfo.swapTotal
-                          )}
-                          size="sm"
-                          aria-label="Swap使用率"
-                        />
+                      <div
+                        className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-[8px] font-semibold ${getMetricCircleClass(
+                          node.connectionStatus === 'online' && node.systemInfo?.swapUsage !== undefined ? node.systemInfo.swapUsage : 0,
+                          node.connectionStatus !== 'online' || node.systemInfo?.swapUsage === undefined || !node.systemInfo.swapTotal
+                        )}`}
+                        title="Swap"
+                        aria-label="Swap"
+                      >
+                        Swap
                       </div>
                     </div>
                     <Button
@@ -1504,6 +1495,59 @@ export default function NodePage() {
 
                   {expandedNodeIds.has(node.id) && (
                     <div className="mt-3 space-y-3 border-t border-divider pt-3">
+                    <div className="grid grid-cols-1 gap-3">
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span>CPU</span>
+                          <span className="font-mono">
+                            {node.connectionStatus === 'online' && node.systemInfo ? `${node.systemInfo.cpuUsage.toFixed(1)}%` : '-'}
+                          </span>
+                        </div>
+                        <Progress
+                          value={node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.cpuUsage : 0}
+                          color={getProgressColor(
+                            node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.cpuUsage : 0,
+                            node.connectionStatus !== 'online'
+                          )}
+                          size="sm"
+                          aria-label="CPU使用率"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span>内存</span>
+                          <span className="whitespace-nowrap font-mono">
+                            {node.connectionStatus === 'online' && node.systemInfo ? formatMemoryMetric(node.systemInfo) : '-'}
+                          </span>
+                        </div>
+                        <Progress
+                          value={node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.memoryUsage : 0}
+                          color={getProgressColor(
+                            node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.memoryUsage : 0,
+                            node.connectionStatus !== 'online'
+                          )}
+                          size="sm"
+                          aria-label="内存使用率"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between gap-1 text-xs mb-1">
+                          <span>Swap</span>
+                          <span className="whitespace-nowrap font-mono">
+                            {node.connectionStatus === 'online' && node.systemInfo ? formatSwapMetric(node.systemInfo) : '-'}
+                          </span>
+                        </div>
+                        <Progress
+                          value={node.connectionStatus === 'online' && node.systemInfo?.swapUsage !== undefined ? node.systemInfo.swapUsage : 0}
+                          color={getProgressColor(
+                            node.connectionStatus === 'online' && node.systemInfo?.swapUsage !== undefined ? node.systemInfo.swapUsage : 0,
+                            node.connectionStatus !== 'online' || node.systemInfo?.swapUsage === undefined || !node.systemInfo.swapTotal
+                          )}
+                          size="sm"
+                          aria-label="Swap使用率"
+                        />
+                      </div>
+                    </div>
                   {/* 基础信息 */}
                   <div className="space-y-2 mb-4">
                     <div className="flex justify-between items-center text-sm min-w-0">
