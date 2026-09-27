@@ -30,6 +30,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -66,7 +67,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     @Value("${PANEL_UPDATE_REPOSITORY:${UPDATE_REPOSITORY:w243420707/flux-panel_rev}}")
     private String configuredRepository;
 
-    @Value("${PANEL_VERSION:${APP_VERSION:1.3.87}}")
+    @Value("${PANEL_VERSION:${APP_VERSION:1.3.88}}")
     private String configuredCurrentVersion;
 
     @Value("${UPDATE_ENCRYPTION_KEY:${jwt-secret:}}")
@@ -258,9 +259,10 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
 
     private Map<String, Object> statusView(PanelUpdateSetting setting) {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("currentVersion", setting.getCurrentVersion());
+        result.put("currentVersion", currentVersion());
         result.put("latestVersion", setting.getLatestVersion());
-        result.put("updateAvailable", setting.getUpdateAvailable() != null && setting.getUpdateAvailable() == 1);
+        result.put("updateAvailable", StringUtils.hasText(setting.getLatestVersion())
+                && compareVersions(setting.getLatestVersion(), currentVersion()) > 0);
         result.put("lastCheckAt", setting.getLastCheckAt());
         result.put("lastCheckStatus", setting.getLastCheckStatus());
         result.put("lastCheckMessage", setting.getLastCheckMessage());
@@ -289,6 +291,16 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
                 status.put("updaterReady", false);
                 status.put("updateStatus", "UNKNOWN");
                 status.put("updateMessage", "宿主机状态文件格式无效");
+                return;
+            }
+            String resultRequestId = result.getString("requestId");
+            Object pendingRequestId = status.get("updateRequestId");
+            if (pendingRequestId != null && !pendingRequestId.equals(resultRequestId)) {
+                status.put("updaterStatus", "PENDING");
+                status.put("updaterMessage", "等待宿主机执行更新");
+                status.put("updaterReady", true);
+                status.put("updateStatus", "PENDING");
+                status.put("updateMessage", "等待宿主机执行更新");
                 return;
             }
             status.put("updaterStatus", result.getString("status"));
@@ -325,7 +337,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
             settingMapper.insert(setting);
         }
         boolean changed = false;
-        if (!StringUtils.hasText(setting.getRepository())) {
+        if (!StringUtils.hasText(setting.getRepository()) || !repository().equals(setting.getRepository())) {
             setting.setRepository(repository());
             changed = true;
         }
@@ -366,7 +378,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     }
 
     private String currentVersion() {
-        return StringUtils.hasText(configuredCurrentVersion) ? configuredCurrentVersion.trim() : "1.3.87";
+        return StringUtils.hasText(configuredCurrentVersion) ? configuredCurrentVersion.trim() : "1.3.88";
     }
 
     private int intervalSeconds(PanelUpdateSetting setting) {
@@ -436,13 +448,31 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     }
 
     private void writeRestricted(Path path, String value) throws IOException {
-        Files.writeString(path, value, StandardCharsets.UTF_8, StandardOpenOption.CREATE,
-                StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+        Path temp = path.resolveSibling(path.getFileName() + ".tmp");
+        Files.deleteIfExists(temp);
         try {
-            Set<PosixFilePermission> permissions = EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
-            Files.setPosixFilePermissions(path, permissions);
+            Set<PosixFilePermission> permissions = EnumSet.of(
+                    PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+            Files.createFile(temp, PosixFilePermissions.asFileAttribute(permissions));
         } catch (UnsupportedOperationException ignored) {
-            // Windows development environments do not expose POSIX permissions.
+            Files.createFile(temp);
+        }
+        try {
+            Files.writeString(temp, value, StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.WRITE);
+            try {
+                Files.setPosixFilePermissions(temp, EnumSet.of(
+                        PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
+            } catch (UnsupportedOperationException ignored) {
+                // Windows development environments do not expose POSIX permissions.
+            }
+            try {
+                Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temp);
         }
     }
 

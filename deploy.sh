@@ -268,17 +268,17 @@ install_packages() {
     apt)
       export DEBIAN_FRONTEND=noninteractive
       apt-get update
-      apt-get install -y ca-certificates curl gnupg lsb-release git nginx certbot python3-certbot-nginx openssl dnsutils iproute2
+      apt-get install -y ca-certificates curl gnupg lsb-release git nginx certbot python3-certbot-nginx openssl dnsutils iproute2 util-linux
       ;;
     dnf)
-      dnf install -y ca-certificates curl gnupg2 git nginx certbot python3-certbot-nginx openssl bind-utils iproute
+      dnf install -y ca-certificates curl gnupg2 git nginx certbot python3-certbot-nginx openssl bind-utils iproute util-linux
       ;;
     yum)
-      yum install -y ca-certificates curl gnupg2 git nginx certbot python3-certbot-nginx openssl bind-utils iproute
+      yum install -y ca-certificates curl gnupg2 git nginx certbot python3-certbot-nginx openssl bind-utils iproute util-linux
       ;;
     apk)
       apk update
-      apk add --no-cache ca-certificates curl git nginx certbot certbot-nginx openssl bind-tools iproute2 docker docker-cli-compose
+      apk add --no-cache ca-certificates curl git nginx certbot certbot-nginx openssl bind-tools iproute2 util-linux docker docker-cli-compose
       ;;
   esac
 }
@@ -636,6 +636,13 @@ set_env_value() {
 
 sync_build_env_values() {
   load_env
+  local release_version
+  release_version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' "${APP_DIR}/vite-frontend/package.json" | head -n 1)"
+  if [[ "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    PANEL_VERSION="${release_version}"
+    set_env_value PANEL_VERSION "${PANEL_VERSION}"
+  fi
+
   if [[ -z "${AWS_ENCRYPTION_KEY:-}" ]]; then
     AWS_ENCRYPTION_KEY="$(random_string)"
     set_env_value AWS_ENCRYPTION_KEY "${AWS_ENCRYPTION_KEY}"
@@ -664,6 +671,7 @@ sync_build_env_values() {
 }
 
 write_env_file() {
+  local release_version
   mkdir -p "${APP_DIR}"
   load_env
   [[ -n "${DEPLOY_REF_ARG}" ]] && DEPLOY_REF="${DEPLOY_REF_ARG}"
@@ -700,7 +708,12 @@ write_env_file() {
   DOCKER_BUILD_CACHE_KEEP="${DOCKER_BUILD_CACHE_KEEP:-512MB}"
   UPDATE_STATE_DIR="${UPDATE_STATE_DIR:-${APP_DIR}/update-state}"
   PANEL_UPDATE_REPOSITORY="${PANEL_UPDATE_REPOSITORY:-${REPO_URL}}"
-  PANEL_VERSION="${PANEL_VERSION:-1.3.87}"
+  release_version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' "${APP_DIR}/vite-frontend/package.json" | head -n 1)"
+  if [[ "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    PANEL_VERSION="${release_version}"
+  else
+    PANEL_VERSION="${PANEL_VERSION:-1.3.88}"
+  fi
   FRONTEND_PORT="${FRONTEND_PORT:-${FRONTEND_PORT_ENV:-6366}}"
   BACKEND_PORT="${BACKEND_PORT:-${BACKEND_PORT_ENV:-6365}}"
   PHPMYADMIN_PORT="${PHPMYADMIN_PORT:-${PHPMYADMIN_PORT_ENV:-8066}}"
@@ -809,6 +822,7 @@ sync_repo() {
 
   if [[ -d "${APP_DIR}/.git" ]]; then
     log "Updating repository in ${APP_DIR}..."
+    git -C "${APP_DIR}" remote set-url origin "${REPO_URL}"
     PREVIOUS_COMMIT="$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)"
   else
     if [[ -d "${APP_DIR}" && -n "$(find "${APP_DIR}" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
@@ -1164,21 +1178,25 @@ write_update_result() {
 auto_update_flow() {
   load_env
   ensure_update_state_dir
-  exec 9>"${UPDATE_STATE_DIR}/auto-update.lock"
-  flock -n 9 || { log "Another automatic panel update is already running."; return 0; }
+  acquire_deploy_lock
 
   local request_file="${UPDATE_STATE_DIR}/request.json"
   local token_file="${UPDATE_STATE_DIR}/github-token"
   local result_file="${UPDATE_STATE_DIR}/result.json"
-  [[ -f "${request_file}" ]] || return 0
+  [[ -f "${request_file}" ]] || { release_deploy_lock; return 0; }
 
   local request_id tag previous_id previous_status
   request_id="$(json_value requestId "${request_file}")"
   tag="$(json_value tag "${request_file}")"
   previous_id="$(json_value requestId "${result_file}")"
   previous_status="$(json_value status "${result_file}")"
-  [[ -n "${request_id}" && -n "${tag}" ]] || { write_update_result "${request_id}" failed "更新请求格式无效"; return 1; }
+  [[ -n "${request_id}" && -n "${tag}" ]] || {
+    write_update_result "${request_id}" failed "更新请求格式无效"
+    release_deploy_lock
+    return 1
+  }
   if [[ "${previous_id}" == "${request_id}" && "${previous_status}" == "success" ]]; then
+    release_deploy_lock
     return 0
   fi
 
@@ -1187,16 +1205,93 @@ auto_update_flow() {
     export GITHUB_TOKEN
   fi
   write_update_result "${request_id}" running "正在拉取 ${tag} 并重建面板"
-  if ( DEPLOY_REF="${tag}" DEPLOY_REF_ARG="${tag}" update_flow ); then
+  if auto_update_apply "${request_id}" "${tag}"; then
     write_update_result "${request_id}" success "面板已更新到 ${tag}"
     rm -f "${request_file}"
   else
-    write_update_result "${request_id}" failed "面板自动更新失败，保留当前运行中的服务"
+    write_update_result "${request_id}" failed "面板自动更新失败，已尝试恢复之前版本"
     rm -f "${token_file}"
+    release_deploy_lock
     return 1
   fi
   rm -f "${token_file}"
+  release_deploy_lock
 }
+
+auto_update_cleanup_snapshot() {
+  local image_tag
+  for image_tag in "${AUTO_ROLLBACK_BACKEND_TAG:-}" "${AUTO_ROLLBACK_FRONTEND_TAG:-}"; do
+    [[ -n "${image_tag}" ]] && docker image rm "${image_tag}" >/dev/null 2>&1 || true
+  done
+  [[ -n "${AUTO_ROLLBACK_ENV_FILE:-}" ]] && rm -f "${AUTO_ROLLBACK_ENV_FILE}"
+}
+
+auto_update_rollback() {
+  local exit_code="$1" restored=1
+  trap - EXIT
+  if [[ "${exit_code}" -eq 0 || "${AUTO_ROLLBACK_ACTIVE:-0}" -ne 1 ]]; then
+    exit "${exit_code}"
+  fi
+
+  set +e
+  err "Automatic update failed; restoring the previous panel release."
+  git -C "${APP_DIR}" checkout --detach -f "${AUTO_ROLLBACK_COMMIT}" >/dev/null 2>&1 || restored=0
+  cp -p "${AUTO_ROLLBACK_ENV_FILE}" "${ENV_FILE}" || restored=0
+  chmod 600 "${ENV_FILE}" 2>/dev/null || restored=0
+  docker tag "${AUTO_ROLLBACK_BACKEND_ID}" "${APP_SLUG}-backend:local" || restored=0
+  docker tag "${AUTO_ROLLBACK_FRONTEND_ID}" "${APP_SLUG}-frontend:local" || restored=0
+  if [[ "${restored}" -ne 1 ]]; then
+    err "Could not restore all panel files and images. The rollback snapshot was kept."
+    exit "${exit_code}"
+  fi
+  load_env
+
+  if compose up -d --force-recreate --remove-orphans \
+      && wait_for_health "${APP_SLUG}-mysql" 180 \
+      && wait_for_health "${APP_SLUG}-backend" 240 \
+      && wait_for_health "${APP_SLUG}-frontend" 120; then
+    warn "Previous panel release is healthy again."
+    auto_update_cleanup_snapshot
+  else
+    err "Panel rollback could not be verified. The previous images and environment backup were kept."
+  fi
+  exit "${exit_code}"
+}
+
+auto_update_apply() (
+  local request_id="$1" tag="$2"
+  load_env
+  AUTO_ROLLBACK_COMMIT="$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)"
+  [[ -n "${AUTO_ROLLBACK_COMMIT}" ]] || return 1
+
+  AUTO_ROLLBACK_BACKEND_ID="$(docker image inspect -f '{{.Id}}' "${APP_SLUG}-backend:local" 2>/dev/null || true)"
+  AUTO_ROLLBACK_FRONTEND_ID="$(docker image inspect -f '{{.Id}}' "${APP_SLUG}-frontend:local" 2>/dev/null || true)"
+  [[ -n "${AUTO_ROLLBACK_BACKEND_ID}" && -n "${AUTO_ROLLBACK_FRONTEND_ID}" ]] || {
+    err "Cannot snapshot the current panel images for rollback."
+    return 1
+  }
+
+  AUTO_ROLLBACK_ENV_FILE="${UPDATE_STATE_DIR}/rollback-${request_id}.env"
+  AUTO_ROLLBACK_BACKEND_TAG="${APP_SLUG}-backend:rollback-${request_id}"
+  AUTO_ROLLBACK_FRONTEND_TAG="${APP_SLUG}-frontend:rollback-${request_id}"
+  cp -p "${ENV_FILE}" "${AUTO_ROLLBACK_ENV_FILE}" || return 1
+  chmod 600 "${AUTO_ROLLBACK_ENV_FILE}"
+  if ! docker tag "${AUTO_ROLLBACK_BACKEND_ID}" "${AUTO_ROLLBACK_BACKEND_TAG}" \
+      || ! docker tag "${AUTO_ROLLBACK_FRONTEND_ID}" "${AUTO_ROLLBACK_FRONTEND_TAG}"; then
+    auto_update_cleanup_snapshot
+    return 1
+  fi
+
+  AUTO_ROLLBACK_ACTIVE=1
+  trap 'auto_update_rollback "$?"' EXIT
+  DEPLOY_REF="${tag}"
+  DEPLOY_REF_ARG="${tag}"
+  update_flow
+
+  AUTO_ROLLBACK_ACTIVE=0
+  trap - EXIT
+  auto_update_cleanup_snapshot
+)
 
 wait_for_health() {
   local container="$1"
@@ -1657,6 +1752,14 @@ update_panel_address_in_db() {
 }
 
 install_flow() {
+  local lock_was_held=0
+  [[ -n "${DEPLOY_LOCK_FD}" ]] && lock_was_held=1
+  acquire_deploy_lock
+  install_flow_locked
+  [[ "${lock_was_held}" -eq 1 ]] || release_deploy_lock
+}
+
+install_flow_locked() {
   detect_system
   install_packages
   install_docker
@@ -1677,6 +1780,14 @@ install_flow() {
 }
 
 update_flow() {
+  local lock_was_held=0
+  [[ -n "${DEPLOY_LOCK_FD}" ]] && lock_was_held=1
+  acquire_deploy_lock
+  update_flow_locked
+  [[ "${lock_was_held}" -eq 1 ]] || release_deploy_lock
+}
+
+update_flow_locked() {
   detect_system
   install_packages
   install_docker
@@ -1698,6 +1809,14 @@ update_flow() {
 }
 
 uninstall_flow() {
+  local lock_was_held=0
+  [[ -n "${DEPLOY_LOCK_FD}" ]] && lock_was_held=1
+  acquire_deploy_lock
+  uninstall_flow_locked
+  [[ "${lock_was_held}" -eq 1 ]] || release_deploy_lock
+}
+
+uninstall_flow_locked() {
   load_env
   if [[ ! -d "${APP_DIR}" ]]; then
     warn "${APP_DIR} does not exist."
