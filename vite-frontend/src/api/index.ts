@@ -1,4 +1,5 @@
 import Network from './network';
+export * from './update';
 
 // 登陆相关接口
 export interface LoginData {

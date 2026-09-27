@@ -9,6 +9,10 @@ LOG_FILE="${LOG_DIR}/gost.log"
 SERVICE_FILE="/etc/systemd/system/gost.service"
 LOGROTATE_FILE="/etc/logrotate.d/gost"
 BINARY_SOURCE_FILE="${INSTALL_DIR}/source.conf"
+UPDATE_LOCK_FILE="${GOST_UPDATE_LOCK_FILE:-/run/lock/gost-update.lock}"
+AUTO_UPDATE_SCRIPT_FILE="${GOST_AUTO_UPDATE_SCRIPT_FILE:-/usr/local/libexec/gost-node-updater}"
+AUTO_UPDATE_SERVICE_FILE="${GOST_AUTO_UPDATE_SERVICE_FILE:-/etc/systemd/system/gost-auto-update.service}"
+AUTO_UPDATE_TIMER_FILE="${GOST_AUTO_UPDATE_TIMER_FILE:-/etc/systemd/system/gost-auto-update.timer}"
 DEFAULT_BINARY_BASE_URL="${GOST_DEFAULT_BINARY_BASE_URL:-https://raw.githubusercontent.com/w243420707/flux-panel-node-assets/refs/heads/main/releases}"
 BINARY_BASE_URL="${GOST_BINARY_BASE_URL:-}"
 BINARY_FALLBACK_BASE_URL="${GOST_BINARY_FALLBACK_BASE_URL:-}"
@@ -31,6 +35,27 @@ OS_PRETTY=""
 KERNEL_RELEASE=""
 INIT_SYSTEM=""
 VIRT_TYPE=""
+UPDATE_LOCK_FD=""
+STAGED_BINARY=""
+
+script_path() {
+  local source="${BASH_SOURCE[0]}"
+  if command -v readlink >/dev/null 2>&1; then
+    readlink -f "${source}" 2>/dev/null || printf '%s' "${source}"
+  else
+    printf '%s' "${source}"
+  fi
+}
+
+SCRIPT_PATH="$(script_path)"
+
+cleanup_staged_binary() {
+  if [[ -n "${STAGED_BINARY:-}" ]]; then
+    rm -f "${STAGED_BINARY}" 2>/dev/null || true
+  fi
+}
+
+trap cleanup_staged_binary EXIT
 
 log() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*"; }
@@ -47,6 +72,7 @@ Usage:
 Actions:
   install     Install or reinstall the node
   update      Download the latest binary and restart the service
+  auto-update Download and install the latest binary without changing config
   uninstall   Stop and remove the node
   status      Show service status
   logs        Follow service logs
@@ -100,6 +126,18 @@ confirm() {
   esac
 }
 
+detect_architecture() {
+  case "$(uname -m)" in
+    x86_64|amd64|x64) ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
+    armv8l|armv7l|armv7|armv7hl|armhf) ARCH="armv7" ;;
+    armv6l|armv6|armel) ARCH="armv6" ;;
+    *)
+      die "Unsupported architecture: $(uname -m). Supported: amd64, arm64, armv7, armv6."
+      ;;
+  esac
+}
+
 detect_os() {
   [[ "$(uname -s)" == "Linux" ]] || die "This installer supports Linux only."
   KERNEL_RELEASE="$(uname -r)"
@@ -138,15 +176,7 @@ detect_os() {
     INIT_SYSTEM="unknown"
   fi
 
-  case "$(uname -m)" in
-    x86_64|amd64|x64) ARCH="amd64" ;;
-    aarch64|arm64) ARCH="arm64" ;;
-    armv8l|armv7l|armv7|armv7hl|armhf) ARCH="armv7" ;;
-    armv6l|armv6|armel) ARCH="armv6" ;;
-    *)
-      die "Unsupported architecture: $(uname -m). Supported: amd64, arm64, armv7, armv6."
-      ;;
-  esac
+  detect_architecture
 
   if command -v systemd-detect-virt >/dev/null 2>&1; then
     VIRT_TYPE="$(systemd-detect-virt 2>/dev/null || true)"
@@ -166,6 +196,7 @@ detect_os() {
 install_packages() {
   if command -v curl >/dev/null 2>&1 \
     && command -v logrotate >/dev/null 2>&1 \
+    && command -v flock >/dev/null 2>&1 \
     && command -v mkswap >/dev/null 2>&1 \
     && command -v swapon >/dev/null 2>&1 \
     && command -v sysctl >/dev/null 2>&1 \
@@ -513,6 +544,29 @@ resolve_binary_source() {
   write_binary_source
 }
 
+resolve_auto_binary_source() {
+  [[ -z "${GOST_BINARY_URL:-}" ]] || die "Automatic updates do not accept a custom binary URL."
+
+  if [[ -z "${BINARY_SOURCE_MODE}" ]]; then
+    BINARY_SOURCE_MODE="github"
+  fi
+  case "${BINARY_SOURCE_MODE}" in
+    github|local) ;;
+    *) die "Invalid asset source mode: ${BINARY_SOURCE_MODE}. Use github or local." ;;
+  esac
+
+  if [[ -z "${BINARY_BASE_URL}" ]]; then
+    local saved_addr
+    saved_addr="$(read_config_value "addr" "${INSTALL_DIR}/config.json" 2>/dev/null || true)"
+    if [[ -n "${saved_addr}" ]]; then
+      BINARY_BASE_URL="$(derive_binary_base_url "${saved_addr}")"
+    fi
+  fi
+  [[ -n "${BINARY_BASE_URL}" ]] || BINARY_BASE_URL="${DEFAULT_BINARY_BASE_URL}"
+  BINARY_BASE_URL="$(normalize_base_url "${BINARY_BASE_URL}")"
+  BINARY_FALLBACK_BASE_URL="$(normalize_base_url "${BINARY_FALLBACK_BASE_URL}")"
+}
+
 write_binary_source() {
   [[ -n "${BINARY_BASE_URL}" ]] || return 0
   mkdir -p "${INSTALL_DIR}"
@@ -538,6 +592,24 @@ stop_service() {
   systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
 }
 
+acquire_update_lock() {
+  command -v flock >/dev/null 2>&1 || die "flock is required for safe node updates."
+  mkdir -p "$(dirname "${UPDATE_LOCK_FILE}")"
+  exec {UPDATE_LOCK_FD}>"${UPDATE_LOCK_FILE}"
+  chmod 600 "${UPDATE_LOCK_FILE}" 2>/dev/null || true
+  if ! flock -n "${UPDATE_LOCK_FD}"; then
+    die "Another node install or update is already running."
+  fi
+}
+
+release_update_lock() {
+  if [[ -n "${UPDATE_LOCK_FD:-}" ]]; then
+    flock -u "${UPDATE_LOCK_FD}" 2>/dev/null || true
+    eval "exec ${UPDATE_LOCK_FD}>&-" 2>/dev/null || true
+    UPDATE_LOCK_FD=""
+  fi
+}
+
 disable_service() {
   systemctl disable "${APP_NAME}" >/dev/null 2>&1 || true
 }
@@ -558,10 +630,14 @@ EOF
   fi
 }
 
-download_binary() {
+download_binary_to_staging() {
+  # Checksum modes: 1 is automatic/fail-closed (custom URLs rejected), while
+  # 2 is strict for repository sources but keeps explicit manual URLs usable.
+  local strict_checksum="${1:-0}"
   mkdir -p "${INSTALL_DIR}"
   local primary_url fallback_url tmp_file selected_base
-  tmp_file="$(mktemp)"
+  STAGED_BINARY="$(mktemp "${INSTALL_DIR}/.${APP_NAME}.download.XXXXXX")"
+  tmp_file="${STAGED_BINARY}"
 
   primary_url="$(binary_url_for_base "${BINARY_BASE_URL}")"
   fallback_url="$(binary_url_for_base "${BINARY_FALLBACK_BASE_URL}")"
@@ -572,7 +648,7 @@ download_binary() {
   elif [[ -n "${BINARY_FALLBACK_BASE_URL}" && "${BINARY_FALLBACK_BASE_URL}" != "${BINARY_BASE_URL}" ]]; then
     warn "Primary node asset source failed; trying fallback: ${fallback_url}"
     rm -f "${tmp_file}"
-    tmp_file="$(mktemp)"
+    tmp_file="$(mktemp "${INSTALL_DIR}/.${APP_NAME}.download.XXXXXX")"
     download_url_with_ipv4_fallback "${fallback_url}" "${tmp_file}" || {
       rm -f "${tmp_file}"
       die "Download failed from both node asset sources."
@@ -584,28 +660,35 @@ download_binary() {
   fi
 
   chmod 755 "${tmp_file}"
-  verify_binary_checksum "${tmp_file}" "$(binary_name)" "${selected_base}" || {
+  verify_binary_checksum "${tmp_file}" "$(binary_name)" "${selected_base}" "${strict_checksum}" || {
     rm -f "${tmp_file}"
+    STAGED_BINARY=""
     die "Checksum verification failed for $(binary_name)."
   }
   verify_binary "${tmp_file}" || {
     rm -f "${tmp_file}"
+    STAGED_BINARY=""
     die "Downloaded node binary failed validation."
   }
-  install -m 755 "${tmp_file}" "${INSTALL_DIR}/${APP_NAME}"
-  rm -f "${tmp_file}"
+  chmod 755 "${tmp_file}"
 }
 
 verify_binary_checksum() {
   local bin="$1" manifest_name="${2:-$(basename "$1")}" base_url="${3:-${BINARY_BASE_URL}}"
+  local strict_checksum="${4:-0}"
   local manifest_url manifest_file expected actual
 
   if [[ -n "${GOST_BINARY_URL:-}" ]]; then
-    warn "Custom binary URL detected; skipped repository checksum verification."
+    if [[ "${strict_checksum}" == "1" ]]; then
+      warn "Automatic updates do not accept a custom binary URL without repository checksums."
+      return 1
+    fi
+    warn "Custom binary URL detected; repository checksum verification is skipped for this explicit manual source."
     return 0
   fi
 
   if ! command -v sha256sum >/dev/null 2>&1; then
+    [[ "${strict_checksum}" == "1" || "${strict_checksum}" == "2" ]] && return 1
     warn "Cannot find sha256sum; skipped checksum verification."
     return 0
   fi
@@ -615,6 +698,7 @@ verify_binary_checksum() {
   manifest_file="$(mktemp)"
   if ! download_url_with_ipv4_fallback "${manifest_url}" "${manifest_file}"; then
     rm -f "${manifest_file}"
+    [[ "${strict_checksum}" == "1" || "${strict_checksum}" == "2" ]] && return 1
     warn "Checksum manifest not found; skipped checksum verification."
     return 0
   fi
@@ -623,6 +707,7 @@ verify_binary_checksum() {
   rm -f "${manifest_file}"
 
   if [[ -z "${expected}" ]]; then
+    [[ "${strict_checksum}" == "1" || "${strict_checksum}" == "2" ]] && return 1
     warn "Checksum manifest does not include ${manifest_name}; skipped checksum verification."
     return 0
   fi
@@ -630,6 +715,76 @@ verify_binary_checksum() {
   actual="$(sha256sum "${bin}" | awk '{print $1}')"
   [[ "${actual}" == "${expected}" ]] || return 1
   log "Binary checksum verification passed."
+}
+
+install_staged_binary() {
+  local target="${INSTALL_DIR}/${APP_NAME}"
+  [[ -n "${STAGED_BINARY:-}" && -f "${STAGED_BINARY}" ]] || die "Staged node binary is missing."
+  chmod 755 "${STAGED_BINARY}"
+  mv -f "${STAGED_BINARY}" "${target}"
+  rm -f "${STAGED_BINARY}"
+  STAGED_BINARY=""
+}
+
+replace_binary_and_restart() {
+  local staged="${1:-}" target="${INSTALL_DIR}/${APP_NAME}"
+  local backup="${INSTALL_DIR}/${APP_NAME}.previous" had_target=0 restored=1
+
+  [[ -n "${staged}" && -f "${staged}" ]] || die "Staged node binary is missing."
+  if cmp -s "${staged}" "${target}"; then
+    rm -f "${staged}"
+    STAGED_BINARY=""
+    if ! systemctl is-active --quiet "${APP_NAME}"; then
+      systemctl start "${APP_NAME}" >/dev/null 2>&1 || true
+    fi
+    log "Node binary is already up to date; service was not restarted."
+    return 0
+  fi
+
+  [[ -f "${target}" ]] && had_target=1
+  if ! systemctl stop "${APP_NAME}" >/dev/null 2>&1; then
+    die "Could not stop the node service before replacing its binary."
+  fi
+  if [[ "${had_target}" -eq 1 ]]; then
+    if ! cp -p "${target}" "${backup}"; then
+      systemctl start "${APP_NAME}" >/dev/null 2>&1 || true
+      die "Could not create a backup of the current node binary."
+    fi
+  fi
+  if ! mv -f "${staged}" "${target}"; then
+    STAGED_BINARY=""
+    systemctl start "${APP_NAME}" >/dev/null 2>&1 || true
+    die "Could not install the staged node binary."
+  fi
+  STAGED_BINARY=""
+  chmod 755 "${target}"
+
+  if systemctl restart "${APP_NAME}" >/dev/null 2>&1 \
+    && systemctl is-active --quiet "${APP_NAME}"; then
+    log "Node binary replaced and service is running."
+    return 0
+  fi
+
+  warn "New node binary failed to start; restoring the previous binary."
+  systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
+  if [[ "${had_target}" -eq 1 && -f "${backup}" ]]; then
+    if mv -f "${backup}" "${target}"; then
+      chmod 755 "${target}" 2>/dev/null || true
+    else
+      err "Could not restore the previous node binary."
+      restored=0
+    fi
+  else
+    rm -f "${target}"
+  fi
+  if [[ "${restored}" -eq 1 ]] \
+    && systemctl start "${APP_NAME}" >/dev/null 2>&1 \
+    && systemctl is-active --quiet "${APP_NAME}"; then
+    warn "Previous node binary restored and service is running."
+  else
+    err "Previous node binary was restored, but the service did not start."
+  fi
+  return 1
 }
 
 download_url() {
@@ -737,6 +892,59 @@ refresh_service() {
   systemctl enable --now "${APP_NAME}"
 }
 
+persist_updater_script() {
+  [[ -f "${SCRIPT_PATH}" ]] || die "Could not locate the node installer script for automatic updates."
+  mkdir -p "$(dirname "${AUTO_UPDATE_SCRIPT_FILE}")"
+  if [[ "${SCRIPT_PATH}" != "${AUTO_UPDATE_SCRIPT_FILE}" ]]; then
+    install -m 700 "${SCRIPT_PATH}" "${AUTO_UPDATE_SCRIPT_FILE}"
+  else
+    chmod 700 "${AUTO_UPDATE_SCRIPT_FILE}"
+  fi
+  chown root:root "${AUTO_UPDATE_SCRIPT_FILE}" 2>/dev/null || true
+}
+
+write_auto_update_units() {
+  cat > "${AUTO_UPDATE_SERVICE_FILE}" <<EOF
+[Unit]
+Description=Flux Panel Gost Node automatic update
+After=network-online.target gost.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${AUTO_UPDATE_SCRIPT_FILE} auto-update
+EOF
+
+  cat > "${AUTO_UPDATE_TIMER_FILE}" <<EOF
+[Unit]
+Description=Daily randomized Flux Panel Gost Node update
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=24h
+AccuracySec=1s
+Persistent=true
+Unit=gost-auto-update.service
+
+[Install]
+WantedBy=timers.target
+EOF
+  chmod 644 "${AUTO_UPDATE_SERVICE_FILE}" "${AUTO_UPDATE_TIMER_FILE}"
+}
+
+install_auto_update_timer() {
+  persist_updater_script
+  write_auto_update_units
+  systemctl daemon-reload
+  systemctl enable --now gost-auto-update.timer
+}
+
+remove_auto_update_timer() {
+  systemctl disable --now gost-auto-update.timer >/dev/null 2>&1 || true
+  rm -f "${AUTO_UPDATE_TIMER_FILE}" "${AUTO_UPDATE_SERVICE_FILE}" "${AUTO_UPDATE_SCRIPT_FILE}"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+}
+
 ensure_service_running() {
   sleep 2
   if systemctl is-active --quiet "${APP_NAME}"; then
@@ -753,23 +961,34 @@ ensure_service_running() {
 }
 
 install_flow() {
+  # A fresh host may not have flock yet; install the base dependencies before
+  # taking the update lock for the rest of the installation.
   detect_os
   install_packages
+  acquire_update_lock
+  install_flow_locked
+  release_update_lock
+}
+
+install_flow_locked() {
   ensure_swap
   prompt_config
   resolve_binary_source
+
+  setup_logging
+  write_config
+  download_binary_to_staging 2
 
   if systemctl list-unit-files --type=service | grep -Fq "${APP_NAME}.service"; then
     stop_service
     disable_service
   fi
 
-  setup_logging
-  write_config
-  download_binary
+  install_staged_binary
   write_service
   refresh_service
   ensure_service_running
+  install_auto_update_timer
 
   log "Install complete."
 }
@@ -777,6 +996,12 @@ install_flow() {
 update_flow() {
   detect_os
   install_packages
+  acquire_update_lock
+  update_flow_locked
+  release_update_lock
+}
+
+update_flow_locked() {
   ensure_swap
 
   [[ -d "${INSTALL_DIR}" ]] || die "The node is not installed."
@@ -793,13 +1018,31 @@ update_flow() {
   resolve_binary_source
 
   setup_logging
-  stop_service
-  download_binary
+  download_binary_to_staging 2
+  replace_binary_and_restart "${STAGED_BINARY}"
   write_service
-  refresh_service
   ensure_service_running
+  install_auto_update_timer
 
   log "Update complete."
+}
+
+auto_update_flow() {
+  acquire_update_lock
+  auto_update_flow_locked
+  release_update_lock
+}
+
+auto_update_flow_locked() {
+  [[ -d "${INSTALL_DIR}" ]] || die "The node is not installed."
+  [[ -x "${INSTALL_DIR}/${APP_NAME}" ]] || die "Binary not found in ${INSTALL_DIR}."
+
+  detect_architecture
+  load_binary_source
+  resolve_auto_binary_source
+  download_binary_to_staging 1
+  replace_binary_and_restart "${STAGED_BINARY}"
+  ensure_service_running
 }
 
 uninstall_flow() {
@@ -811,8 +1054,15 @@ uninstall_flow() {
     return 0
   fi
 
+  acquire_update_lock
+  uninstall_flow_locked
+  release_update_lock
+}
+
+uninstall_flow_locked() {
   stop_service
   disable_service
+  remove_auto_update_timer
   rm -f "${SERVICE_FILE}"
   rm -f "${LOGROTATE_FILE}"
   rm -rf "${INSTALL_DIR}"
@@ -873,7 +1123,7 @@ EOF
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      install|update|uninstall|status|logs|swap|menu)
+      install|update|auto-update|uninstall|status|logs|swap|menu)
         ACTION="$1"
         shift
         ;;
@@ -930,6 +1180,7 @@ main() {
   case "${ACTION}" in
     install) install_flow ;;
     update) update_flow ;;
+    auto-update) auto_update_flow ;;
     uninstall) uninstall_flow ;;
     status) status_flow ;;
     logs) logs_flow ;;

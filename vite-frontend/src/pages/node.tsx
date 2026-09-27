@@ -878,7 +878,7 @@ export default function NodePage() {
     const radius = 15;
     const circumference = 2 * Math.PI * radius;
     return (
-      <div className="relative h-9 w-9" title={`${label}: ${unavailable ? '未配置' : offline ? '离线' : `${percentage.toFixed(1)}%`}`} aria-label={label}>
+      <div className="relative h-7 w-7 shrink-0 @md:h-9 @md:w-9 @xl:h-11 @xl:w-11 @2xl:h-12 @2xl:w-12" title={`${label}: ${unavailable ? '未配置' : offline ? '离线' : `${percentage.toFixed(1)}%`}`} aria-label={label}>
         <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90" aria-hidden="true">
           <circle cx="18" cy="18" r={radius} fill="none" stroke="currentColor" strokeWidth="3" className="text-default-200 dark:text-default-700" />
           <circle
@@ -894,7 +894,7 @@ export default function NodePage() {
             strokeDashoffset={circumference * (1 - percentage / 100)}
           />
         </svg>
-        <span className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-default-600 dark:text-default-300">
+        <span className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-default-600 dark:text-default-300 @xl:text-[10px]">
           {unavailable || offline ? '-' : `${percentage.toFixed(0)}%`}
         </span>
       </div>
@@ -1466,8 +1466,8 @@ export default function NodePage() {
     
       <div className="px-3 lg:px-6 py-8">
         {/* 页面头部 */}
-        <div className="flex items-center justify-between gap-3 mb-6">
-        <div className="min-w-0 flex flex-1 flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
+        <div className="flex shrink-0 flex-nowrap items-center gap-2">
             <Chip
               variant="flat"
               color="primary"
@@ -1551,17 +1551,17 @@ export default function NodePage() {
                 className="@container shadow-sm border border-divider hover:shadow-md transition-shadow duration-200"
               >
                 <CardHeader className="pb-2">
-                  <div className="flex w-full flex-col gap-2 @md:flex-row @md:items-center @md:justify-between">
+                  <div className="flex w-full items-center justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-foreground truncate text-sm">{node.name}</h3>
-                      <p className="text-xs text-default-500 truncate">{getNodePrimaryAddress(node)}</p>
+                      <h3 className="font-semibold text-foreground truncate text-sm @xl:text-base">{node.name}</h3>
+                      <p className="text-xs text-default-500 truncate @xl:text-sm">{getNodePrimaryAddress(node)}</p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-1.5 @md:ml-2 @md:flex-nowrap @md:justify-end">
+                    <div className="flex shrink-0 items-center gap-1.5">
                       <Chip
                         color={getWallMonitorColor(node)}
                         variant="flat"
                         size="sm"
-                        className="text-xs"
+                        className="text-[10px] @xl:text-xs"
                       >
                         {getWallMonitorLabel(node)}
                       </Chip>
@@ -1569,7 +1569,7 @@ export default function NodePage() {
                         color={node.connectionStatus === 'online' ? 'success' : 'danger'} 
                         variant="flat" 
                         size="sm"
-                        className="text-xs"
+                        className="text-[10px] @xl:text-xs"
                       >
                         {node.connectionStatus === 'online' ? '在线' : '离线'}
                       </Chip>
@@ -1595,22 +1595,22 @@ export default function NodePage() {
                 </CardHeader>
 
                 <CardBody className="pt-0 pb-3">
-                  <div className="grid grid-cols-1 gap-3 @md:grid-cols-[minmax(0,1fr)_8rem_minmax(0,1fr)] @md:items-center @md:gap-1 @md:text-[10px]">
-                    <div className="space-y-1 text-xs @md:col-start-1 @md:space-y-2 @md:text-[10px]">
-                      <div className="flex justify-between gap-2">
-                        <span className="text-default-500">累计总流量</span>
-                        <span className="whitespace-nowrap text-right font-mono">
+                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_6rem_minmax(0,1fr)] items-center gap-1 text-[10px] @md:grid-cols-[minmax(0,1fr)_7.5rem_minmax(0,1fr)] @xl:grid-cols-[minmax(0,1.1fr)_minmax(11rem,1fr)_minmax(0,1fr)] @xl:gap-2 @xl:text-xs">
+                    <div className="min-w-0 space-y-1 @xl:space-y-3">
+                      <div className="flex min-w-0 items-center justify-between gap-1">
+                        <span className="min-w-0 break-words leading-3 text-default-500 @xl:text-xs">累计总流量</span>
+                        <span className="shrink-0 whitespace-nowrap text-right font-mono @xl:text-sm @xl:font-semibold">
                           {node.vpsUsage?.current ? formatTraffic(node.vpsUsage.current.totalBytes) : '-'}
                         </span>
                       </div>
-                      <div className="flex justify-between gap-2">
-                        <span className="text-default-500">累计使用时长</span>
-                        <span className="whitespace-nowrap text-right">
+                      <div className="flex min-w-0 items-center justify-between gap-1">
+                        <span className="min-w-0 break-words leading-3 text-default-500 @xl:text-xs">累计使用时长</span>
+                        <span className="shrink-0 whitespace-nowrap text-right @xl:text-sm @xl:font-semibold">
                           {node.vpsUsage?.current ? formatUsageDuration(node.vpsUsage.current) : '-'}
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center justify-around rounded border border-default-200 bg-default-50 px-2 py-1.5 dark:bg-default-100/20 @md:col-start-2 @md:gap-0 @md:px-1 @md:py-1">
+                    <div className="flex min-w-0 items-center justify-around rounded border border-default-200 bg-default-50 px-1 py-1 dark:bg-default-100/20 @xl:gap-2 @xl:px-3 @xl:py-2">
                       <MetricRing
                         label="CPU"
                         value={node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.cpuUsage : 0}
@@ -1628,18 +1628,18 @@ export default function NodePage() {
                         unavailable={node.systemInfo?.swapUsage === undefined || !node.systemInfo.swapTotal}
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs @md:col-start-3 @md:grid-cols-1 @md:gap-1 @md:text-[10px]">
-                      <div className="flex flex-col items-center gap-0.5 rounded bg-default-50 p-2 text-center dark:bg-default-100 @md:flex-row @md:justify-between @md:gap-1 @md:rounded-none @md:bg-transparent @md:p-0 @md:text-left @md:dark:bg-transparent">
-                        <span className="text-default-600">上传速度</span>
-                        <span className="whitespace-nowrap font-mono">
+                    <div className="grid min-w-0 grid-cols-1 gap-1 @xl:gap-2 @xl:rounded @xl:bg-default-50 @xl:p-2.5 @xl:dark:bg-default-100/20">
+                      <div className="flex min-w-0 items-center justify-between gap-1">
+                        <span className="min-w-0 break-words leading-3 text-default-600 @sm:whitespace-nowrap @xl:text-xs">上传速度</span>
+                        <span className="shrink-0 whitespace-nowrap font-mono @xl:text-sm @xl:font-semibold">
                           {node.connectionStatus === 'online' && node.systemInfo
                             ? formatSpeed(node.systemInfo.uploadSpeed)
                             : '-'}
                         </span>
                       </div>
-                      <div className="flex flex-col items-center gap-0.5 rounded bg-default-50 p-2 text-center dark:bg-default-100 @md:flex-row @md:justify-between @md:gap-1 @md:rounded-none @md:bg-transparent @md:p-0 @md:text-left @md:dark:bg-transparent">
-                        <span className="text-default-600">下载速度</span>
-                        <span className="whitespace-nowrap font-mono">
+                      <div className="flex min-w-0 items-center justify-between gap-1">
+                        <span className="min-w-0 break-words leading-3 text-default-600 @sm:whitespace-nowrap @xl:text-xs">下载速度</span>
+                        <span className="shrink-0 whitespace-nowrap font-mono @xl:text-sm @xl:font-semibold">
                           {node.connectionStatus === 'online' && node.systemInfo
                             ? formatSpeed(node.systemInfo.downloadSpeed)
                             : '-'}

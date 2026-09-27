@@ -24,6 +24,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
         try (Connection connection = dataSource.getConnection()) {
             runStep("add tunnel.in_node_ids", () -> ensureColumn(connection, "tunnel", "in_node_ids", "ALTER TABLE tunnel ADD COLUMN in_node_ids LONGTEXT NULL AFTER in_node_id"));
             runStep("add tunnel.out_node_ids", () -> ensureColumn(connection, "tunnel", "out_node_ids", "ALTER TABLE tunnel ADD COLUMN out_node_ids LONGTEXT NULL AFTER out_node_id"));
+            runStep("create panel update storage", () -> addPanelUpdateStorage(connection));
             runStep("add node dual-stack runtime ip columns", () -> addNodeRuntimeIpColumns(connection));
             runStep("add node remote change ip token", () -> addNodeRemoteChangeIpToken(connection));
             runStep("add node remote change ip settings", () -> addNodeRemoteChangeIpSettings(connection));
@@ -177,6 +178,40 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
         try (Statement statement = connection.createStatement()) {
             statement.executeUpdate("UPDATE node SET server_ipv4 = server_ip WHERE server_ipv4 = '' AND server_ip REGEXP '^[0-9]{1,3}(\\\\.[0-9]{1,3}){3}$'");
             statement.executeUpdate("UPDATE node SET server_ipv6 = server_ip WHERE server_ipv6 = '' AND server_ip LIKE '%:%'");
+        }
+    }
+
+    private void addPanelUpdateStorage(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE IF NOT EXISTS panel_update_setting ("
+                    + "id BIGINT NOT NULL PRIMARY KEY,"
+                    + "enabled TINYINT NOT NULL DEFAULT 0,"
+                    + "check_interval_seconds INT NOT NULL DEFAULT 86400,"
+                    + "github_token_encrypted LONGTEXT NULL,"
+                    + "repository VARCHAR(255) NOT NULL DEFAULT 'w243420707/flux-panel_rev',"
+                    + "current_version VARCHAR(64) NULL,"
+                    + "latest_version VARCHAR(64) NULL,"
+                    + "update_available TINYINT NOT NULL DEFAULT 0,"
+                    + "last_check_at BIGINT NULL,"
+                    + "last_check_status VARCHAR(32) NOT NULL DEFAULT 'NEVER',"
+                    + "last_check_message VARCHAR(1000) NULL,"
+                    + "next_check_at BIGINT NULL,"
+                    + "update_request_id VARCHAR(64) NULL,"
+                    + "update_request_tag VARCHAR(64) NULL,"
+                    + "update_requested_at BIGINT NULL"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        }
+        // These checks make the migration safe if an early development build created the table first.
+        ensureColumn(connection, "panel_update_setting", "update_request_id",
+                "ALTER TABLE panel_update_setting ADD COLUMN update_request_id VARCHAR(64) NULL");
+        ensureColumn(connection, "panel_update_setting", "update_request_tag",
+                "ALTER TABLE panel_update_setting ADD COLUMN update_request_tag VARCHAR(64) NULL");
+        ensureColumn(connection, "panel_update_setting", "update_requested_at",
+                "ALTER TABLE panel_update_setting ADD COLUMN update_requested_at BIGINT NULL");
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT IGNORE INTO panel_update_setting "
+                    + "(id, enabled, check_interval_seconds, repository, update_available, last_check_status) "
+                    + "VALUES (1, 0, 86400, 'w243420707/flux-panel_rev', 0, 'NEVER')");
         }
     }
 

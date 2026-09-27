@@ -3,11 +3,12 @@ set -Eeuo pipefail
 
 APP_NAME="flux-panel_rev"
 APP_SLUG="flux-panel-rev"
-REPO_URL="${REPO_URL:-https://github.com/w243420707/flux-panel_rev.git}"
+REPO_URL="${REPO_URL:-${PANEL_UPDATE_REPOSITORY:-https://github.com/w243420707/flux-panel_rev.git}}"
 DEPLOY_REF="${DEPLOY_REF:-${BRANCH:-main}}"
 APP_DIR="${APP_DIR:-/opt/${APP_NAME}}"
 COMPOSE_FILE="docker-compose.deploy.yml"
 ENV_FILE="${APP_DIR}/.env"
+UPDATE_STATE_DIR="${UPDATE_STATE_DIR:-${APP_DIR}/update-state}"
 RAW_DEPLOY_URL="${RAW_DEPLOY_URL:-https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/main/deploy.sh}"
 
 ACTION=""
@@ -34,6 +35,7 @@ MYSQL_IMAGE="mysql:5.7"
 PREVIOUS_COMMIT=""
 CURRENT_COMMIT=""
 BUILD_SERVICES=()
+DEPLOY_LOCK_FD=""
 DOCKER_IPV4_HOSTS_TOKEN="flux-panel-rev-docker-ipv4-fallback"
 DOCKER_IPV4_HOSTS_ACTIVE=0
 GITHUB_IPV4_HOSTS_TOKEN="flux-panel-rev-github-ipv4-fallback"
@@ -77,6 +79,7 @@ Usage:
 Commands:
   install       Install or reinstall the panel
   update        Pull latest code, rebuild images, restart services
+  auto-update   Process a backend-written update request
   uninstall     Stop and remove services
   status        Show service status
   logs          Follow service logs
@@ -105,7 +108,7 @@ EOF
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      install|update|uninstall|status|logs|cleanup|renew-cert|menu)
+      install|update|auto-update|uninstall|status|logs|cleanup|renew-cert|menu)
         ACTION="$1"
         ;;
       --domain)
@@ -695,6 +698,9 @@ write_env_file() {
   DOCKER_LOG_MAX_SIZE="${DOCKER_LOG_MAX_SIZE:-50m}"
   DOCKER_LOG_MAX_FILE="${DOCKER_LOG_MAX_FILE:-1}"
   DOCKER_BUILD_CACHE_KEEP="${DOCKER_BUILD_CACHE_KEEP:-512MB}"
+  UPDATE_STATE_DIR="${UPDATE_STATE_DIR:-${APP_DIR}/update-state}"
+  PANEL_UPDATE_REPOSITORY="${PANEL_UPDATE_REPOSITORY:-${REPO_URL}}"
+  PANEL_VERSION="${PANEL_VERSION:-1.3.87}"
   FRONTEND_PORT="${FRONTEND_PORT:-${FRONTEND_PORT_ENV:-6366}}"
   BACKEND_PORT="${BACKEND_PORT:-${BACKEND_PORT_ENV:-6365}}"
   PHPMYADMIN_PORT="${PHPMYADMIN_PORT:-${PHPMYADMIN_PORT_ENV:-8066}}"
@@ -744,6 +750,10 @@ MAVEN_MIRROR_URL=${MAVEN_MIRROR_URL}
 DOCKER_LOG_MAX_SIZE=${DOCKER_LOG_MAX_SIZE}
 DOCKER_LOG_MAX_FILE=${DOCKER_LOG_MAX_FILE}
 DOCKER_BUILD_CACHE_KEEP=${DOCKER_BUILD_CACHE_KEEP}
+UPDATE_STATE_DIR=${UPDATE_STATE_DIR}
+UPDATE_STATE_HOST_DIR=${UPDATE_STATE_DIR}
+PANEL_UPDATE_REPOSITORY=${PANEL_UPDATE_REPOSITORY}
+PANEL_VERSION=${PANEL_VERSION}
 FRONTEND_PORT=${FRONTEND_PORT}
 BACKEND_PORT=${BACKEND_PORT}
 PHPMYADMIN_PORT=${PHPMYADMIN_PORT}
@@ -791,6 +801,10 @@ collect_install_config() {
 }
 
 sync_repo() {
+  REPO_URL="${PANEL_UPDATE_REPOSITORY:-${REPO_URL}}"
+  if [[ "${REPO_URL}" != *://* ]]; then
+    REPO_URL="https://github.com/${REPO_URL%.git}.git"
+  fi
   configure_github_ipv4_fallback || true
 
   if [[ -d "${APP_DIR}/.git" ]]; then
@@ -802,17 +816,17 @@ sync_repo() {
     fi
     log "Cloning ${REPO_URL} to ${APP_DIR}..."
     mkdir -p "$(dirname "${APP_DIR}")"
-    if ! git clone "${REPO_URL}" "${APP_DIR}"; then
+    if ! git_authenticated clone "${REPO_URL}" "${APP_DIR}"; then
       warn "GitHub clone failed; retrying once after IPv4 fallback setup..."
       configure_github_ipv4_fallback || true
-      git clone "${REPO_URL}" "${APP_DIR}" || die "Cannot clone ${REPO_URL}. The VPS cannot reach GitHub; check DNS/network access or use the panel's local-source deployment."
+      git_authenticated clone "${REPO_URL}" "${APP_DIR}" || die "Cannot clone ${REPO_URL}. The VPS cannot reach GitHub; check DNS/network access or use the panel's local-source deployment."
     fi
   fi
 
-  if ! git -C "${APP_DIR}" fetch origin --prune --tags --force; then
+  if ! git_authenticated -C "${APP_DIR}" fetch origin --prune --tags --force; then
     warn "GitHub fetch failed; retrying once after IPv4 fallback setup..."
     configure_github_ipv4_fallback || true
-    git -C "${APP_DIR}" fetch origin --prune --tags --force || die "Cannot update ${REPO_URL}. The VPS cannot resolve or reach GitHub; check DNS/network access or use the panel's local-source deployment."
+    git_authenticated -C "${APP_DIR}" fetch origin --prune --tags --force || die "Cannot update ${REPO_URL}. The VPS cannot resolve or reach GitHub; check DNS/network access or use the panel's local-source deployment."
   fi
   checkout_deploy_ref
   [[ -f "${APP_DIR}/${COMPOSE_FILE}" ]] || die "Missing ${COMPOSE_FILE} in ${APP_DIR}."
@@ -841,6 +855,17 @@ checkout_deploy_ref() {
 
 compose() {
   DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose --env-file "${ENV_FILE}" -f "${APP_DIR}/${COMPOSE_FILE}" "$@"
+}
+
+git_authenticated() {
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    GIT_CONFIG_COUNT=1 \
+      GIT_CONFIG_KEY_0=http.extraHeader \
+      GIT_CONFIG_VALUE_0="Authorization: Bearer ${GITHUB_TOKEN}" \
+      git "$@"
+  else
+    git "$@"
+  fi
 }
 
 append_build_service() {
@@ -1058,6 +1083,119 @@ install_cli_wrapper() {
 exec bash "${APP_DIR}/deploy.sh" "\$@"
 EOF
   chmod +x "/usr/local/bin/${APP_SLUG}"
+}
+
+ensure_update_state_dir() {
+  UPDATE_STATE_DIR="${UPDATE_STATE_DIR:-${APP_DIR}/update-state}"
+  mkdir -p "${UPDATE_STATE_DIR}"
+  chmod 700 "${UPDATE_STATE_DIR}"
+}
+
+acquire_deploy_lock() {
+  [[ -n "${DEPLOY_LOCK_FD}" ]] && return 0
+  ensure_update_state_dir
+  exec {DEPLOY_LOCK_FD}>"${UPDATE_STATE_DIR}/deploy.lock"
+  flock -n "${DEPLOY_LOCK_FD}" || die "Another panel install or update is already running."
+}
+
+release_deploy_lock() {
+  if [[ -n "${DEPLOY_LOCK_FD}" ]]; then
+    flock -u "${DEPLOY_LOCK_FD}" 2>/dev/null || true
+    eval "exec ${DEPLOY_LOCK_FD}>&-" 2>/dev/null || true
+    DEPLOY_LOCK_FD=""
+  fi
+}
+
+install_update_timer() {
+  ensure_update_state_dir
+  cat > "/etc/systemd/system/${APP_SLUG}-auto-update.service" <<EOF
+[Unit]
+Description=${APP_NAME} automatic release updater
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/${APP_SLUG} auto-update --yes
+EOF
+  cat > "/etc/systemd/system/${APP_SLUG}-auto-update.timer" <<EOF
+[Unit]
+Description=${APP_NAME} automatic release updater timer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=3min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now "${APP_SLUG}-auto-update.timer"
+}
+
+remove_update_timer() {
+  systemctl disable --now "${APP_SLUG}-auto-update.timer" >/dev/null 2>&1 || true
+  rm -f "/etc/systemd/system/${APP_SLUG}-auto-update.timer" "/etc/systemd/system/${APP_SLUG}-auto-update.service"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+}
+
+json_value() {
+  local key="$1" file="$2"
+  [[ -f "${file}" ]] || return 0
+  sed -n "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "${file}" | head -n 1
+}
+
+json_safe() {
+  printf '%s' "${1:-}" | tr '\r\n\"' '   '
+}
+
+write_update_result() {
+  local request_id="$1" status="$2" message="$3" result_file="${UPDATE_STATE_DIR}/result.json" tmp
+  local safe_message
+  safe_message="$(json_safe "${message}")"
+  tmp="${result_file}.tmp.$$"
+  printf '{"requestId":"%s","status":"%s","message":"%s","finishedAt":%s}\n' \
+    "$(json_safe "${request_id}")" "${status}" "${safe_message}" "$(date +%s000)" > "${tmp}"
+  chmod 600 "${tmp}"
+  mv -f "${tmp}" "${result_file}"
+}
+
+auto_update_flow() {
+  load_env
+  ensure_update_state_dir
+  exec 9>"${UPDATE_STATE_DIR}/auto-update.lock"
+  flock -n 9 || { log "Another automatic panel update is already running."; return 0; }
+
+  local request_file="${UPDATE_STATE_DIR}/request.json"
+  local token_file="${UPDATE_STATE_DIR}/github-token"
+  local result_file="${UPDATE_STATE_DIR}/result.json"
+  [[ -f "${request_file}" ]] || return 0
+
+  local request_id tag previous_id previous_status
+  request_id="$(json_value requestId "${request_file}")"
+  tag="$(json_value tag "${request_file}")"
+  previous_id="$(json_value requestId "${result_file}")"
+  previous_status="$(json_value status "${result_file}")"
+  [[ -n "${request_id}" && -n "${tag}" ]] || { write_update_result "${request_id}" failed "更新请求格式无效"; return 1; }
+  if [[ "${previous_id}" == "${request_id}" && "${previous_status}" == "success" ]]; then
+    return 0
+  fi
+
+  if [[ -f "${token_file}" ]]; then
+    GITHUB_TOKEN="$(<"${token_file}")"
+    export GITHUB_TOKEN
+  fi
+  write_update_result "${request_id}" running "正在拉取 ${tag} 并重建面板"
+  if ( DEPLOY_REF="${tag}" DEPLOY_REF_ARG="${tag}" update_flow ); then
+    write_update_result "${request_id}" success "面板已更新到 ${tag}"
+    rm -f "${request_file}"
+  else
+    write_update_result "${request_id}" failed "面板自动更新失败，保留当前运行中的服务"
+    rm -f "${token_file}"
+    return 1
+  fi
+  rm -f "${token_file}"
 }
 
 wait_for_health() {
@@ -1528,6 +1666,7 @@ install_flow() {
   stop_existing_stack_for_install
   write_env_file
   install_cli_wrapper
+  install_update_timer
   ensure_runtime_ports
   start_stack
   mark_deployed_commit
@@ -1547,6 +1686,7 @@ update_flow() {
   set_env_value DEPLOY_REF "${DEPLOY_REF}"
   sync_build_env_values
   install_cli_wrapper
+  install_update_timer
   ensure_runtime_ports
   determine_update_build_services
   start_stack 1 changed "${BUILD_SERVICES[@]}"
@@ -1587,6 +1727,7 @@ uninstall_flow() {
   systemctl reload nginx 2>/dev/null || true
 
   rm -f "/usr/local/bin/${APP_SLUG}" "/etc/cron.d/${APP_SLUG}-certbot-renew"
+  remove_update_timer
 
   if [[ "${PURGE_DATA}" -eq 1 ]]; then
     if [[ -n "${DOMAIN:-}" ]] && command -v certbot >/dev/null 2>&1; then
@@ -1713,6 +1854,7 @@ main() {
       fi
       ;;
     update) update_flow ;;
+    auto-update) auto_update_flow ;;
     uninstall) uninstall_flow ;;
     status) status_flow ;;
     logs) logs_flow ;;

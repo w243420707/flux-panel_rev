@@ -9,6 +9,14 @@ import { Switch } from "@heroui/switch";
 import { Select, SelectItem } from "@heroui/select";
 import toast from 'react-hot-toast';
 import { updateConfigs } from '@/api';
+import {
+  checkForUpdate,
+  getUpdateSettings,
+  getUpdateStatus,
+  saveUpdateSettings,
+  UpdateSettings,
+  UpdateStatus,
+} from '@/api/update';
 import { SettingsIcon } from '@/components/icons';
 
 import { isAdmin } from '@/utils/auth';
@@ -101,6 +109,26 @@ const CONFIG_ITEMS: ConfigItem[] = [
   }
 ];
 
+const DEFAULT_UPDATE_SETTINGS: UpdateSettings = {
+  enabled: false,
+  checkIntervalSeconds: 24 * 60 * 60,
+  githubTokenConfigured: false,
+  githubTokenMasked: null,
+  repository: '',
+};
+
+const formatUpdateTime = (value: string | number | null | undefined): string => {
+  if (value === null || value === undefined || value === '') {
+    return '暂无';
+  }
+
+  const date = typeof value === 'number'
+    ? new Date(value < 1_000_000_000_000 ? value * 1000 : value)
+    : new Date(value);
+
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+};
+
 // 初始化时从缓存读取配置，避免闪烁
 const getInitialConfigs = (): Record<string, string> => {
   if (typeof window === 'undefined') return {};
@@ -129,6 +157,14 @@ export default function ConfigPage() {
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [originalConfigs, setOriginalConfigs] = useState<Record<string, string>>(initialConfigs);
+  const [updateSettings, setUpdateSettings] = useState<UpdateSettings>(DEFAULT_UPDATE_SETTINGS);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updateIntervalMinutes, setUpdateIntervalMinutes] = useState('1440');
+  const [githubToken, setGithubToken] = useState('');
+  const [clearGithubToken, setClearGithubToken] = useState(false);
+  const [updateLoading, setUpdateLoading] = useState(true);
+  const [updateSaving, setUpdateSaving] = useState(false);
+  const [updateChecking, setUpdateChecking] = useState(false);
 
   // 权限检查
   useEffect(() => {
@@ -178,6 +214,51 @@ export default function ConfigPage() {
 
     return () => clearTimeout(timer);
   }, []); // 只在组件挂载时执行一次
+
+  // 加载自动更新设置和状态。Token 只保留在当前输入框内，不写入缓存。
+  useEffect(() => {
+    let active = true;
+
+    const loadUpdateInfo = async () => {
+      setUpdateLoading(true);
+      try {
+        const [settingsResponse, statusResponse] = await Promise.all([
+          getUpdateSettings(),
+          getUpdateStatus(),
+        ]);
+
+        if (!active) return;
+
+        if (settingsResponse.code === 0 && settingsResponse.data) {
+          const settings = {
+            ...DEFAULT_UPDATE_SETTINGS,
+            ...settingsResponse.data,
+          };
+          setUpdateSettings(settings);
+          setUpdateIntervalMinutes(String(Math.max(3, Math.round(settings.checkIntervalSeconds / 60))));
+        } else if (settingsResponse.msg) {
+          toast.error('加载自动更新设置失败: ' + settingsResponse.msg);
+        }
+
+        if (statusResponse.code === 0 && statusResponse.data) {
+          setUpdateStatus(statusResponse.data);
+        }
+      } catch (error) {
+        if (active) {
+          toast.error('加载自动更新设置失败，请重试');
+        }
+      } finally {
+        if (active) {
+          setUpdateLoading(false);
+        }
+      }
+    };
+
+    void loadUpdateInfo();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // 处理配置项变更
   const handleConfigChange = (key: string, value: string) => {
@@ -236,6 +317,75 @@ export default function ConfigPage() {
       toast.error('保存配置出错，请重试');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // 保存自动更新设置
+  const handleUpdateSettingsSave = async () => {
+    const intervalMinutes = Number(updateIntervalMinutes);
+    if (!Number.isInteger(intervalMinutes) || intervalMinutes < 3) {
+      toast.error('检查间隔至少为 3 分钟');
+      return;
+    }
+
+    setUpdateSaving(true);
+    try {
+      const payload: {
+        enabled: boolean;
+        checkIntervalSeconds: number;
+        githubToken?: string;
+        clearGithubToken?: boolean;
+      } = {
+        enabled: updateSettings.enabled,
+        checkIntervalSeconds: intervalMinutes * 60,
+      };
+
+      if (clearGithubToken) {
+        payload.clearGithubToken = true;
+      } else if (githubToken.trim()) {
+        payload.githubToken = githubToken.trim();
+      }
+
+      const response = await saveUpdateSettings(payload);
+      if (response.code !== 0) {
+        toast.error('自动更新设置保存失败: ' + response.msg);
+        return;
+      }
+
+      toast.success('自动更新设置已保存');
+      setGithubToken('');
+      setClearGithubToken(false);
+
+      if (response.data) {
+        setUpdateSettings({ ...DEFAULT_UPDATE_SETTINGS, ...response.data });
+      } else {
+        const settingsResponse = await getUpdateSettings();
+        if (settingsResponse.code === 0 && settingsResponse.data) {
+          setUpdateSettings({ ...DEFAULT_UPDATE_SETTINGS, ...settingsResponse.data });
+        }
+      }
+    } catch (error) {
+      toast.error('自动更新设置保存失败，请重试');
+    } finally {
+      setUpdateSaving(false);
+    }
+  };
+
+  // 手动检查 GitHub Release
+  const handleUpdateCheck = async () => {
+    setUpdateChecking(true);
+    try {
+      const response = await checkForUpdate();
+      if (response.code === 0 && response.data) {
+        setUpdateStatus(response.data);
+        toast.success(response.data.updateAvailable ? '发现新版本' : '当前已是最新版本');
+      } else {
+        toast.error('检查更新失败: ' + response.msg);
+      }
+    } catch (error) {
+      toast.error('检查更新失败，请重试');
+    } finally {
+      setUpdateChecking(false);
     }
   };
 
@@ -410,6 +560,170 @@ export default function ConfigPage() {
           </CardBody>
         </Card>
 
+        <Card className="mt-6 shadow-md">
+          <CardHeader className="pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 w-full">
+              <div>
+                <h2 className="text-xl font-semibold">面板自动更新</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  从 GitHub 私有仓库检查面板新版本，Token 只由后端保存。
+                </p>
+              </div>
+              <Button
+                color="primary"
+                startContent={<SaveIcon className="w-4 h-4" />}
+                onClick={handleUpdateSettingsSave}
+                isLoading={updateSaving}
+              >
+                {updateSaving ? '保存中...' : '保存更新设置'}
+              </Button>
+            </div>
+          </CardHeader>
+
+          <Divider />
+
+          <CardBody className="space-y-6 pt-6">
+            {updateLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Spinner size="sm" label="加载更新设置中..." />
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      自动检查更新
+                    </label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      默认关闭，打开后按下面的间隔自动检查。
+                    </p>
+                  </div>
+                  <Switch
+                    isSelected={updateSettings.enabled}
+                    onValueChange={(enabled) => setUpdateSettings((current) => ({ ...current, enabled }))}
+                    color="primary"
+                  >
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                      {updateSettings.enabled ? '已启用' : '已禁用'}
+                    </span>
+                  </Switch>
+                </div>
+
+                <Divider />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Input
+                    type="number"
+                    label="检查间隔（分钟）"
+                    min={3}
+                    step={1}
+                    value={updateIntervalMinutes}
+                    onChange={(event) => setUpdateIntervalMinutes(event.target.value)}
+                    description="最少 3 分钟，默认 1440 分钟（24 小时）"
+                    variant="bordered"
+                  />
+                  <Input
+                    label="GitHub 仓库"
+                    value={updateSettings.repository || '未配置'}
+                    isReadOnly
+                    variant="bordered"
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <Input
+                    type="password"
+                    label="GitHub Token"
+                    placeholder={updateSettings.githubTokenConfigured
+                      ? `已配置${updateSettings.githubTokenMasked ? `（${updateSettings.githubTokenMasked}）` : ''}，留空保留原 Token`
+                      : '请输入用于访问私有仓库的 Token'}
+                    value={githubToken}
+                    onChange={(event) => {
+                      setGithubToken(event.target.value);
+                      if (event.target.value) {
+                        setClearGithubToken(false);
+                      }
+                    }}
+                    autoComplete="new-password"
+                    variant="bordered"
+                    description="Token 不会写入浏览器缓存；留空表示保留当前 Token。"
+                  />
+                  {updateSettings.githubTokenConfigured && (
+                    <label className="inline-flex items-center gap-2 text-sm text-danger-600 dark:text-danger-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={clearGithubToken}
+                        onChange={(event) => {
+                          setClearGithubToken(event.target.checked);
+                          if (event.target.checked) {
+                            setGithubToken('');
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 text-danger-600 focus:ring-danger-500"
+                      />
+                      清除已保存的 GitHub Token
+                    </label>
+                  )}
+                </div>
+
+                <Divider />
+
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-medium">版本状态</h3>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {updateStatus?.updateMessage || updateStatus?.lastCheckMessage || '尚未执行检查'}
+                      </p>
+                    </div>
+                    <Button
+                      variant="flat"
+                      color="primary"
+                      onClick={handleUpdateCheck}
+                      isLoading={updateChecking}
+                    >
+                      {updateChecking ? '检查中...' : '立即检查'}
+                    </Button>
+                  </div>
+
+                  {updateStatus ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-500 dark:text-gray-400">当前版本</span>
+                        <span className="font-medium">{updateStatus.currentVersion || '未知'}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-500 dark:text-gray-400">最新版本</span>
+                        <span className="font-medium">{updateStatus.latestVersion || '暂无'}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-500 dark:text-gray-400">更新状态</span>
+                        <span className={updateStatus.updateAvailable ? 'font-medium text-primary' : 'font-medium text-success'}>
+                          {updateStatus.updateAvailable ? '有新版本' : '已是最新'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-500 dark:text-gray-400">更新任务</span>
+                        <span className="font-medium">{updateStatus.updateStatus || '暂无任务'}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-500 dark:text-gray-400">上次检查</span>
+                        <span className="font-medium text-right">{formatUpdateTime(updateStatus.lastCheckAt)}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-500 dark:text-gray-400">下次检查</span>
+                        <span className="font-medium text-right">{formatUpdateTime(updateStatus.nextCheckAt)}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">暂无版本状态</p>
+                  )}
+                </div>
+              </>
+            )}
+          </CardBody>
+        </Card>
+
         {/* 操作提示 */}
         {hasChanges && (
           <Card className="mt-4 bg-warning-50 dark:bg-warning-900/20 border-warning-200 dark:border-warning-800">
@@ -426,4 +740,4 @@ export default function ConfigPage() {
       </div>
     
   );
-} 
+}

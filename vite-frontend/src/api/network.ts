@@ -148,6 +148,47 @@ const Network = {
            resolve({"code": -1, "msg": error.message || "网络请求失败", "data": null as T});
          });
     });
+  },
+
+  put: function<T = any>(path: string = '', data: any = {}): Promise<ApiResponse<T>> {
+    return new Promise(function(resolve) {
+      // 如果baseURL是默认值且是WebView环境，说明没有设置面板地址
+      if (baseURL === '') {
+        resolve({"code": -1, "msg": " - 请先设置面板地址", "data": null as T});
+        return;
+      }
+
+      axios.put(path, data, {
+        timeout: 30000,
+        headers: {
+          "Authorization": window.localStorage.getItem('token'),
+          "Content-Type": "application/json"
+        }
+      })
+        .then(function(response: AxiosResponse<ApiResponse<T>>) {
+          // 检查是否token失效
+          if (isTokenExpired(response.data)) {
+            const expiredResponse = tokenExpiredResponse<T>(response.data.msg);
+            handleTokenExpired();
+            resolve(expiredResponse);
+            return;
+          }
+          resolve(response.data);
+        })
+        .catch(function(error: any) {
+          console.error('PUT请求错误:', error?.message, error?.response?.status);
+
+          // 检查是否是401错误（token失效）
+          if (error.response && error.response.status === 401) {
+            const msg = error.response.data?.msg || error.response.data?.message || '未登录或token已过期';
+            handleTokenExpired();
+            resolve(tokenExpiredResponse<T>(msg));
+            return;
+          }
+
+          resolve({"code": -1, "msg": error.message || "网络请求失败", "data": null as T});
+        });
+    });
   }
 };
 
