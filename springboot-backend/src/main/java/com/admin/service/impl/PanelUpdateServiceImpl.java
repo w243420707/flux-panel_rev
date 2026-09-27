@@ -56,7 +56,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     private static final String STATE_RESULT = "result.json";
     private static final String STATE_TOKEN = "github-token";
     private static final Pattern REPOSITORY_PATTERN = Pattern.compile("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$");
-    private static final Pattern COMMIT_PATTERN = Pattern.compile("^[a-fA-F0-9]{40,64}$");
+    private static final Pattern COMMIT_PATTERN = Pattern.compile("^[a-fA-F0-9]{40}$");
 
     @Resource
     private PanelUpdateSettingMapper settingMapper;
@@ -67,7 +67,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     @Value("${PANEL_UPDATE_REPOSITORY:${UPDATE_REPOSITORY:w243420707/flux-panel_rev}}")
     private String configuredRepository;
 
-    @Value("${PANEL_VERSION:${APP_VERSION:1.3.90}}")
+    @Value("${PANEL_VERSION:${APP_VERSION:1.3.91}}")
     private String configuredCurrentVersion;
 
     @Value("${PANEL_COMMIT:}")
@@ -80,13 +80,13 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     private String stateDirectory;
 
     @Override
-    public R getSettings() {
+    public synchronized R getSettings() {
         PanelUpdateSetting setting = loadSetting();
         return R.ok(settingsView(setting));
     }
 
     @Override
-    public R saveSettings(PanelUpdateSettingsRequest request) {
+    public synchronized R saveSettings(PanelUpdateSettingsRequest request) {
         if (request == null) {
             return R.err("更新设置不能为空");
         }
@@ -127,12 +127,12 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     }
 
     @Override
-    public R checkNow() {
+    public synchronized R checkNow() {
         return R.ok(checkLatestCommit(false));
     }
 
     @Override
-    public R getStatus() {
+    public synchronized R getStatus() {
         PanelUpdateSetting setting = loadSetting();
         Map<String, Object> status = statusView(setting);
         return R.ok(status);
@@ -140,7 +140,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
 
     /** Poll at a small fixed cadence; the persisted interval controls actual API calls. */
     @Scheduled(fixedDelayString = "${UPDATE_SCHEDULE_DELAY_MS:60000}", initialDelayString = "${UPDATE_SCHEDULE_INITIAL_DELAY_MS:60000}")
-    public void scheduledCheck() {
+    public synchronized void scheduledCheck() {
         try {
             PanelUpdateSetting setting = loadSetting();
             if (setting.getEnabled() == null || setting.getEnabled() != 1) {
@@ -166,6 +166,9 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
         setting.setNextCheckAt(now + intervalMillis(setting));
 
         try {
+            if (!COMMIT_PATTERN.matcher(currentCommit()).matches()) {
+                throw new IllegalStateException("当前部署缺少有效的 PANEL_COMMIT，请先在宿主机手动执行 deploy.sh update 更新面板，再启用自动更新");
+            }
             String token = decryptToken(setting);
             JSONObject commit = fetchLatestCommit(setting.getRepository(), token);
             String sha = commit.getString("sha");
@@ -190,6 +193,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
                 enqueueIfNeeded(setting, sha, token, now);
             }
         } catch (Exception e) {
+            setting.setUpdateAvailable(0);
             setting.setLastCheckAt(now);
             setting.setLastCheckStatus("FAILED");
             setting.setLastCheckMessage(safeMessage(e));
@@ -230,13 +234,18 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     }
 
     private void enqueueIfNeeded(PanelUpdateSetting setting, String commit, String token, long now) {
+        Path directory = Path.of(stateDirectory);
+        // The host owns a published request until it consumes it, including retries.
+        // Never replace its request ID or credential while an update is pending/running.
+        if (Files.exists(directory.resolve(STATE_REQUEST))) {
+            return;
+        }
         if (commit.equalsIgnoreCase(setting.getUpdateRequestTag())
                 && setting.getUpdateRequestedAt() != null
                 && now - setting.getUpdateRequestedAt() < intervalMillis(setting)) {
             return;
         }
         String requestId = UUID.randomUUID().toString();
-        Path directory = Path.of(stateDirectory);
         try {
             Files.createDirectories(directory);
             if (StringUtils.hasText(token)) {
@@ -398,7 +407,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     }
 
     private String currentVersion() {
-        return StringUtils.hasText(configuredCurrentVersion) ? configuredCurrentVersion.trim() : "1.3.90";
+        return StringUtils.hasText(configuredCurrentVersion) ? configuredCurrentVersion.trim() : "1.3.91";
     }
 
     private String currentCommit() {
@@ -406,11 +415,10 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     }
 
     private boolean isCommitUpdateAvailable(PanelUpdateSetting setting) {
-        if (!StringUtils.hasText(setting.getLatestCommit())) {
-            return false;
-        }
-        return !StringUtils.hasText(currentCommit())
-                || !setting.getLatestCommit().equalsIgnoreCase(currentCommit());
+        return COMMIT_PATTERN.matcher(currentCommit()).matches()
+                && StringUtils.hasText(setting.getLatestCommit())
+                && COMMIT_PATTERN.matcher(setting.getLatestCommit()).matches()
+                && !setting.getLatestCommit().equalsIgnoreCase(currentCommit());
     }
 
     private int intervalSeconds(PanelUpdateSetting setting) {

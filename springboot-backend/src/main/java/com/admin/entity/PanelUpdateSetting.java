@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import lombok.Data;
 
 /** Persistent settings and the last observed state for panel self-updates. */
@@ -18,7 +19,7 @@ public class PanelUpdateSetting {
     @TableField("check_interval_seconds")
     private Integer checkIntervalSeconds;
 
-    @TableField("github_token_encrypted")
+    @TableField(value = "github_token_encrypted", updateStrategy = FieldStrategy.IGNORED)
     private String githubTokenEncrypted;
 
     private String repository;

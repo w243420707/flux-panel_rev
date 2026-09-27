@@ -625,29 +625,30 @@ set_env_value() {
   local key="$1"
   local value="$2"
   local tmp
-  tmp="$(mktemp)"
+  tmp="$(mktemp)" || return $?
   if [[ -f "${ENV_FILE}" ]]; then
     grep -v "^${key}=" "${ENV_FILE}" > "${tmp}" || true
   fi
-  printf '%s=%s\n' "${key}" "${value}" >> "${tmp}"
-  mv "${tmp}" "${ENV_FILE}"
+  printf '%s=%s\n' "${key}" "${value}" >> "${tmp}" || return $?
+  mv "${tmp}" "${ENV_FILE}" || return $?
   chmod 600 "${ENV_FILE}"
 }
 
 sync_build_env_values() {
-  load_env
+  load_env || return $?
   local release_version
   release_version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' "${APP_DIR}/vite-frontend/package.json" | head -n 1)"
   if [[ "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     PANEL_VERSION="${release_version}"
-    set_env_value PANEL_VERSION "${PANEL_VERSION}"
+    set_env_value PANEL_VERSION "${PANEL_VERSION}" || return $?
   fi
   PANEL_COMMIT="${CURRENT_COMMIT:-$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)}"
-  [[ -n "${PANEL_COMMIT}" ]] && set_env_value PANEL_COMMIT "${PANEL_COMMIT}"
+  [[ "${PANEL_COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]] || { err "Cannot determine the deployed commit."; return 1; }
+  set_env_value PANEL_COMMIT "${PANEL_COMMIT}" || return $?
 
   if [[ -z "${AWS_ENCRYPTION_KEY:-}" ]]; then
     AWS_ENCRYPTION_KEY="$(random_string)"
-    set_env_value AWS_ENCRYPTION_KEY "${AWS_ENCRYPTION_KEY}"
+    set_env_value AWS_ENCRYPTION_KEY "${AWS_ENCRYPTION_KEY}" || return $?
   fi
 
   local frontend_dockerfile="Dockerfile"
@@ -655,20 +656,20 @@ sync_build_env_values() {
     frontend_dockerfile="Dockerfile.prebuilt"
   fi
   FRONTEND_DOCKERFILE="${frontend_dockerfile}"
-  set_env_value FRONTEND_DOCKERFILE "${FRONTEND_DOCKERFILE}"
+  set_env_value FRONTEND_DOCKERFILE "${FRONTEND_DOCKERFILE}" || return $?
 
   # Migrate old mirror defaults back to official/global sources for overseas VPS.
   if [[ "${NPM_REGISTRY:-}" == "https://registry.npmmirror.com" ]]; then
     NPM_REGISTRY="https://registry.npmjs.org"
-    set_env_value NPM_REGISTRY "${NPM_REGISTRY}"
+    set_env_value NPM_REGISTRY "${NPM_REGISTRY}" || return $?
   fi
   if [[ "${NPM_FALLBACK_REGISTRY:-}" == "https://registry.npmmirror.com" || "${NPM_FALLBACK_REGISTRY:-}" == "https://registry.npmjs.org" ]]; then
     NPM_FALLBACK_REGISTRY="https://registry.yarnpkg.com"
-    set_env_value NPM_FALLBACK_REGISTRY "${NPM_FALLBACK_REGISTRY}"
+    set_env_value NPM_FALLBACK_REGISTRY "${NPM_FALLBACK_REGISTRY}" || return $?
   fi
   if [[ "${MAVEN_MIRROR_URL:-}" == "https://maven.aliyun.com/repository/public" ]]; then
     MAVEN_MIRROR_URL=""
-    set_env_value MAVEN_MIRROR_URL "${MAVEN_MIRROR_URL}"
+    set_env_value MAVEN_MIRROR_URL "${MAVEN_MIRROR_URL}" || return $?
   fi
 }
 
@@ -714,7 +715,7 @@ write_env_file() {
   if [[ "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     PANEL_VERSION="${release_version}"
   else
-    PANEL_VERSION="${PANEL_VERSION:-1.3.90}"
+    PANEL_VERSION="${PANEL_VERSION:-1.3.91}"
   fi
   PANEL_COMMIT="${CURRENT_COMMIT:-$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)}"
   FRONTEND_PORT="${FRONTEND_PORT:-${FRONTEND_PORT_ENV:-6366}}"
@@ -826,7 +827,7 @@ sync_repo() {
 
   if [[ -d "${APP_DIR}/.git" ]]; then
     log "Updating repository in ${APP_DIR}..."
-    git -C "${APP_DIR}" remote set-url origin "${REPO_URL}"
+    git -C "${APP_DIR}" remote set-url origin "${REPO_URL}" || return $?
     PREVIOUS_COMMIT="$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)"
   else
     if [[ -d "${APP_DIR}" && -n "$(find "${APP_DIR}" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
@@ -846,7 +847,7 @@ sync_repo() {
     configure_github_ipv4_fallback || true
     git_authenticated -C "${APP_DIR}" fetch origin --prune --tags --force || die "Cannot update ${REPO_URL}. The VPS cannot resolve or reach GitHub; check DNS/network access or use the panel's local-source deployment."
   fi
-  checkout_deploy_ref
+  checkout_deploy_ref || return $?
   [[ -f "${APP_DIR}/${COMPOSE_FILE}" ]] || die "Missing ${COMPOSE_FILE} in ${APP_DIR}."
 }
 
@@ -855,19 +856,19 @@ checkout_deploy_ref() {
 
   if git -C "${APP_DIR}" show-ref --verify --quiet "refs/remotes/origin/${DEPLOY_REF}"; then
     log "Deploying branch: ${DEPLOY_REF}"
-    git -C "${APP_DIR}" checkout -B "${DEPLOY_REF}" "origin/${DEPLOY_REF}"
-    git -C "${APP_DIR}" reset --hard "origin/${DEPLOY_REF}"
+    git -C "${APP_DIR}" checkout -B "${DEPLOY_REF}" "origin/${DEPLOY_REF}" || return $?
+    git -C "${APP_DIR}" reset --hard "origin/${DEPLOY_REF}" || return $?
   elif git -C "${APP_DIR}" show-ref --verify --quiet "refs/tags/${DEPLOY_REF}"; then
     log "Deploying tag: ${DEPLOY_REF}"
-    git -C "${APP_DIR}" checkout --detach -f "refs/tags/${DEPLOY_REF}"
+    git -C "${APP_DIR}" checkout --detach -f "refs/tags/${DEPLOY_REF}" || return $?
   elif git -C "${APP_DIR}" rev-parse --verify --quiet "${DEPLOY_REF}^{commit}" >/dev/null; then
     log "Deploying commit: ${DEPLOY_REF}"
-    git -C "${APP_DIR}" checkout --detach -f "${DEPLOY_REF}"
+    git -C "${APP_DIR}" checkout --detach -f "${DEPLOY_REF}" || return $?
   else
     die "Git ref not found: ${DEPLOY_REF}. Use a branch, tag, or commit from ${REPO_URL}."
   fi
 
-  CURRENT_COMMIT="$(git -C "${APP_DIR}" rev-parse HEAD)"
+  CURRENT_COMMIT="$(git -C "${APP_DIR}" rev-parse HEAD)" || return $?
   log "Checked out commit: ${CURRENT_COMMIT:0:7}"
 }
 
@@ -877,9 +878,11 @@ compose() {
 
 git_authenticated() {
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    local credential
+    credential="$(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 | tr -d '\r\n')" || return $?
     GIT_CONFIG_COUNT=1 \
-      GIT_CONFIG_KEY_0=http.extraHeader \
-      GIT_CONFIG_VALUE_0="Authorization: Bearer ${GITHUB_TOKEN}" \
+      GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader \
+      GIT_CONFIG_VALUE_0="Authorization: Basic ${credential}" \
       git "$@"
   else
     git "$@"
@@ -1128,7 +1131,7 @@ install_update_timer() {
   ensure_update_state_dir
   cat > "/etc/systemd/system/${APP_SLUG}-auto-update.service" <<EOF
 [Unit]
-Description=${APP_NAME} automatic release updater
+Description=${APP_NAME} automatic main commit updater
 After=docker.service
 Requires=docker.service
 
@@ -1138,7 +1141,7 @@ ExecStart=/usr/local/bin/${APP_SLUG} auto-update --yes
 EOF
   cat > "/etc/systemd/system/${APP_SLUG}-auto-update.timer" <<EOF
 [Unit]
-Description=${APP_NAME} automatic release updater timer
+Description=${APP_NAME} automatic main commit updater timer
 
 [Timer]
 OnBootSec=5min
@@ -1179,6 +1182,15 @@ write_update_result() {
   mv -f "${tmp}" "${result_file}"
 }
 
+consume_update_request() {
+  local request_id="$1" request_file="${UPDATE_STATE_DIR}/request.json"
+  [[ "$(json_value requestId "${request_file}")" == "${request_id}" ]] || return 0
+  # Keep the request present until its credential is removed. The backend
+  # must not enqueue another request while this credential is being consumed.
+  rm -f "${UPDATE_STATE_DIR}/github-token" || return $?
+  rm -f "${request_file}"
+}
+
 auto_update_flow() {
   load_env
   ensure_update_state_dir
@@ -1195,17 +1207,26 @@ auto_update_flow() {
   commit="$(json_value commit "${request_file}")"
   previous_id="$(json_value requestId "${result_file}")"
   previous_status="$(json_value status "${result_file}")"
-  [[ -n "${request_id}" && -n "${tag}" ]] || {
+  [[ "${request_id}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ && "${tag}" == main ]] || {
     write_update_result "${request_id}" failed "更新请求格式无效"
+    consume_update_request "${request_id}"
     release_deploy_lock
     return 1
   }
-  if [[ -n "${commit}" && ! "${commit}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  if [[ ! "${commit}" =~ ^[0-9a-fA-F]{40}$ ]]; then
     write_update_result "${request_id}" failed "更新请求中的提交 SHA 无效"
+    consume_update_request "${request_id}"
     release_deploy_lock
     return 1
   fi
-  if [[ "${previous_id}" == "${request_id}" && "${previous_status}" == "success" ]]; then
+  if [[ "${previous_id}" == "${request_id}" && ( "${previous_status}" == success || "${previous_status}" == failed ) ]]; then
+    consume_update_request "${request_id}"
+    release_deploy_lock
+    return 0
+  fi
+  if [[ "${LAST_DEPLOYED_COMMIT:-}" =~ ^[0-9a-fA-F]{40}$ && "${LAST_DEPLOYED_COMMIT,,}" == "${commit,,}" ]]; then
+    write_update_result "${request_id}" success "提交 ${commit:0:7} 已部署，跳过拉取、构建和重启"
+    consume_update_request "${request_id}"
     release_deploy_lock
     return 0
   fi
@@ -1215,16 +1236,17 @@ auto_update_flow() {
     export GITHUB_TOKEN
   fi
   write_update_result "${request_id}" running "正在拉取 ${tag} 并重建面板"
-  if auto_update_apply "${request_id}" "${tag}" "${commit:-${tag}}"; then
+  if auto_update_apply "${request_id}" "${tag}" "${commit}"; then
     write_update_result "${request_id}" success "面板已更新到 main 最新提交 ${commit:0:7}"
-    rm -f "${request_file}"
   else
     write_update_result "${request_id}" failed "面板自动更新失败，已尝试恢复之前版本"
-    rm -f "${token_file}"
+    consume_update_request "${request_id}"
+    unset GITHUB_TOKEN
     release_deploy_lock
     return 1
   fi
-  rm -f "${token_file}"
+  consume_update_request "${request_id}"
+  unset GITHUB_TOKEN
   release_deploy_lock
 }
 
@@ -1285,7 +1307,7 @@ auto_update_apply() (
   AUTO_ROLLBACK_BACKEND_TAG="${APP_SLUG}-backend:rollback-${request_id}"
   AUTO_ROLLBACK_FRONTEND_TAG="${APP_SLUG}-frontend:rollback-${request_id}"
   cp -p "${ENV_FILE}" "${AUTO_ROLLBACK_ENV_FILE}" || return 1
-  chmod 600 "${AUTO_ROLLBACK_ENV_FILE}"
+  chmod 600 "${AUTO_ROLLBACK_ENV_FILE}" || return $?
   if ! docker tag "${AUTO_ROLLBACK_BACKEND_ID}" "${AUTO_ROLLBACK_BACKEND_TAG}" \
       || ! docker tag "${AUTO_ROLLBACK_FRONTEND_ID}" "${AUTO_ROLLBACK_FRONTEND_TAG}"; then
     auto_update_cleanup_snapshot
@@ -1296,8 +1318,8 @@ auto_update_apply() (
   trap 'auto_update_rollback "$?"' EXIT
   DEPLOY_REF="${tag}"
   DEPLOY_REF_ARG="${target_commit}"
-  update_flow
-  set_env_value DEPLOY_REF "${tag}"
+  update_flow || exit $?
+  set_env_value DEPLOY_REF "${tag}" || exit $?
 
   AUTO_ROLLBACK_ACTIVE=0
   trap - EXIT
@@ -1337,12 +1359,12 @@ start_stack() {
   case "${build_mode}" in
     all)
       log "Building panel images..."
-      build_panel_services
+      build_panel_services || return $?
       ;;
     changed)
       if [[ "$#" -gt 0 ]]; then
         log "Building changed panel image(s) sequentially: $*"
-        build_panel_services "$@"
+        build_panel_services "$@" || return $?
       else
         log "No panel image rebuild needed for this update."
       fi
@@ -1353,7 +1375,7 @@ start_stack() {
   esac
 
   log "Starting containers in background..."
-  compose_up_with_port_retry "${recreate}"
+  compose_up_with_port_retry "${recreate}" || return $?
   wait_for_health "${APP_SLUG}-mysql" 180 || die "MySQL did not become healthy. Check the MySQL container logs before retrying."
   wait_for_health "${APP_SLUG}-backend" 240 || die "Backend did not become healthy. Nginx was not reconfigured; check the backend container logs before retrying."
   wait_for_health "${APP_SLUG}-frontend" 120 || die "Frontend did not become healthy. Nginx was not reconfigured; check the frontend container logs before retrying."
@@ -1791,30 +1813,31 @@ install_flow_locked() {
 }
 
 update_flow() {
-  local lock_was_held=0
+  local lock_was_held=0 status=0
   [[ -n "${DEPLOY_LOCK_FD}" ]] && lock_was_held=1
-  acquire_deploy_lock
-  update_flow_locked
+  acquire_deploy_lock || return $?
+  update_flow_locked || status=$?
   [[ "${lock_was_held}" -eq 1 ]] || release_deploy_lock
+  return "${status}"
 }
 
 update_flow_locked() {
-  detect_system
-  install_packages
-  install_docker
-  load_env
+  detect_system || return $?
+  install_packages || return $?
+  install_docker || return $?
+  load_env || return $?
   [[ -n "${DEPLOY_REF_ARG}" ]] && DEPLOY_REF="${DEPLOY_REF_ARG}"
-  sync_repo
-  set_env_value DEPLOY_REF "${DEPLOY_REF}"
-  sync_build_env_values
-  install_cli_wrapper
-  install_update_timer
-  ensure_runtime_ports
-  determine_update_build_services
-  start_stack 1 changed "${BUILD_SERVICES[@]}"
-  mark_deployed_commit
+  sync_repo || return $?
+  set_env_value DEPLOY_REF "${DEPLOY_REF}" || return $?
+  sync_build_env_values || return $?
+  install_cli_wrapper || return $?
+  install_update_timer || return $?
+  ensure_runtime_ports || return $?
+  determine_update_build_services || return $?
+  start_stack 1 changed "${BUILD_SERVICES[@]}" || return $?
+  mark_deployed_commit || return $?
   post_deploy_cleanup
-  configure_nginx
+  configure_nginx || return $?
   update_panel_address_in_db
   print_summary
 }

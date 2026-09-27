@@ -381,7 +381,11 @@ export default function ConfigPage() {
       const response = await checkForUpdate();
       if (response.code === 0 && response.data) {
         setUpdateStatus(response.data);
-        toast.success(response.data.updateAvailable ? '发现 main 分支新提交' : '当前已是最新提交');
+        if (response.data.lastCheckStatus === 'FAILED') {
+          toast.error(response.data.lastCheckMessage || '检查更新失败，请重试');
+        } else {
+          toast.success(response.data.updateAvailable ? '发现 main 分支新提交' : '当前已是最新提交');
+        }
       } else {
         toast.error('检查更新失败: ' + response.msg);
       }
@@ -696,7 +700,7 @@ export default function ConfigPage() {
                         <span className="font-medium">{updateStatus.currentVersion || '未知'}</span>
                       </div>
                       <div className="flex justify-between gap-3">
-                        <span className="text-gray-500 dark:text-gray-400">main 当前提交</span>
+                        <span className="text-gray-500 dark:text-gray-400">当前部署提交</span>
                         <span className="font-mono font-medium">{formatShortCommit(updateStatus.currentCommit)}</span>
                       </div>
                       <div className="flex justify-between gap-3">
