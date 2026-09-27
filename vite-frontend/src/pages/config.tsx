@@ -129,6 +129,9 @@ const formatUpdateTime = (value: string | number | null | undefined): string => 
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 };
 
+const formatShortCommit = (commit: string | null | undefined): string =>
+  commit ? commit.slice(0, 7) : '暂无';
+
 // 初始化时从缓存读取配置，避免闪烁
 const getInitialConfigs = (): Record<string, string> => {
   if (typeof window === 'undefined') return {};
@@ -371,14 +374,14 @@ export default function ConfigPage() {
     }
   };
 
-  // 手动检查 GitHub Release
+  // 手动检查 GitHub main 分支提交
   const handleUpdateCheck = async () => {
     setUpdateChecking(true);
     try {
       const response = await checkForUpdate();
       if (response.code === 0 && response.data) {
         setUpdateStatus(response.data);
-        toast.success(response.data.updateAvailable ? '发现新版本' : '当前已是最新版本');
+        toast.success(response.data.updateAvailable ? '发现 main 分支新提交' : '当前已是最新提交');
       } else {
         toast.error('检查更新失败: ' + response.msg);
       }
@@ -566,7 +569,7 @@ export default function ConfigPage() {
               <div>
                 <h2 className="text-xl font-semibold">面板自动更新</h2>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  从 GitHub 私有仓库检查面板新版本，Token 只由后端保存。
+                  检查 GitHub 仓库 main 分支的新提交，Token 只由后端保存。
                 </p>
               </div>
               <Button
@@ -671,7 +674,7 @@ export default function ConfigPage() {
                 <div className="flex flex-col gap-4">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
-                      <h3 className="text-base font-medium">版本状态</h3>
+                      <h3 className="text-base font-medium">main 分支提交状态</h3>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         {updateStatus?.updateMessage || updateStatus?.lastCheckMessage || '尚未执行检查'}
                       </p>
@@ -689,17 +692,35 @@ export default function ConfigPage() {
                   {updateStatus ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
                       <div className="flex justify-between gap-3">
-                        <span className="text-gray-500 dark:text-gray-400">当前版本</span>
+                        <span className="text-gray-500 dark:text-gray-400">面板版本</span>
                         <span className="font-medium">{updateStatus.currentVersion || '未知'}</span>
                       </div>
                       <div className="flex justify-between gap-3">
-                        <span className="text-gray-500 dark:text-gray-400">最新版本</span>
-                        <span className="font-medium">{updateStatus.latestVersion || '暂无'}</span>
+                        <span className="text-gray-500 dark:text-gray-400">main 当前提交</span>
+                        <span className="font-mono font-medium">{formatShortCommit(updateStatus.currentCommit)}</span>
                       </div>
                       <div className="flex justify-between gap-3">
-                        <span className="text-gray-500 dark:text-gray-400">更新状态</span>
-                        <span className={updateStatus.updateAvailable ? 'font-medium text-primary' : 'font-medium text-success'}>
-                          {updateStatus.updateAvailable ? '有新版本' : '已是最新'}
+                        <span className="text-gray-500 dark:text-gray-400">main 最新提交</span>
+                        <span className="font-mono font-medium">{formatShortCommit(updateStatus.latestCommit)}</span>
+                      </div>
+                      <div className="flex flex-col gap-1 sm:col-span-2">
+                        <span className="text-gray-500 dark:text-gray-400">最新提交说明</span>
+                        <span className="font-medium break-words">{updateStatus.latestCommitMessage || '暂无'}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-gray-500 dark:text-gray-400">检查状态</span>
+                        <span className={updateStatus.lastCheckStatus === 'FAILED'
+                          ? 'font-medium text-danger'
+                          : updateStatus.updateAvailable
+                            ? 'font-medium text-primary'
+                            : 'font-medium text-success'}>
+                          {updateStatus.lastCheckStatus === 'FAILED'
+                            ? '检查失败'
+                            : updateStatus.updateAvailable
+                              ? '发现新提交'
+                              : updateStatus.lastCheckStatus === 'SUCCESS'
+                                ? '已是最新提交'
+                                : '尚未检查'}
                         </span>
                       </div>
                       <div className="flex justify-between gap-3">

@@ -642,6 +642,8 @@ sync_build_env_values() {
     PANEL_VERSION="${release_version}"
     set_env_value PANEL_VERSION "${PANEL_VERSION}"
   fi
+  PANEL_COMMIT="${CURRENT_COMMIT:-$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)}"
+  [[ -n "${PANEL_COMMIT}" ]] && set_env_value PANEL_COMMIT "${PANEL_COMMIT}"
 
   if [[ -z "${AWS_ENCRYPTION_KEY:-}" ]]; then
     AWS_ENCRYPTION_KEY="$(random_string)"
@@ -712,8 +714,9 @@ write_env_file() {
   if [[ "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     PANEL_VERSION="${release_version}"
   else
-    PANEL_VERSION="${PANEL_VERSION:-1.3.88}"
+    PANEL_VERSION="${PANEL_VERSION:-1.3.90}"
   fi
+  PANEL_COMMIT="${CURRENT_COMMIT:-$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)}"
   FRONTEND_PORT="${FRONTEND_PORT:-${FRONTEND_PORT_ENV:-6366}}"
   BACKEND_PORT="${BACKEND_PORT:-${BACKEND_PORT_ENV:-6365}}"
   PHPMYADMIN_PORT="${PHPMYADMIN_PORT:-${PHPMYADMIN_PORT_ENV:-8066}}"
@@ -767,6 +770,7 @@ UPDATE_STATE_DIR=${UPDATE_STATE_DIR}
 UPDATE_STATE_HOST_DIR=${UPDATE_STATE_DIR}
 PANEL_UPDATE_REPOSITORY=${PANEL_UPDATE_REPOSITORY}
 PANEL_VERSION=${PANEL_VERSION}
+PANEL_COMMIT=${PANEL_COMMIT}
 FRONTEND_PORT=${FRONTEND_PORT}
 BACKEND_PORT=${BACKEND_PORT}
 PHPMYADMIN_PORT=${PHPMYADMIN_PORT}
@@ -1185,9 +1189,10 @@ auto_update_flow() {
   local result_file="${UPDATE_STATE_DIR}/result.json"
   [[ -f "${request_file}" ]] || { release_deploy_lock; return 0; }
 
-  local request_id tag previous_id previous_status
+  local request_id tag commit previous_id previous_status
   request_id="$(json_value requestId "${request_file}")"
   tag="$(json_value tag "${request_file}")"
+  commit="$(json_value commit "${request_file}")"
   previous_id="$(json_value requestId "${result_file}")"
   previous_status="$(json_value status "${result_file}")"
   [[ -n "${request_id}" && -n "${tag}" ]] || {
@@ -1195,6 +1200,11 @@ auto_update_flow() {
     release_deploy_lock
     return 1
   }
+  if [[ -n "${commit}" && ! "${commit}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    write_update_result "${request_id}" failed "更新请求中的提交 SHA 无效"
+    release_deploy_lock
+    return 1
+  fi
   if [[ "${previous_id}" == "${request_id}" && "${previous_status}" == "success" ]]; then
     release_deploy_lock
     return 0
@@ -1205,8 +1215,8 @@ auto_update_flow() {
     export GITHUB_TOKEN
   fi
   write_update_result "${request_id}" running "正在拉取 ${tag} 并重建面板"
-  if auto_update_apply "${request_id}" "${tag}"; then
-    write_update_result "${request_id}" success "面板已更新到 ${tag}"
+  if auto_update_apply "${request_id}" "${tag}" "${commit:-${tag}}"; then
+    write_update_result "${request_id}" success "面板已更新到 main 最新提交 ${commit:0:7}"
     rm -f "${request_file}"
   else
     write_update_result "${request_id}" failed "面板自动更新失败，已尝试恢复之前版本"
@@ -1259,7 +1269,7 @@ auto_update_rollback() {
 }
 
 auto_update_apply() (
-  local request_id="$1" tag="$2"
+  local request_id="$1" tag="$2" target_commit="$3"
   load_env
   AUTO_ROLLBACK_COMMIT="$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)"
   [[ -n "${AUTO_ROLLBACK_COMMIT}" ]] || return 1
@@ -1285,8 +1295,9 @@ auto_update_apply() (
   AUTO_ROLLBACK_ACTIVE=1
   trap 'auto_update_rollback "$?"' EXIT
   DEPLOY_REF="${tag}"
-  DEPLOY_REF_ARG="${tag}"
+  DEPLOY_REF_ARG="${target_commit}"
   update_flow
+  set_env_value DEPLOY_REF "${tag}"
 
   AUTO_ROLLBACK_ACTIVE=0
   trap - EXIT

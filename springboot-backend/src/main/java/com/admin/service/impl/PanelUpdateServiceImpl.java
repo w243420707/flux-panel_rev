@@ -40,7 +40,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * Panel self-update settings and GitHub Release checks.
+ * Panel self-update settings and GitHub main-branch commit checks.
  *
  * The service only asks the host updater to perform an upgrade.  It never
  * executes Docker or Git commands inside the application container.
@@ -56,7 +56,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     private static final String STATE_RESULT = "result.json";
     private static final String STATE_TOKEN = "github-token";
     private static final Pattern REPOSITORY_PATTERN = Pattern.compile("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$");
-    private static final Pattern RELEASE_TAG_PATTERN = Pattern.compile("^v\\d+\\.\\d+\\.\\d+$");
+    private static final Pattern COMMIT_PATTERN = Pattern.compile("^[a-fA-F0-9]{40,64}$");
 
     @Resource
     private PanelUpdateSettingMapper settingMapper;
@@ -67,8 +67,11 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     @Value("${PANEL_UPDATE_REPOSITORY:${UPDATE_REPOSITORY:w243420707/flux-panel_rev}}")
     private String configuredRepository;
 
-    @Value("${PANEL_VERSION:${APP_VERSION:1.3.88}}")
+    @Value("${PANEL_VERSION:${APP_VERSION:1.3.90}}")
     private String configuredCurrentVersion;
+
+    @Value("${PANEL_COMMIT:}")
+    private String configuredCurrentCommit;
 
     @Value("${UPDATE_ENCRYPTION_KEY:${jwt-secret:}}")
     private String encryptionSecret;
@@ -117,6 +120,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
 
         setting.setRepository(repository());
         setting.setCurrentVersion(currentVersion());
+        setting.setCurrentCommit(currentCommit());
         setting.setNextCheckAt(nextCheckAt(setting));
         saveSetting(setting);
         return R.ok(settingsView(setting));
@@ -124,7 +128,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
 
     @Override
     public R checkNow() {
-        return R.ok(checkRelease(false));
+        return R.ok(checkLatestCommit(false));
     }
 
     @Override
@@ -146,55 +150,60 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
             if (setting.getNextCheckAt() != null && setting.getNextCheckAt() > now) {
                 return;
             }
-            checkRelease(true);
+            checkLatestCommit(true);
         } catch (Exception e) {
             // A missing database during startup must not stop Spring's scheduler.
             log.warn("自动检查面板更新失败: {}", e.getMessage());
         }
     }
 
-    private Map<String, Object> checkRelease(boolean automatic) {
+    private Map<String, Object> checkLatestCommit(boolean automatic) {
         PanelUpdateSetting setting = loadSetting();
         long now = System.currentTimeMillis();
         setting.setRepository(repository());
         setting.setCurrentVersion(currentVersion());
+        setting.setCurrentCommit(currentCommit());
         setting.setNextCheckAt(now + intervalMillis(setting));
 
         try {
             String token = decryptToken(setting);
-            String release = fetchLatestRelease(setting.getRepository(), token);
-            JSONObject releaseJson = JSONObject.parseObject(release);
-            String tag = releaseJson == null ? null : releaseJson.getString("tag_name");
-            if (!StringUtils.hasText(tag) || !RELEASE_TAG_PATTERN.matcher(tag.trim()).matches()) {
-                throw new IllegalStateException("GitHub 最新 Release 标签不是 vX.Y.Z 格式");
+            JSONObject commit = fetchLatestCommit(setting.getRepository(), token);
+            String sha = commit.getString("sha");
+            if (!StringUtils.hasText(sha) || !COMMIT_PATTERN.matcher(sha.trim()).matches()) {
+                throw new IllegalStateException("GitHub main 分支返回的 commit SHA 无效");
             }
-            tag = tag.trim();
-            setting.setLatestVersion(tag);
-            setting.setUpdateAvailable(compareVersions(tag, setting.getCurrentVersion()) > 0 ? 1 : 0);
+            sha = sha.trim().toLowerCase();
+            JSONObject commitDetails = commit.getJSONObject("commit");
+            String message = commitDetails == null ? "" : commitDetails.getString("message");
+            setting.setCurrentCommit(currentCommit());
+            setting.setLatestCommit(sha);
+            setting.setLatestCommitMessage(message == null ? "" : message.trim());
+            setting.setLatestVersion(null);
+            setting.setUpdateAvailable(isCommitUpdateAvailable(setting) ? 1 : 0);
             setting.setLastCheckAt(now);
             setting.setLastCheckStatus("SUCCESS");
-            setting.setLastCheckMessage("检查完成");
+            setting.setLastCheckMessage("main 分支检查完成");
             saveSetting(setting);
 
             if (automatic && setting.getEnabled() != null && setting.getEnabled() == 1
                     && setting.getUpdateAvailable() == 1) {
-                enqueueIfNeeded(setting, tag, token, now);
+                enqueueIfNeeded(setting, sha, token, now);
             }
         } catch (Exception e) {
             setting.setLastCheckAt(now);
             setting.setLastCheckStatus("FAILED");
             setting.setLastCheckMessage(safeMessage(e));
             saveSetting(setting);
-            log.warn("检查 GitHub Release 失败: {}", safeMessage(e));
+            log.warn("检查 GitHub main 分支失败: {}", safeMessage(e));
         }
         return statusView(setting);
     }
 
-    private String fetchLatestRelease(String repository, String token) {
+    private JSONObject fetchLatestCommit(String repository, String token) {
         if (!REPOSITORY_PATTERN.matcher(repository).matches()) {
             throw new IllegalArgumentException("GitHub 仓库格式无效");
         }
-        String endpoint = "https://api.github.com/repos/" + repository + "/releases/latest";
+        String endpoint = "https://api.github.com/repos/" + repository + "/commits/main";
         HttpHeaders headers = new HttpHeaders();
         headers.setAccept(List.of(MediaType.APPLICATION_JSON));
         headers.set(HttpHeaders.USER_AGENT, "flux-panel-updater");
@@ -213,11 +222,15 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
         if (!response.getStatusCode().is2xxSuccessful() || !StringUtils.hasText(response.getBody())) {
             throw new IllegalStateException("GitHub API 返回空结果");
         }
-        return response.getBody();
+        JSONObject commit = JSONObject.parseObject(response.getBody());
+        if (commit == null) {
+            throw new IllegalStateException("GitHub API 返回的 commit 为空");
+        }
+        return commit;
     }
 
-    private void enqueueIfNeeded(PanelUpdateSetting setting, String tag, String token, long now) {
-        if (tag.equals(setting.getUpdateRequestTag())
+    private void enqueueIfNeeded(PanelUpdateSetting setting, String commit, String token, long now) {
+        if (commit.equalsIgnoreCase(setting.getUpdateRequestTag())
                 && setting.getUpdateRequestedAt() != null
                 && now - setting.getUpdateRequestedAt() < intervalMillis(setting)) {
             return;
@@ -234,11 +247,12 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
             JSONObject request = new JSONObject();
             request.put("requestId", requestId);
             request.put("repository", setting.getRepository());
-            request.put("tag", tag);
+            request.put("tag", "main");
+            request.put("commit", commit);
             request.put("requestedAt", now);
             writeAtomic(directory.resolve(STATE_REQUEST), request.toJSONString());
             setting.setUpdateRequestId(requestId);
-            setting.setUpdateRequestTag(tag);
+            setting.setUpdateRequestTag(commit);
             setting.setUpdateRequestedAt(now);
             saveSetting(setting);
         } catch (IOException e) {
@@ -261,8 +275,10 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("currentVersion", currentVersion());
         result.put("latestVersion", setting.getLatestVersion());
-        result.put("updateAvailable", StringUtils.hasText(setting.getLatestVersion())
-                && compareVersions(setting.getLatestVersion(), currentVersion()) > 0);
+        result.put("currentCommit", currentCommit());
+        result.put("latestCommit", setting.getLatestCommit());
+        result.put("latestCommitMessage", setting.getLatestCommitMessage());
+        result.put("updateAvailable", isCommitUpdateAvailable(setting));
         result.put("lastCheckAt", setting.getLastCheckAt());
         result.put("lastCheckStatus", setting.getLastCheckStatus());
         result.put("lastCheckMessage", setting.getLastCheckMessage());
@@ -345,6 +361,10 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
             setting.setCurrentVersion(currentVersion());
             changed = true;
         }
+        if (!StringUtils.hasText(setting.getCurrentCommit()) && StringUtils.hasText(currentCommit())) {
+            setting.setCurrentCommit(currentCommit());
+            changed = true;
+        }
         if (setting.getCheckIntervalSeconds() == null || setting.getCheckIntervalSeconds() < MIN_INTERVAL_SECONDS) {
             setting.setCheckIntervalSeconds(DEFAULT_INTERVAL_SECONDS);
             changed = true;
@@ -378,7 +398,19 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     }
 
     private String currentVersion() {
-        return StringUtils.hasText(configuredCurrentVersion) ? configuredCurrentVersion.trim() : "1.3.88";
+        return StringUtils.hasText(configuredCurrentVersion) ? configuredCurrentVersion.trim() : "1.3.90";
+    }
+
+    private String currentCommit() {
+        return StringUtils.hasText(configuredCurrentCommit) ? configuredCurrentCommit.trim().toLowerCase() : "";
+    }
+
+    private boolean isCommitUpdateAvailable(PanelUpdateSetting setting) {
+        if (!StringUtils.hasText(setting.getLatestCommit())) {
+            return false;
+        }
+        return !StringUtils.hasText(currentCommit())
+                || !setting.getLatestCommit().equalsIgnoreCase(currentCommit());
     }
 
     private int intervalSeconds(PanelUpdateSetting setting) {
@@ -425,26 +457,6 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
         if (!StringUtils.hasText(token)) return "";
         if (token.length() <= 8) return "********";
         return token.substring(0, 4) + "****" + token.substring(token.length() - 4);
-    }
-
-    private int compareVersions(String left, String right) {
-        int[] a = versionParts(left);
-        int[] b = versionParts(right);
-        for (int i = 0; i < 3; i++) {
-            if (a[i] != b[i]) return Integer.compare(a[i], b[i]);
-        }
-        return 0;
-    }
-
-    private int[] versionParts(String value) {
-        int[] result = new int[]{0, 0, 0};
-        if (!StringUtils.hasText(value)) return result;
-        String normalized = value.trim().replaceFirst("^v", "");
-        String[] parts = normalized.split("\\.");
-        for (int i = 0; i < Math.min(3, parts.length); i++) {
-            try { result[i] = Integer.parseInt(parts[i]); } catch (NumberFormatException ignored) { return new int[]{0, 0, 0}; }
-        }
-        return result;
     }
 
     private void writeRestricted(Path path, String value) throws IOException {

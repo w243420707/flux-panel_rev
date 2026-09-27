@@ -17,6 +17,9 @@ export interface UpdateSettingsPayload {
 
 export interface UpdateStatus {
   currentVersion: string;
+  currentCommit: string | null;
+  latestCommit: string | null;
+  latestCommitMessage: string | null;
   latestVersion: string | null;
   updateAvailable: boolean;
   lastCheckAt: string | number | null;

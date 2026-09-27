@@ -29,6 +29,15 @@ public class PanelUpdateSetting {
     @TableField("latest_version")
     private String latestVersion;
 
+    @TableField("current_commit")
+    private String currentCommit;
+
+    @TableField("latest_commit")
+    private String latestCommit;
+
+    @TableField("latest_commit_message")
+    private String latestCommitMessage;
+
     @TableField("update_available")
     private Integer updateAvailable;
 

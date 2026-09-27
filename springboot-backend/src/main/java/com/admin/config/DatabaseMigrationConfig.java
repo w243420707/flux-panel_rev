@@ -191,6 +191,9 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                     + "repository VARCHAR(255) NOT NULL DEFAULT 'w243420707/flux-panel_rev',"
                     + "current_version VARCHAR(64) NULL,"
                     + "latest_version VARCHAR(64) NULL,"
+                    + "current_commit VARCHAR(64) NULL,"
+                    + "latest_commit VARCHAR(64) NULL,"
+                    + "latest_commit_message LONGTEXT NULL,"
                     + "update_available TINYINT NOT NULL DEFAULT 0,"
                     + "last_check_at BIGINT NULL,"
                     + "last_check_status VARCHAR(32) NOT NULL DEFAULT 'NEVER',"
@@ -208,6 +211,12 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 "ALTER TABLE panel_update_setting ADD COLUMN update_request_tag VARCHAR(64) NULL");
         ensureColumn(connection, "panel_update_setting", "update_requested_at",
                 "ALTER TABLE panel_update_setting ADD COLUMN update_requested_at BIGINT NULL");
+        ensureColumn(connection, "panel_update_setting", "current_commit",
+                "ALTER TABLE panel_update_setting ADD COLUMN current_commit VARCHAR(64) NULL");
+        ensureColumn(connection, "panel_update_setting", "latest_commit",
+                "ALTER TABLE panel_update_setting ADD COLUMN latest_commit VARCHAR(64) NULL");
+        ensureColumn(connection, "panel_update_setting", "latest_commit_message",
+                "ALTER TABLE panel_update_setting ADD COLUMN latest_commit_message LONGTEXT NULL");
         try (Statement statement = connection.createStatement()) {
             statement.executeUpdate("INSERT IGNORE INTO panel_update_setting "
                     + "(id, enabled, check_interval_seconds, repository, update_available, last_check_status) "

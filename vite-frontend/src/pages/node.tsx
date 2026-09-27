@@ -1595,15 +1595,15 @@ export default function NodePage() {
                 </CardHeader>
 
                 <CardBody className="pt-0 pb-3">
-                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_6rem_minmax(0,1fr)] items-center gap-1 text-[10px] @md:grid-cols-[minmax(0,1fr)_7.5rem_minmax(0,1fr)] @xl:grid-cols-[minmax(0,1.1fr)_minmax(11rem,1fr)_minmax(0,1fr)] @xl:gap-2 @xl:text-xs">
+                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_6rem_minmax(0,1fr)] items-center gap-1 text-[10px] @md:grid-cols-[minmax(0,1fr)_7.5rem_minmax(0,1fr)] @xl:grid-cols-[max-content_minmax(11rem,1fr)_max-content] @xl:gap-3 @xl:text-xs">
                     <div className="min-w-0 space-y-1 @xl:space-y-3">
-                      <div className="flex min-w-0 items-center justify-between gap-1">
+                      <div className="flex min-w-0 items-center justify-between gap-1 @xl:justify-start @xl:gap-4">
                         <span className="min-w-0 break-words leading-3 text-default-500 @xl:text-xs">累计总流量</span>
                         <span className="shrink-0 whitespace-nowrap text-right font-mono @xl:text-sm @xl:font-semibold">
                           {node.vpsUsage?.current ? formatTraffic(node.vpsUsage.current.totalBytes) : '-'}
                         </span>
                       </div>
-                      <div className="flex min-w-0 items-center justify-between gap-1">
+                      <div className="flex min-w-0 items-center justify-between gap-1 @xl:justify-start @xl:gap-4">
                         <span className="min-w-0 break-words leading-3 text-default-500 @xl:text-xs">累计使用时长</span>
                         <span className="shrink-0 whitespace-nowrap text-right @xl:text-sm @xl:font-semibold">
                           {node.vpsUsage?.current ? formatUsageDuration(node.vpsUsage.current) : '-'}
@@ -1628,8 +1628,8 @@ export default function NodePage() {
                         unavailable={node.systemInfo?.swapUsage === undefined || !node.systemInfo.swapTotal}
                       />
                     </div>
-                    <div className="grid min-w-0 grid-cols-1 gap-1 @xl:gap-2 @xl:rounded @xl:bg-default-50 @xl:p-2.5 @xl:dark:bg-default-100/20">
-                      <div className="flex min-w-0 items-center justify-between gap-1">
+                    <div className="grid min-w-0 grid-cols-1 gap-1 @xl:w-fit @xl:gap-2 @xl:rounded @xl:bg-default-50 @xl:p-2.5 @xl:dark:bg-default-100/20">
+                      <div className="flex min-w-0 items-center justify-between gap-1 @xl:justify-start @xl:gap-4">
                         <span className="min-w-0 break-words leading-3 text-default-600 @sm:whitespace-nowrap @xl:text-xs">上传速度</span>
                         <span className="shrink-0 whitespace-nowrap font-mono @xl:text-sm @xl:font-semibold">
                           {node.connectionStatus === 'online' && node.systemInfo
@@ -1637,7 +1637,7 @@ export default function NodePage() {
                             : '-'}
                         </span>
                       </div>
-                      <div className="flex min-w-0 items-center justify-between gap-1">
+                      <div className="flex min-w-0 items-center justify-between gap-1 @xl:justify-start @xl:gap-4">
                         <span className="min-w-0 break-words leading-3 text-default-600 @sm:whitespace-nowrap @xl:text-xs">下载速度</span>
                         <span className="shrink-0 whitespace-nowrap font-mono @xl:text-sm @xl:font-semibold">
                           {node.connectionStatus === 'online' && node.systemInfo

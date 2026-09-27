@@ -6,6 +6,7 @@ import com.admin.common.utils.AESCrypto;
 import com.admin.entity.PanelUpdateSetting;
 import com.admin.mapper.PanelUpdateSettingMapper;
 import com.admin.service.impl.PanelUpdateServiceImpl;
+import com.alibaba.fastjson.JSONObject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -15,6 +16,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -79,18 +81,78 @@ class PanelUpdateServiceImplTest {
     }
 
     @Test
-    void releaseCheckUsesBearerTokenAndFindsNewerVersion() {
+    void commitCheckUsesBearerTokenAndIgnoresSemver() {
+        String currentCommit = "a".repeat(40);
+        String latestCommit = "b".repeat(40);
         setting.setGithubTokenEncrypted(new AESCrypto(ENCRYPTION_KEY).encrypt("github_pat_secret-value"));
-        github.expect(requestTo("https://api.github.com/repos/owner/private-panel/releases/latest"))
+        setting.setCurrentVersion("99.0.0");
+        ReflectionTestUtils.setField(service, "configuredCurrentCommit", currentCommit);
+        github.expect(requestTo("https://api.github.com/repos/owner/private-panel/commits/main"))
                 .andExpect(header("Authorization", "Bearer github_pat_secret-value"))
-                .andRespond(withSuccess("{\"tag_name\":\"v1.0.18\"}", MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess(commitResponse(latestCommit, "Fix panel startup"), MediaType.APPLICATION_JSON));
 
         @SuppressWarnings("unchecked")
         Map<String, Object> status = (Map<String, Object>) service.checkNow().getData();
 
         github.verify();
-        assertEquals("v1.0.18", status.get("latestVersion"));
+        assertEquals("1.0.17", status.get("currentVersion"));
+        assertEquals(currentCommit, status.get("currentCommit"));
+        assertEquals(latestCommit, status.get("latestCommit"));
+        assertEquals("Fix panel startup", status.get("latestCommitMessage"));
         assertEquals(true, status.get("updateAvailable"));
         assertEquals("SUCCESS", status.get("lastCheckStatus"));
+    }
+
+    @Test
+    void equalCommitIsNotAnUpdateEvenWhenLegacyVersionsDiffer() {
+        String currentCommit = "c".repeat(40);
+        setting.setLatestVersion("v999.0.0");
+        setting.setLatestCommit(currentCommit);
+        ReflectionTestUtils.setField(service, "configuredCurrentCommit", currentCommit);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> status = (Map<String, Object>) service.getStatus().getData();
+
+        assertEquals(false, status.get("updateAvailable"));
+    }
+
+    @Test
+    void unknownCurrentCommitTriggersOneBootstrapUpdate() {
+        setting.setLatestCommit("f".repeat(40));
+        ReflectionTestUtils.setField(service, "configuredCurrentCommit", "");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> status = (Map<String, Object>) service.getStatus().getData();
+
+        assertEquals(true, status.get("updateAvailable"));
+    }
+
+    @Test
+    void automaticCheckQueuesMainAndStoresCommitShaAsRequestTag() throws Exception {
+        String currentCommit = "d".repeat(40);
+        String latestCommit = "e".repeat(40);
+        ReflectionTestUtils.setField(service, "configuredCurrentCommit", currentCommit);
+        setting.setEnabled(1);
+        github.expect(requestTo("https://api.github.com/repos/owner/private-panel/commits/main"))
+                .andRespond(withSuccess(commitResponse(latestCommit, "Update API"), MediaType.APPLICATION_JSON));
+
+        ReflectionTestUtils.invokeMethod(service, "checkLatestCommit", true);
+
+        github.verify();
+        Path requestPath = Path.of(ReflectionTestUtils.getField(service, "stateDirectory").toString(), "request.json");
+        JSONObject request = JSONObject.parseObject(Files.readString(requestPath));
+        assertEquals("main", request.getString("tag"));
+        assertEquals(latestCommit, request.getString("commit"));
+        assertEquals(latestCommit, setting.getUpdateRequestTag());
+        assertNotNull(setting.getUpdateRequestId());
+    }
+
+    private static String commitResponse(String sha, String message) {
+        JSONObject commit = new JSONObject();
+        commit.put("sha", sha);
+        JSONObject details = new JSONObject();
+        details.put("message", message);
+        commit.put("commit", details);
+        return commit.toJSONString();
     }
 }
