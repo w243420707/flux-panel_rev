@@ -1544,7 +1544,7 @@ export default function NodePage() {
             </CardBody>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 gap-3">
+          <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,620px),1fr))]">
             {nodeList.map((node) => (
               <Card 
                 key={node.id} 
