@@ -60,8 +60,12 @@ CREATE TABLE `node` (
   `change_ip_min_interval_minutes` int(10) DEFAULT NULL,
   `change_ip_remote_api` varchar(1000) DEFAULT NULL,
   `oracle_node` tinyint(1) NOT NULL DEFAULT '0',
+  `cloud_provider` varchar(16) NOT NULL DEFAULT 'NONE',
   `oci_account_id` bigint(20) DEFAULT NULL,
   `oci_instance_ocid` varchar(255) DEFAULT NULL,
+  `aws_account_id` bigint(20) DEFAULT NULL,
+  `aws_instance_id` varchar(255) DEFAULT NULL,
+  `aws_region` varchar(80) DEFAULT NULL,
   `change_ip_last_attempt_at` bigint(20) DEFAULT NULL,
   `change_ip_last_result` varchar(16) NOT NULL DEFAULT 'UNKNOWN',
   `ip` longtext,
@@ -466,6 +470,188 @@ CREATE TABLE IF NOT EXISTS `oci_account` (
   `updated_time` bigint(20) DEFAULT NULL,
   `status` int(10) DEFAULT NULL,
   PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aws_account` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `name` varchar(120) NOT NULL,
+  `access_key_id` varchar(128) NOT NULL,
+  `access_key_encrypted` longtext DEFAULT NULL,
+  `access_secret_encrypted` longtext NOT NULL,
+  `session_token_encrypted` longtext NULL,
+  `mfa_serial_number` varchar(255) DEFAULT NULL,
+  `mfa_secret_encrypted` longtext NULL,
+  `proxy_encrypted` longtext NULL,
+  `role_arn` varchar(1000) DEFAULT NULL,
+  `role_external_id_encrypted` longtext NULL,
+  `role_session_name` varchar(128) DEFAULT NULL,
+  `region` varchar(80) NOT NULL,
+  `regions` longtext NULL,
+  `proxy` varchar(1000) DEFAULT NULL,
+  `remark` varchar(1000) DEFAULT NULL,
+  `group_name` varchar(120) DEFAULT NULL,
+  `group_id` bigint(20) DEFAULT NULL,
+  `proxy_pool_id` bigint(20) DEFAULT NULL,
+  `created_time` bigint(20) DEFAULT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_aws_account_group` (`group_name`),
+  KEY `idx_aws_account_region` (`region`),
+  KEY `idx_aws_account_group_id` (`group_id`),
+  KEY `idx_aws_account_proxy_id` (`proxy_pool_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aws_account_group` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `name` varchar(120) NOT NULL,
+  `remark` varchar(500) DEFAULT NULL,
+  `created_time` bigint(20) DEFAULT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_aws_account_group_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aws_proxy_pool` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `name` varchar(120) NOT NULL,
+  `endpoint` varchar(500) DEFAULT NULL,
+  `proxy_encrypted` longtext NOT NULL,
+  `remark` varchar(500) DEFAULT NULL,
+  `created_time` bigint(20) DEFAULT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_aws_proxy_pool_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aws_ec2_instance_profile` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `account_id` bigint(20) NOT NULL,
+  `region` varchar(80) DEFAULT NULL,
+  `instance_id` varchar(64) NOT NULL,
+  `name` varchar(255) DEFAULT NULL,
+  `instance_type` varchar(80) DEFAULT NULL,
+  `image_id` varchar(80) DEFAULT NULL,
+  `subnet_id` varchar(80) DEFAULT NULL,
+  `security_group_ids` varchar(2000) DEFAULT NULL,
+  `root_volume_size` varchar(32) DEFAULT NULL,
+  `user_data` longtext NULL,
+  `tags_json` longtext NULL,
+  `remark` varchar(1000) DEFAULT NULL,
+  `created_time` bigint(20) DEFAULT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_aws_profile_instance` (`account_id`,`region`,`instance_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aws_ec2_instance_template` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `account_id` bigint(20) DEFAULT NULL,
+  `region` varchar(80) DEFAULT NULL,
+  `availability_zone` varchar(80) DEFAULT NULL,
+  `name` varchar(255) NOT NULL,
+  `image_id` varchar(80) DEFAULT NULL,
+  `instance_type` varchar(80) DEFAULT NULL,
+  `key_name` varchar(255) DEFAULT NULL,
+  `architecture` varchar(32) DEFAULT NULL,
+  `disk_gib` int(11) DEFAULT NULL,
+  `password_encrypted` longtext NULL,
+  `spot` tinyint(4) DEFAULT NULL,
+  `enable_ipv6` tinyint(4) DEFAULT NULL,
+  `disable_public_ip` tinyint(4) DEFAULT NULL,
+  `static_ip` tinyint(4) DEFAULT NULL,
+  `cidr` varchar(128) DEFAULT NULL,
+  `subnet_id` varchar(80) DEFAULT NULL,
+  `security_group_ids` varchar(2000) DEFAULT NULL,
+  `root_volume_size` varchar(32) DEFAULT NULL,
+  `user_data` longtext NULL,
+  `tags_json` longtext NULL,
+  `remark` varchar(1000) DEFAULT NULL,
+  `created_time` bigint(20) DEFAULT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_aws_template_account` (`account_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aws_node_binding` (
+  `node_id` bigint(20) NOT NULL,
+  `account_id` bigint(20) NOT NULL,
+  `instance_id` varchar(64) NOT NULL,
+  `region` varchar(80) DEFAULT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  PRIMARY KEY (`node_id`),
+  KEY `idx_aws_binding_account` (`account_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aws_share_group` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) NOT NULL,
+  `expires_at` bigint(20) DEFAULT NULL,
+  `permissions` varchar(1000) NOT NULL DEFAULT 'read',
+  `node_ids_json` longtext DEFAULT NULL,
+  `access_token` varchar(255) DEFAULT NULL,
+  `created_time` bigint(20) DEFAULT NULL,
+  `updated_time` bigint(20) DEFAULT NULL,
+  `status` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_aws_share_token` (`access_token`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aws_failover_config` (
+  `id` bigint(20) NOT NULL,
+  `enabled` tinyint(4) NOT NULL DEFAULT 0,
+  `backup_group_id` bigint(20) DEFAULT NULL,
+  `max_instances` int(11) NOT NULL DEFAULT 1,
+  `cron` varchar(128) NOT NULL DEFAULT '0 */10 * * * *',
+  `conditions_json` longtext DEFAULT NULL,
+  `telegram_enabled` tinyint(4) NOT NULL DEFAULT 0,
+  `node_ids_json` longtext DEFAULT NULL,
+  `template_id` bigint(20) DEFAULT NULL,
+  `account_selection` varchar(32) DEFAULT 'ordered',
+  `required_vcpu` int(11) DEFAULT 2,
+  `traffic_limit_bytes` bigint(20) DEFAULT NULL,
+  `telegram_bot_token_encrypted` longtext DEFAULT NULL,
+  `telegram_chat_id` varchar(255) DEFAULT NULL,
+  `next_check_at` bigint(20) DEFAULT NULL,
+  `lease_until` bigint(20) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aws_operation` (
+  `id` varchar(96) NOT NULL,
+  `active_target` varchar(255) DEFAULT NULL,
+  `account_id` bigint(20) DEFAULT NULL,
+  `region` varchar(80) DEFAULT NULL,
+  `instance_id` varchar(64) DEFAULT NULL,
+  `action` varchar(64) DEFAULT NULL,
+  `request_hash` varchar(128) DEFAULT NULL,
+  `status` varchar(32) NOT NULL,
+  `message` varchar(1000) DEFAULT NULL,
+  `result_json` longtext DEFAULT NULL,
+  `created_at` bigint(20) DEFAULT NULL,
+  `finished_at` bigint(20) DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_aws_operation_active` (`active_target`),
+  KEY `idx_aws_operation_account` (`account_id`), KEY `idx_aws_operation_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aws_failover_job` (
+  `id` varchar(96) NOT NULL,
+  `source_key` varchar(255) DEFAULT NULL,
+  `node_id` bigint(20) DEFAULT NULL,
+  `old_account_id` bigint(20) DEFAULT NULL,
+  `old_instance_id` varchar(64) DEFAULT NULL,
+  `old_region` varchar(80) DEFAULT NULL,
+  `new_account_id` bigint(20) DEFAULT NULL,
+  `new_instance_id` varchar(64) DEFAULT NULL,
+  `new_region` varchar(80) DEFAULT NULL,
+  `reason` varchar(64) DEFAULT NULL,
+  `status` varchar(32) DEFAULT NULL,
+  `message` varchar(1000) DEFAULT NULL,
+  `created_at` bigint(20) DEFAULT NULL,
+  `finished_at` bigint(20) DEFAULT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_aws_failover_source` (`source_key`),
+  KEY `idx_aws_failover_node` (`node_id`), KEY `idx_aws_failover_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 COMMIT;

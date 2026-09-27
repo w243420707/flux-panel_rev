@@ -9,6 +9,29 @@ import java.util.concurrent.ThreadPoolExecutor;
 
 @Configuration
 public class AsyncExecutorConfig {
+    @Bean(name = "awsOperationExecutor")
+    public Executor awsOperationExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(50);
+        executor.setThreadNamePrefix("aws-operation-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean(name = "awsNodeChangeIpExecutor")
+    public Executor awsNodeChangeIpExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(8);
+        executor.setQueueCapacity(32);
+        executor.setThreadNamePrefix("aws-node-change-ip-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.initialize();
+        return executor;
+    }
 
     @Bean(name = "tunnelSyncExecutor")
     public Executor tunnelSyncExecutor() {

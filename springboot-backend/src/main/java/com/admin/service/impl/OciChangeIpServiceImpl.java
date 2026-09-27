@@ -27,8 +27,14 @@ public class OciChangeIpServiceImpl implements OciChangeIpService {
     @Resource
     private OciCloudService ociCloudService;
 
+    @Resource
+    private AwsEc2ServiceImpl awsEc2Service;
+
     @Resource(name = "ociChangeIpExecutor")
     private Executor executor;
+
+    @Resource(name = "awsNodeChangeIpExecutor")
+    private Executor awsNodeChangeIpExecutor;
 
     @Override
     public void requestAfterUnreachableReport(Long nodeId) {
@@ -40,24 +46,47 @@ public class OciChangeIpServiceImpl implements OciChangeIpService {
             executor.execute(() -> performChange(nodeId, attemptAt));
         } catch (RuntimeException rejected) {
             finish(nodeId, attemptAt, RESULT_FAILED);
-            log.warn("OCI change IP task rejected, nodeId={}", nodeId);
+            log.warn("Cloud change IP task rejected, nodeId={}", nodeId);
         }
     }
 
     private void performChange(Long nodeId, long attemptAt) {
         String result = RESULT_FAILED;
+        boolean deferred = false;
         try {
             Node node = nodeMapper.selectById(nodeId);
-            if (node == null || !Integer.valueOf(1).equals(node.getOracleNode())
-                    || node.getOciAccountId() == null || node.getOciInstanceOcid() == null) {
+            if (node == null || !java.util.Objects.equals(node.getChangeIpLastAttemptAt(), attemptAt)) {
                 return;
             }
-            var account = accountService.requireAccount(node.getOciAccountId());
-            String privateKey = accountService.decryptPrivateKey(account);
-            ociCloudService.changePublicIp(account, privateKey, node.getOciInstanceOcid());
+            if ("AWS".equalsIgnoreCase(node.getCloudProvider())) {
+                if (node.getAwsAccountId() == null || node.getAwsInstanceId() == null || node.getAwsRegion() == null) return;
+                awsNodeChangeIpExecutor.execute(() -> performAwsChange(nodeId, attemptAt,
+                        node.getAwsAccountId(), node.getAwsInstanceId(), node.getAwsRegion()));
+                deferred = true;
+            } else if ("OCI".equalsIgnoreCase(node.getCloudProvider())
+                    || (node.getCloudProvider() == null && Integer.valueOf(1).equals(node.getOracleNode()))) {
+                if (node.getOciAccountId() == null || node.getOciInstanceOcid() == null) return;
+                var account = accountService.requireAccount(node.getOciAccountId());
+                String privateKey = accountService.decryptPrivateKey(account);
+                ociCloudService.changePublicIp(account, privateKey, node.getOciInstanceOcid());
+            } else {
+                return;
+            }
             result = RESULT_SUCCEEDED;
         } catch (Exception e) {
-            log.warn("OCI change IP failed, nodeId={}, errorType={}", nodeId, e.getClass().getSimpleName());
+            log.warn("Cloud change IP failed, nodeId={}, errorType={}", nodeId, e.getClass().getSimpleName());
+        } finally {
+            if (!deferred) finish(nodeId, attemptAt, result);
+        }
+    }
+
+    private void performAwsChange(Long nodeId, long attemptAt, Long accountId, String instanceId, String region) {
+        String result = RESULT_FAILED;
+        try {
+            var changed = awsEc2Service.changeIpForNode(accountId, instanceId, region);
+            if (changed != null && "SUCCEEDED".equals(changed.get("status"))) result = RESULT_SUCCEEDED;
+        } catch (Exception e) {
+            log.warn("AWS change IP failed, nodeId={}, errorType={}", nodeId, e.getClass().getSimpleName());
         } finally {
             finish(nodeId, attemptAt, result);
         }

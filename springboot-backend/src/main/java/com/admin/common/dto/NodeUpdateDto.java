@@ -25,9 +25,17 @@ public class NodeUpdateDto {
 
     private Integer oracleNode;
 
+    private String cloudProvider;
+
     private Long ociAccountId;
 
     private String ociInstanceOcid;
+
+    private Long awsAccountId;
+
+    private String awsInstanceId;
+
+    private String awsRegion;
 
     @NotNull(message = "起始端口不能为空")
     @Min(value = 1, message = "起始端口必须大于0")

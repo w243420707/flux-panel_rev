@@ -33,8 +33,9 @@ public interface NodeMapper extends BaseMapper<Node> {
     List<Node> findDueReboots(@Param("now") long now);
 
     @Update("UPDATE node SET change_ip_last_attempt_at = #{attemptAt}, change_ip_last_result = 'PENDING' "
-            + "WHERE id = #{id} AND oracle_node = 1 AND oci_account_id IS NOT NULL "
-            + "AND oci_instance_ocid IS NOT NULL AND TRIM(oci_instance_ocid) <> '' "
+            + "WHERE id = #{id} AND cloud_provider IN ('OCI', 'AWS') "
+            + "AND ((cloud_provider = 'OCI' AND oci_account_id IS NOT NULL AND oci_instance_ocid IS NOT NULL AND TRIM(oci_instance_ocid) <> '') "
+            + "OR (cloud_provider = 'AWS' AND aws_account_id IS NOT NULL AND aws_instance_id IS NOT NULL AND TRIM(aws_instance_id) <> '' AND aws_region IS NOT NULL AND TRIM(aws_region) <> '')) "
             + "AND (change_ip_last_attempt_at IS NULL OR change_ip_last_attempt_at <= "
             + "#{attemptAt} - GREATEST(COALESCE(change_ip_min_interval_minutes, 3), 3) * 60000)")
     int reserveChangeIpAttempt(@Param("id") Long id, @Param("attemptAt") long attemptAt);
@@ -46,12 +47,41 @@ public interface NodeMapper extends BaseMapper<Node> {
                               @Param("result") String result);
 
     @Update("UPDATE node SET oracle_node = #{oracleNode}, oci_account_id = #{accountId}, "
+            + "oci_instance_ocid = #{instanceOcid}, cloud_provider = #{cloudProvider}, "
+            + "aws_account_id = #{awsAccountId}, aws_instance_id = #{awsInstanceId}, aws_region = #{awsRegion} WHERE id = #{id}")
+    int updateCloudBinding(@Param("id") Long id,
+                         @Param("oracleNode") int oracleNode,
+                         @Param("accountId") Long accountId,
+                         @Param("instanceOcid") String instanceOcid,
+                         @Param("cloudProvider") String cloudProvider,
+                         @Param("awsAccountId") Long awsAccountId,
+                         @Param("awsInstanceId") String awsInstanceId,
+                         @Param("awsRegion") String awsRegion);
+
+    /** Compatibility alias used by older tests and integrations. */
+    @Update("UPDATE node SET oracle_node = #{oracleNode}, oci_account_id = #{accountId}, "
             + "oci_instance_ocid = #{instanceOcid} WHERE id = #{id}")
     int updateOciBinding(@Param("id") Long id,
                          @Param("oracleNode") int oracleNode,
                          @Param("accountId") Long accountId,
                          @Param("instanceOcid") String instanceOcid);
 
+    @Update("UPDATE node SET aws_account_id=#{account}, aws_instance_id=#{instance}, aws_region=#{region}, "
+            + "server_ip=#{ip},server_ipv4=#{ipv4},server_ipv6=#{ipv6}, wall_monitor_external_status='UNKNOWN', "
+            + "wall_monitor_external_last_check_at=NULL, wall_monitor_external_message='实例已替补，等待 APK 确认', "
+            + "change_ip_last_attempt_at=NULL,change_ip_last_result='UNKNOWN' "
+            + "WHERE id=#{id} AND cloud_provider='AWS' AND aws_account_id=#{oldAccount} "
+            + "AND aws_instance_id=#{oldInstance} AND aws_region=#{oldRegion}")
+    int replaceAwsBinding(@Param("id") Long id, @Param("oldAccount") Long oldAccount,
+                          @Param("oldInstance") String oldInstance, @Param("oldRegion") String oldRegion,
+                          @Param("account") Long account, @Param("instance") String instance,
+                          @Param("region") String region, @Param("ip") String ip,
+                          @Param("ipv4") String ipv4, @Param("ipv6") String ipv6);
+
+    @Update("UPDATE node SET change_ip_last_attempt_at=NULL,change_ip_last_result='UNKNOWN' WHERE id=#{id}")
+    int invalidateChangeIpAttempt(@Param("id") Long id);
+
+    /** Backward-compatible OCI-only update used by older callers/tests. */
     @Select("SELECT COUNT(*) FROM node WHERE oci_account_id = #{accountId}")
     int countNodesUsingOciAccount(@Param("accountId") Long accountId);
 

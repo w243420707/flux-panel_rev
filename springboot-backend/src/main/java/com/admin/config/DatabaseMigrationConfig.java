@@ -199,10 +199,18 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
     private void addOciStorage(Connection connection) throws Exception {
         ensureColumn(connection, "node", "oracle_node",
                 "ALTER TABLE node ADD COLUMN oracle_node TINYINT NOT NULL DEFAULT 0 AFTER change_ip_remote_api");
+        ensureColumn(connection, "node", "cloud_provider",
+                "ALTER TABLE node ADD COLUMN cloud_provider VARCHAR(16) NOT NULL DEFAULT 'NONE' AFTER oracle_node");
         ensureColumn(connection, "node", "oci_account_id",
                 "ALTER TABLE node ADD COLUMN oci_account_id BIGINT NULL AFTER oracle_node");
         ensureColumn(connection, "node", "oci_instance_ocid",
                 "ALTER TABLE node ADD COLUMN oci_instance_ocid VARCHAR(255) NULL AFTER oci_account_id");
+        ensureColumn(connection, "node", "aws_account_id",
+                "ALTER TABLE node ADD COLUMN aws_account_id BIGINT NULL AFTER oci_instance_ocid");
+        ensureColumn(connection, "node", "aws_instance_id",
+                "ALTER TABLE node ADD COLUMN aws_instance_id VARCHAR(255) NULL AFTER aws_account_id");
+        ensureColumn(connection, "node", "aws_region",
+                "ALTER TABLE node ADD COLUMN aws_region VARCHAR(80) NULL AFTER aws_instance_id");
         ensureColumn(connection, "node", "change_ip_last_attempt_at",
                 "ALTER TABLE node ADD COLUMN change_ip_last_attempt_at BIGINT NULL AFTER oci_instance_ocid");
         ensureColumn(connection, "node", "change_ip_last_result",
@@ -220,6 +228,9 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                     + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
             statement.executeUpdate("UPDATE node SET change_ip_min_interval_minutes = 3 "
                     + "WHERE change_ip_min_interval_minutes IS NOT NULL AND change_ip_min_interval_minutes < 3");
+            statement.executeUpdate("UPDATE node SET cloud_provider = 'OCI' WHERE oracle_node = 1 "
+                    + "AND (cloud_provider IS NULL OR cloud_provider = '' OR cloud_provider = 'NONE')");
+            statement.executeUpdate("UPDATE node SET cloud_provider = 'NONE' WHERE cloud_provider IS NULL OR cloud_provider = ''");
         }
     }
 

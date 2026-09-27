@@ -109,6 +109,17 @@ export default function AdminLayout({
       adminOnly: true
     },
     {
+      path: '/aws',
+      label: 'AWS EC2',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M5 7.5 12 4l7 3.5v9L12 20l-7-3.5v-9Z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="m5 7.5 7 4 7-4M12 11.5V20" />
+        </svg>
+      ),
+      adminOnly: true
+    },
+    {
       path: '/limit',
       label: '限速管理',
       icon: (

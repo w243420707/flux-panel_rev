@@ -14,6 +14,7 @@ import com.admin.entity.Tunnel;
 import com.admin.entity.ViteConfig;
 import com.admin.mapper.NodeMapper;
 import com.admin.service.OciAccountService;
+import com.admin.service.AwsAccountService;
 import com.admin.mapper.TunnelMapper;
 import com.admin.service.CloudflareDnsSettingService;
 import com.admin.service.CloudflareDnsSyncService;
@@ -107,6 +108,9 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     private OciAccountService ociAccountService;
 
     @Resource
+    private AwsAccountService awsAccountService;
+
+    @Resource
     @Lazy
     private CloudflareDnsSettingService cloudflareDnsSettingService;
 
@@ -196,9 +200,18 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         if (!result) {
             return R.err(ERROR_UPDATE_MSG);
         }
-        if (baseMapper.updateOciBinding(updateNode.getId(), updateNode.getOracleNode(),
-                updateNode.getOciAccountId(), updateNode.getOciInstanceOcid()) != 1) {
+        if (baseMapper.updateCloudBinding(updateNode.getId(), updateNode.getOracleNode(),
+                updateNode.getOciAccountId(), updateNode.getOciInstanceOcid(), updateNode.getCloudProvider(),
+                updateNode.getAwsAccountId(), updateNode.getAwsInstanceId(), updateNode.getAwsRegion()) != 1) {
             return R.err(ERROR_UPDATE_MSG);
+        }
+        if (!Objects.equals(previousNode.getCloudProvider(), updateNode.getCloudProvider())
+                || !Objects.equals(previousNode.getOciAccountId(), updateNode.getOciAccountId())
+                || !Objects.equals(previousNode.getOciInstanceOcid(), updateNode.getOciInstanceOcid())
+                || !Objects.equals(previousNode.getAwsAccountId(), updateNode.getAwsAccountId())
+                || !Objects.equals(previousNode.getAwsInstanceId(), updateNode.getAwsInstanceId())
+                || !Objects.equals(previousNode.getAwsRegion(), updateNode.getAwsRegion())) {
+            baseMapper.invalidateChangeIpAttempt(updateNode.getId());
         }
 
         // 更新隧道入口ip
@@ -648,7 +661,8 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     private Node buildNewNode(NodeDto nodeDto) {
         Node node = new Node();
         BeanUtils.copyProperties(nodeDto, node);
-        applyOciBinding(node, nodeDto.getOracleNode(), nodeDto.getOciAccountId(), nodeDto.getOciInstanceOcid());
+        applyCloudBinding(node, nodeDto.getCloudProvider(), nodeDto.getOracleNode(), nodeDto.getOciAccountId(),
+                nodeDto.getOciInstanceOcid(), nodeDto.getAwsAccountId(), nodeDto.getAwsInstanceId(), nodeDto.getAwsRegion());
         node.setChangeIpMinIntervalMinutes(normalizeChangeIpInterval(nodeDto.getChangeIpMinIntervalMinutes()));
         normalizeNodeAddressFields(node);
 
@@ -688,7 +702,8 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         node.setIp(nodeUpdateDto.getIp());
         node.setServerIp(nodeUpdateDto.getServerIp());
         node.setChangeIpMinIntervalMinutes(normalizeChangeIpInterval(nodeUpdateDto.getChangeIpMinIntervalMinutes()));
-        applyOciBinding(node, nodeUpdateDto.getOracleNode(), nodeUpdateDto.getOciAccountId(), nodeUpdateDto.getOciInstanceOcid());
+        applyCloudBinding(node, nodeUpdateDto.getCloudProvider(), nodeUpdateDto.getOracleNode(), nodeUpdateDto.getOciAccountId(),
+                nodeUpdateDto.getOciInstanceOcid(), nodeUpdateDto.getAwsAccountId(), nodeUpdateDto.getAwsInstanceId(), nodeUpdateDto.getAwsRegion());
         node.setPortSta(nodeUpdateDto.getPortSta());
         node.setPortEnd(nodeUpdateDto.getPortEnd());
         normalizeNodeAddressFields(node);
@@ -711,24 +726,48 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         return value == null ? 3 : value;
     }
 
-    private void applyOciBinding(Node node, Integer oracleNode, Long accountId, String instanceOcid) {
-        boolean enabled = oracleNode != null && oracleNode == 1;
-        node.setOracleNode(enabled ? 1 : 0);
-        if (!enabled) {
+    private void applyCloudBinding(Node node, String requestedProvider, Integer oracleNode, Long accountId, String instanceOcid,
+                                   Long awsAccountId, String awsInstanceId, String awsRegion) {
+        String provider = StrUtil.isBlank(requestedProvider)
+                ? (oracleNode != null && oracleNode == 1 ? "OCI" : "NONE")
+                : requestedProvider.trim().toUpperCase();
+        if (!provider.equals("NONE") && !provider.equals("OCI") && !provider.equals("AWS")) {
+            throw new IllegalArgumentException("云厂商只能选择 NONE、OCI 或 AWS");
+        }
+        node.setCloudProvider(provider);
+        node.setOracleNode("OCI".equals(provider) ? 1 : 0);
+        node.setAwsAccountId(null);
+        node.setAwsInstanceId(null);
+        node.setAwsRegion(null);
+        if (provider.equals("NONE")) {
             node.setOciAccountId(null);
             node.setOciInstanceOcid(null);
             return;
         }
-        String normalizedOcid = normalizeOptionalText(instanceOcid);
-        if (accountId == null || !StringUtils.hasText(normalizedOcid)
-                || !ociAccountService.accountExists(accountId)) {
-            throw new IllegalArgumentException("Oracle 节点必须选择有效的 OCI 账号和实例");
+        if (provider.equals("OCI")) {
+            String normalizedOcid = normalizeOptionalText(instanceOcid);
+            if (accountId == null || !StringUtils.hasText(normalizedOcid)
+                    || !ociAccountService.accountExists(accountId)) {
+                throw new IllegalArgumentException("Oracle 节点必须选择有效的 OCI 账号和实例");
+            }
+            if (!normalizedOcid.startsWith("ocid1.instance.")) {
+                throw new IllegalArgumentException("OCI 实例 OCID 格式无效");
+            }
+            node.setOciAccountId(accountId);
+            node.setOciInstanceOcid(normalizedOcid);
+            return;
         }
-        if (!normalizedOcid.startsWith("ocid1.instance.")) {
-            throw new IllegalArgumentException("OCI 实例 OCID 格式无效");
+        if (awsAccountId == null || !awsAccountService.accountExists(awsAccountId)
+                || !StringUtils.hasText(awsInstanceId) || !StringUtils.hasText(awsRegion)) {
+            throw new IllegalArgumentException("AWS 节点必须选择有效的 AWS 账号、实例和区域");
         }
-        node.setOciAccountId(accountId);
-        node.setOciInstanceOcid(normalizedOcid);
+        if (!awsInstanceId.trim().matches("i-[a-f0-9]{8,17}") || !awsRegion.trim().matches("[a-z]{2,3}(-gov)?-[a-z0-9-]+-[0-9]+"))
+            throw new IllegalArgumentException("AWS 实例 ID 或区域格式无效");
+        node.setOciAccountId(null);
+        node.setOciInstanceOcid(null);
+        node.setAwsAccountId(awsAccountId);
+        node.setAwsInstanceId(awsInstanceId.trim());
+        node.setAwsRegion(awsRegion.trim());
     }
 
     private void normalizeNodeAddressFields(Node node) {

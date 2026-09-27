@@ -31,12 +31,12 @@ class NodeChangeIpDatabaseTest {
         source.setURL("jdbc:h2:mem:change_ip_" + UUID.randomUUID()
                 + ";MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1");
         jdbc = new JdbcTemplate(source);
-        jdbc.execute("CREATE TABLE node (id BIGINT PRIMARY KEY, oracle_node INT NOT NULL, "
-                + "oci_account_id BIGINT, oci_instance_ocid VARCHAR(255), "
+        jdbc.execute("CREATE TABLE node (id BIGINT PRIMARY KEY, oracle_node INT NOT NULL, cloud_provider VARCHAR(16) NOT NULL DEFAULT 'NONE', "
+                + "oci_account_id BIGINT, oci_instance_ocid VARCHAR(255), aws_account_id BIGINT, aws_instance_id VARCHAR(255), aws_region VARCHAR(80), "
                 + "wall_monitor_status VARCHAR(32), "
                 + "change_ip_min_interval_minutes INT, change_ip_last_attempt_at BIGINT, "
                 + "change_ip_last_result VARCHAR(16) NOT NULL DEFAULT 'UNKNOWN')");
-        jdbc.update("INSERT INTO node (id, oracle_node, oci_account_id, oci_instance_ocid) VALUES (?, 1, 2, 'ocid1.instance.test')",
+        jdbc.update("INSERT INTO node (id, oracle_node, cloud_provider, oci_account_id, oci_instance_ocid) VALUES (?, 1, 'OCI', 2, 'ocid1.instance.test')",
                 NODE_ID);
 
         MybatisSqlSessionFactoryBean builder = new MybatisSqlSessionFactoryBean();

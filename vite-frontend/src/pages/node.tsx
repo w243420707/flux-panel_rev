@@ -9,7 +9,6 @@ import { Spinner } from "@heroui/spinner";
 import { Alert } from "@heroui/alert";
 import { Progress } from "@heroui/progress";
 import { Select, SelectItem } from "@heroui/select";
-import { Switch } from "@heroui/switch";
 import toast from 'react-hot-toast';
 import axios from 'axios';
 import {
@@ -18,6 +17,7 @@ import {
   type OciAccountSummary,
   type OciInstance,
 } from "@/api/oci";
+import { listAwsAccounts, listAwsInstances, type AwsAccountSummary, type AwsInstance } from "@/api/aws";
 
 
 import { 
@@ -74,8 +74,12 @@ interface Node {
   wallMonitorExternalMessage?: string;
   remoteChangeIpUrl?: string;
   oracleNode?: boolean | number;
+  cloudProvider?: 'NONE' | 'OCI' | 'AWS' | string;
   ociAccountId?: number | null;
   ociInstanceOcid?: string | null;
+  awsAccountId?: number | null;
+  awsInstanceId?: string | null;
+  awsRegion?: string | null;
   changeIpMinIntervalMinutes?: number | null;
   changeIpLastAttemptAt?: number | null;
   changeIpLastResult?: 'PENDING' | 'SUCCEEDED' | 'FAILED' | string | null;
@@ -105,8 +109,12 @@ interface NodeForm {
   ipString: string;
   serverIp: string;
   oracleNode: boolean;
+  cloudProvider: 'NONE' | 'OCI' | 'AWS';
   ociAccountId: number | null;
   ociInstanceOcid: string;
+  awsAccountId: number | null;
+  awsInstanceId: string;
+  awsRegion: string;
   changeIpMinIntervalMinutes: string;
   portSta: number;
   portEnd: number;
@@ -144,8 +152,12 @@ export default function NodePage() {
     ipString: '',
     serverIp: '',
     oracleNode: false,
+    cloudProvider: 'NONE',
     ociAccountId: null,
     ociInstanceOcid: '',
+    awsAccountId: null,
+    awsInstanceId: '',
+    awsRegion: '',
     changeIpMinIntervalMinutes: '',
     portSta: 1000,
     portEnd: 65535
@@ -155,6 +167,10 @@ export default function NodePage() {
   const [ociAccountsLoading, setOciAccountsLoading] = useState(false);
   const [ociInstances, setOciInstances] = useState<OciInstance[]>([]);
   const [ociInstancesLoading, setOciInstancesLoading] = useState(false);
+  const [awsAccounts, setAwsAccounts] = useState<AwsAccountSummary[]>([]);
+  const [awsInstances, setAwsInstances] = useState<AwsInstance[]>([]);
+  const [awsAccountsLoading, setAwsAccountsLoading] = useState(false);
+  const [awsInstancesLoading, setAwsInstancesLoading] = useState(false);
   
   // 安装命令相关状态
   const [installCommandModal, setInstallCommandModal] = useState(false);
@@ -175,6 +191,7 @@ export default function NodePage() {
   const quietRefreshTimerRef = useRef<number | null>(null);
   const loadNodesPendingRef = useRef(0);
   const ociInstancesRequestRef = useRef(0);
+  const awsInstancesRequestRef = useRef(0);
   const maxReconnectAttempts = 5;
 
   const toggleNodeDetails = (nodeId: number) => {
@@ -215,7 +232,7 @@ export default function NodePage() {
   }, []);
 
   useEffect(() => {
-    if (!dialogVisible || !form.oracleNode) return;
+    if (!dialogVisible || form.cloudProvider !== 'OCI') return;
     let active = true;
     setOciAccountsLoading(true);
     listOciAccounts()
@@ -237,7 +254,7 @@ export default function NodePage() {
         if (active) setOciAccountsLoading(false);
       });
     return () => { active = false; };
-  }, [dialogVisible, form.oracleNode]);
+  }, [dialogVisible, form.cloudProvider]);
 
   useEffect(() => {
     const requestId = ++ociInstancesRequestRef.current;
@@ -267,6 +284,55 @@ export default function NodePage() {
         if (requestId === ociInstancesRequestRef.current) setOciInstancesLoading(false);
       });
   }, [dialogVisible, form.ociAccountId]);
+
+  useEffect(() => {
+    if (!dialogVisible || form.cloudProvider !== 'AWS') return;
+    let active = true;
+    setAwsAccountsLoading(true);
+    listAwsAccounts()
+      .then((accountsResponse) => {
+        if (!active) return;
+        if (accountsResponse.code === 0) {
+          setAwsAccounts(Array.isArray(accountsResponse.data) ? accountsResponse.data : []);
+        } else {
+          setAwsAccounts([]);
+          toast.error(accountsResponse.msg || '加载 AWS 账号失败');
+        }
+      })
+      .catch(() => { if (active) toast.error('加载 AWS 账号失败'); })
+      .finally(() => { if (active) setAwsAccountsLoading(false); });
+    return () => { active = false; };
+  }, [dialogVisible, form.cloudProvider]);
+
+  useEffect(() => {
+    const requestId = ++awsInstancesRequestRef.current;
+    if (!dialogVisible || form.cloudProvider !== 'AWS' || !form.awsAccountId) {
+      setAwsInstances([]);
+      setAwsInstancesLoading(false);
+      return;
+    }
+
+    setAwsInstances([]);
+    setAwsInstancesLoading(true);
+    listAwsInstances({ accountId: form.awsAccountId })
+      .then((response) => {
+        if (requestId !== awsInstancesRequestRef.current) return;
+        if (response.code === 0) {
+          setAwsInstances(Array.isArray(response.data) ? response.data : []);
+        } else {
+          setAwsInstances([]);
+          toast.error(response.msg || '加载 AWS 实例失败');
+        }
+      })
+      .catch(() => {
+        if (requestId !== awsInstancesRequestRef.current) return;
+        setAwsInstances([]);
+        toast.error('加载 AWS 实例失败');
+      })
+      .finally(() => {
+        if (requestId === awsInstancesRequestRef.current) setAwsInstancesLoading(false);
+      });
+  }, [dialogVisible, form.cloudProvider, form.awsAccountId]);
 
   useEffect(() => {
     const refreshTimer = window.setInterval(() => {
@@ -521,6 +587,10 @@ export default function NodePage() {
       }
     } else if (type === 'changeIp') {
       applyChangeIpStatus(Number(id), messageData);
+    } else if (type === 'cloudBinding') {
+      // A replacement changes instance identity, not just its current public IP.
+      // Reload the server-authoritative binding instead of deriving it from IP.
+      refreshNodesQuietly();
     } else if (type === 'wallMonitor') {
       const monitorUpdates = { ...messageData };
       delete monitorUpdates.remoteChangeIpUrl;
@@ -876,12 +946,21 @@ export default function NodePage() {
     return new Date(timestamp).toLocaleString();
   };
 
+  const getNodeCloudProvider = (node: Node): 'NONE' | 'OCI' | 'AWS' => {
+    if (node.cloudProvider === 'NONE' || node.cloudProvider === 'AWS' || node.cloudProvider === 'OCI') return node.cloudProvider;
+    if (node.awsAccountId || node.awsInstanceId) return 'AWS';
+    if (node.ociAccountId || node.ociInstanceOcid || node.oracleNode === true || node.oracleNode === 1) return 'OCI';
+    return 'NONE';
+  };
+
   const getChangeIpAttemptStatus = (node: Node): {
     label: string;
     color: "default" | "primary" | "secondary" | "success" | "warning" | "danger";
   } => {
-    if (!(node.oracleNode === true || node.oracleNode === 1)) return { label: "未启用", color: "default" };
-    if (!node.ociAccountId || !node.ociInstanceOcid) return { label: "未绑定实例", color: "default" };
+    const provider = getNodeCloudProvider(node);
+    if (provider === 'NONE') return { label: "未启用", color: "default" };
+    if (provider === 'OCI' && (!node.ociAccountId || !node.ociInstanceOcid)) return { label: "未绑定实例", color: "default" };
+    if (provider === 'AWS' && (!node.awsAccountId || !node.awsInstanceId || !node.awsRegion)) return { label: "未绑定实例", color: "default" };
     if (node.changeIpLastResult === "SUCCEEDED") return { label: "已更换", color: "success" };
     if (node.changeIpLastResult === "FAILED") return { label: "失败", color: "danger" };
     if (node.changeIpLastResult === "PENDING") return { label: "处理中", color: "warning" };
@@ -957,9 +1036,14 @@ export default function NodePage() {
       newErrors.changeIpMinIntervalMinutes = '最小间隔不能低于 3 分钟';
     }
 
-    if (form.oracleNode) {
+    if (form.cloudProvider === 'OCI') {
       if (!form.ociAccountId) newErrors.ociAccountId = '请选择 OCI 账号';
       if (!form.ociInstanceOcid.trim()) newErrors.ociInstanceOcid = '请选择 OCI 实例';
+    }
+    if (form.cloudProvider === 'AWS') {
+      if (!form.awsAccountId) newErrors.awsAccountId = '请选择 AWS 账号';
+      if (!form.awsInstanceId.trim()) newErrors.awsInstanceId = '请选择 AWS 实例';
+      if (!form.awsRegion.trim()) newErrors.awsRegion = '请选择 AWS 区域';
     }
     
     if (!form.portSta || form.portSta < 1 || form.portSta > 65535) {
@@ -993,9 +1077,13 @@ export default function NodePage() {
       name: node.name,
       ipString: node.ip ? node.ip.split(',').map(ip => ip.trim()).join('\n') : '',
       serverIp: node.serverIp || '',
-      oracleNode: node.oracleNode === true || node.oracleNode === 1,
+      oracleNode: node.cloudProvider === 'OCI' || node.oracleNode === true || node.oracleNode === 1,
+      cloudProvider: getNodeCloudProvider(node),
       ociAccountId: node.ociAccountId ?? null,
       ociInstanceOcid: node.ociInstanceOcid || '',
+      awsAccountId: node.awsAccountId ?? null,
+      awsInstanceId: node.awsInstanceId || '',
+      awsRegion: node.awsRegion || '',
       changeIpMinIntervalMinutes: node.changeIpMinIntervalMinutes?.toString() || '',
       portSta: node.portSta,
       portEnd: node.portEnd
@@ -1254,9 +1342,13 @@ export default function NodePage() {
         ...form,
         ip: ipString,
         changeIpMinIntervalMinutes,
-        oracleNode: form.oracleNode ? 1 : 0,
-        ociAccountId: form.oracleNode ? form.ociAccountId : null,
-        ociInstanceOcid: form.oracleNode ? form.ociInstanceOcid : null,
+        cloudProvider: form.cloudProvider,
+        oracleNode: form.cloudProvider === 'OCI' ? 1 : 0,
+        ociAccountId: form.cloudProvider === 'OCI' ? form.ociAccountId : null,
+        ociInstanceOcid: form.cloudProvider === 'OCI' ? form.ociInstanceOcid : null,
+        awsAccountId: form.cloudProvider === 'AWS' ? form.awsAccountId : null,
+        awsInstanceId: form.cloudProvider === 'AWS' ? form.awsInstanceId : null,
+        awsRegion: form.cloudProvider === 'AWS' ? form.awsRegion : null,
       };
       delete (submitData as any).ipString;
       
@@ -1266,9 +1358,13 @@ export default function NodePage() {
         ip: ipString,
         serverIp: form.serverIp,
         changeIpMinIntervalMinutes,
-        oracleNode: form.oracleNode ? 1 : 0,
-        ociAccountId: form.oracleNode ? form.ociAccountId : null,
-        ociInstanceOcid: form.oracleNode ? form.ociInstanceOcid : null,
+        cloudProvider: form.cloudProvider,
+        oracleNode: form.cloudProvider === 'OCI' ? 1 : 0,
+        ociAccountId: form.cloudProvider === 'OCI' ? form.ociAccountId : null,
+        ociInstanceOcid: form.cloudProvider === 'OCI' ? form.ociInstanceOcid : null,
+        awsAccountId: form.cloudProvider === 'AWS' ? form.awsAccountId : null,
+        awsInstanceId: form.cloudProvider === 'AWS' ? form.awsInstanceId : null,
+        awsRegion: form.cloudProvider === 'AWS' ? form.awsRegion : null,
         portSta: form.portSta,
         portEnd: form.portEnd
       };
@@ -1285,9 +1381,13 @@ export default function NodePage() {
               name: form.name,
               ip: ipString,
               serverIp: form.serverIp,
-              oracleNode: form.oracleNode ? 1 : 0,
-              ociAccountId: form.oracleNode ? form.ociAccountId : null,
-              ociInstanceOcid: form.oracleNode ? form.ociInstanceOcid : null,
+              cloudProvider: form.cloudProvider,
+              oracleNode: form.cloudProvider === 'OCI' ? 1 : 0,
+              ociAccountId: form.cloudProvider === 'OCI' ? form.ociAccountId : null,
+              ociInstanceOcid: form.cloudProvider === 'OCI' ? form.ociInstanceOcid : null,
+              awsAccountId: form.cloudProvider === 'AWS' ? form.awsAccountId : null,
+              awsInstanceId: form.cloudProvider === 'AWS' ? form.awsInstanceId : null,
+              awsRegion: form.cloudProvider === 'AWS' ? form.awsRegion : null,
               changeIpMinIntervalMinutes: form.changeIpMinIntervalMinutes.trim()
                 ? Number(form.changeIpMinIntervalMinutes)
                 : null,
@@ -1316,8 +1416,12 @@ export default function NodePage() {
       ipString: '',
       serverIp: '',
       oracleNode: false,
+      cloudProvider: 'NONE',
       ociAccountId: null,
       ociInstanceOcid: '',
+      awsAccountId: null,
+      awsInstanceId: '',
+      awsRegion: '',
       changeIpMinIntervalMinutes: '',
       portSta: 1000,
       portEnd: 65535
@@ -1440,19 +1544,19 @@ export default function NodePage() {
             </CardBody>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 gap-3">
             {nodeList.map((node) => (
               <Card 
                 key={node.id} 
                 className="shadow-sm border border-divider hover:shadow-md transition-shadow duration-200"
               >
                 <CardHeader className="pb-2">
-                  <div className="flex justify-between items-start w-full">
+                  <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
                     <div className="flex-1 min-w-0">
                       <h3 className="font-semibold text-foreground truncate text-sm">{node.name}</h3>
                       <p className="text-xs text-default-500 truncate">{getNodePrimaryAddress(node)}</p>
                     </div>
-                    <div className="flex items-center gap-1.5 ml-2">
+                    <div className="flex flex-wrap items-center gap-1.5 xl:ml-2 xl:flex-nowrap xl:justify-end">
                       <Chip
                         color={getWallMonitorColor(node)}
                         variant="flat"
@@ -1469,43 +1573,44 @@ export default function NodePage() {
                       >
                         {node.connectionStatus === 'online' ? '在线' : '离线'}
                       </Chip>
+                      <Button
+                        size="sm"
+                        variant="light"
+                        className="min-h-8 shrink-0 justify-between gap-2 px-2 text-default-500"
+                        onPress={() => toggleNodeDetails(node.id)}
+                        aria-expanded={expandedNodeIds.has(node.id)}
+                      >
+                        <span>{expandedNodeIds.has(node.id) ? '收起详情' : '更多详情'}</span>
+                        <svg
+                          className={`h-4 w-4 transition-transform ${expandedNodeIds.has(node.id) ? 'rotate-180' : ''}`}
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.51a.75.75 0 01-1.08 0l-4.25-4.51a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                        </svg>
+                      </Button>
                     </div>
                   </div>
                 </CardHeader>
 
                 <CardBody className="pt-0 pb-3">
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded bg-default-50 p-2 text-center dark:bg-default-100">
-                        <div className="text-default-600 mb-0.5">上传速度</div>
-                        <div className="font-mono">
-                          {node.connectionStatus === 'online' && node.systemInfo
-                            ? formatSpeed(node.systemInfo.uploadSpeed)
-                            : '-'}
-                        </div>
-                      </div>
-                      <div className="rounded bg-default-50 p-2 text-center dark:bg-default-100">
-                        <div className="text-default-600 mb-0.5">下载速度</div>
-                        <div className="font-mono">
-                          {node.connectionStatus === 'online' && node.systemInfo
-                            ? formatSpeed(node.systemInfo.downloadSpeed)
-                            : '-'}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="space-y-1 text-xs">
+                  <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_auto_minmax(17rem,0.8fr)] xl:items-center xl:gap-8">
+                    <div className="space-y-1 text-xs xl:col-start-1 xl:space-y-2">
                       <div className="flex justify-between gap-2">
                         <span className="text-default-500">累计总流量</span>
-                        <span className="font-mono">
+                        <span className="font-mono text-right">
                           {node.vpsUsage?.current ? formatTraffic(node.vpsUsage.current.totalBytes) : '-'}
                         </span>
                       </div>
                       <div className="flex justify-between gap-2">
                         <span className="text-default-500">累计使用时长</span>
-                        <span>{node.vpsUsage?.current ? formatUsageDuration(node.vpsUsage.current) : '-'}</span>
+                        <span className="text-right">
+                          {node.vpsUsage?.current ? formatUsageDuration(node.vpsUsage.current) : '-'}
+                        </span>
                       </div>
                     </div>
-                    <div className="flex items-center justify-around rounded border border-default-200 bg-default-50 px-2 py-1.5 dark:bg-default-100/20">
+                    <div className="flex items-center justify-around rounded border border-default-200 bg-default-50 px-2 py-1.5 dark:bg-default-100/20 xl:col-start-2 xl:gap-4 xl:px-4 xl:py-2">
                       <MetricRing
                         label="CPU"
                         value={node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.cpuUsage : 0}
@@ -1523,23 +1628,24 @@ export default function NodePage() {
                         unavailable={node.systemInfo?.swapUsage === undefined || !node.systemInfo.swapTotal}
                       />
                     </div>
-                    <Button
-                      size="sm"
-                      variant="light"
-                      className="w-full min-h-8 justify-between px-2 text-default-500"
-                      onPress={() => toggleNodeDetails(node.id)}
-                      aria-expanded={expandedNodeIds.has(node.id)}
-                    >
-                      <span>{expandedNodeIds.has(node.id) ? '收起详情' : '更多详情'}</span>
-                      <svg
-                        className={`h-4 w-4 transition-transform ${expandedNodeIds.has(node.id) ? 'rotate-180' : ''}`}
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        aria-hidden="true"
-                      >
-                        <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.51a.75.75 0 01-1.08 0l-4.25-4.51a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-                      </svg>
-                    </Button>
+                    <div className="grid grid-cols-2 gap-2 text-xs xl:col-start-3 xl:grid-cols-1 xl:gap-1 xl:rounded xl:bg-default-50 xl:p-3 xl:dark:bg-default-100/20">
+                      <div className="flex flex-col items-center gap-0.5 rounded bg-default-50 p-2 text-center dark:bg-default-100 xl:flex-row xl:justify-between xl:gap-3 xl:rounded-none xl:bg-transparent xl:p-0 xl:text-left xl:dark:bg-transparent">
+                        <span className="text-default-600">上传速度</span>
+                        <span className="whitespace-nowrap font-mono">
+                          {node.connectionStatus === 'online' && node.systemInfo
+                            ? formatSpeed(node.systemInfo.uploadSpeed)
+                            : '-'}
+                        </span>
+                      </div>
+                      <div className="flex flex-col items-center gap-0.5 rounded bg-default-50 p-2 text-center dark:bg-default-100 xl:flex-row xl:justify-between xl:gap-3 xl:rounded-none xl:bg-transparent xl:p-0 xl:text-left xl:dark:bg-transparent">
+                        <span className="text-default-600">下载速度</span>
+                        <span className="whitespace-nowrap font-mono">
+                          {node.connectionStatus === 'online' && node.systemInfo
+                            ? formatSpeed(node.systemInfo.downloadSpeed)
+                            : '-'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
                   {expandedNodeIds.has(node.id) && (
@@ -1667,7 +1773,7 @@ export default function NodePage() {
                         <span>{formatMonitorTime(node.wallMonitorExternalLastCheckAt)}</span>
                       </div>
                       <div className="mt-2 flex items-center justify-between gap-2 text-default-400">
-                        <span>Oracle 自动换 IP</span>
+                        <span>{getNodeCloudProvider(node) === 'AWS' ? 'AWS 自动换 IP' : getNodeCloudProvider(node) === 'OCI' ? 'Oracle 自动换 IP' : '自动换 IP'}</span>
                         <Chip color={getChangeIpAttemptStatus(node).color} variant="flat" size="sm">
                           {getChangeIpAttemptStatus(node).label}
                         </Chip>
@@ -2041,20 +2147,22 @@ export default function NodePage() {
                 />
 
                 <div className="space-y-4 rounded border border-default-200 p-3">
-                  <Switch
-                    isSelected={form.oracleNode}
-                    onValueChange={(enabled) => setForm(prev => ({
-                      ...prev,
-                      oracleNode: enabled,
-                      ociAccountId: enabled ? prev.ociAccountId : null,
-                      ociInstanceOcid: enabled ? prev.ociInstanceOcid : '',
-                    }))}
-                    color="primary"
+                  <Select
+                    label="云厂商"
+                    selectedKeys={[form.cloudProvider]}
+                    onSelectionChange={(keys) => {
+                      const provider = (Array.from(keys)[0] as 'NONE' | 'OCI' | 'AWS' | undefined) || 'NONE';
+                      setForm(prev => ({ ...prev, cloudProvider: provider, oracleNode: provider === 'OCI', ociAccountId: provider === 'OCI' ? prev.ociAccountId : null, ociInstanceOcid: provider === 'OCI' ? prev.ociInstanceOcid : '', awsAccountId: provider === 'AWS' ? prev.awsAccountId : null, awsInstanceId: provider === 'AWS' ? prev.awsInstanceId : '', awsRegion: provider === 'AWS' ? prev.awsRegion : '' }));
+                      setErrors({});
+                    }}
+                    variant="bordered"
                   >
-                    <span className="text-sm">是否为 Oracle 节点</span>
-                  </Switch>
+                    <SelectItem key="NONE">无自动换 IP</SelectItem>
+                    <SelectItem key="OCI">Oracle OCI</SelectItem>
+                    <SelectItem key="AWS">Amazon EC2</SelectItem>
+                  </Select>
 
-                  {form.oracleNode && (
+                  {form.cloudProvider === 'OCI' && (
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <Select
                         label="OCI 账号"
@@ -2111,6 +2219,56 @@ export default function NodePage() {
                     </div>
                   )}
 
+                  {form.cloudProvider === 'AWS' && (
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <Select
+                        label="AWS 账号"
+                        placeholder="选择 AWS 账号"
+                        selectedKeys={form.awsAccountId ? [String(form.awsAccountId)] : []}
+                        onSelectionChange={(keys) => {
+                          const key = Array.from(keys)[0];
+                          const accountId = key ? Number(key) : null;
+                          setForm(prev => ({ ...prev, awsAccountId: accountId && Number.isFinite(accountId) ? accountId : null, awsInstanceId: '', awsRegion: '' }));
+                          setErrors(prev => ({ ...prev, awsAccountId: '', awsInstanceId: '', awsRegion: '' }));
+                        }}
+                        isLoading={awsAccountsLoading}
+                        isDisabled={awsAccountsLoading || awsAccounts.length === 0}
+                        isInvalid={!!errors.awsAccountId}
+                        errorMessage={errors.awsAccountId}
+                        variant="bordered"
+                      >
+                        {awsAccounts.map(account => <SelectItem key={String(account.id)} textValue={account.name}>{account.name}{account.region ? ` · ${account.region}` : ''}</SelectItem>)}
+                      </Select>
+                      <Select
+                        label="AWS 实例"
+                        placeholder={awsInstancesLoading ? '正在加载实例...' : '选择 AWS 实例'}
+                        selectedKeys={form.awsInstanceId && form.awsRegion ? [`${form.awsRegion}:${form.awsInstanceId}`] : []}
+                        onSelectionChange={(keys) => {
+                          const selectedKey = Array.from(keys)[0] as string | undefined;
+                          const instance = awsInstances.find(item => `${item.region}:${item.instanceId}` === selectedKey);
+                          if (instance) {
+                            setForm(prev => ({ ...prev, awsInstanceId: instance.instanceId, awsRegion: instance.region || '' }));
+                            setErrors(prev => ({ ...prev, awsInstanceId: '', awsRegion: '' }));
+                          }
+                        }}
+                        isLoading={awsInstancesLoading}
+                        isDisabled={!form.awsAccountId || awsInstancesLoading}
+                        isInvalid={!!errors.awsInstanceId}
+                        errorMessage={errors.awsInstanceId}
+                        variant="bordered"
+                      >
+                        {[
+                          ...awsInstances.filter(instance => (!instance.accountId || instance.accountId === form.awsAccountId) && instance.state !== 'terminated'),
+                          ...(form.awsInstanceId && form.awsRegion && !awsInstances.some(instance => instance.instanceId === form.awsInstanceId && instance.region === form.awsRegion)
+                            ? [{ instanceId: form.awsInstanceId, region: form.awsRegion, accountId: form.awsAccountId || undefined, name: '当前绑定（未同步到）' }]
+                            : []),
+                        ].map(instance => <SelectItem key={`${instance.region}:${instance.instanceId}`} textValue={`${instance.name || instance.instanceId} ${instance.region || ''}`}>{instance.name || instance.instanceId} · {instance.publicIpv4 || instance.publicIp || '无公网 IP'} · {instance.region || '-'}</SelectItem>)}
+                      </Select>
+                      <Input label="AWS 区域" value={form.awsRegion} isReadOnly isInvalid={!!errors.awsRegion} errorMessage={errors.awsRegion} variant="bordered" />
+                      <p className="text-xs text-default-500 md:col-span-2">绑定使用账号、区域和固定实例 ID，不受换 IP 影响。实例未同步到时保留原绑定，不会自动清空。</p>
+                    </div>
+                  )}
+
                   <Input
                     label="换 IP 最小间隔（分钟）"
                     placeholder="留空默认 3 分钟"
@@ -2121,7 +2279,7 @@ export default function NodePage() {
                     isInvalid={!!errors.changeIpMinIntervalMinutes}
                     errorMessage={errors.changeIpMinIntervalMinutes}
                     variant="bordered"
-                    description="留空按 3 分钟；填写时不能低于 3 分钟。仅 Oracle 节点在 APK 报告不可达时尝试换 IP。"
+                    description="留空按 3 分钟；填写时不能低于 3 分钟。绑定 Oracle 或 AWS 后，APK 报告不可达时自动尝试换 IP。"
                   />
                 </div>
 

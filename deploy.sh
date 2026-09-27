@@ -633,6 +633,10 @@ set_env_value() {
 
 sync_build_env_values() {
   load_env
+  if [[ -z "${AWS_ENCRYPTION_KEY:-}" ]]; then
+    AWS_ENCRYPTION_KEY="$(random_string)"
+    set_env_value AWS_ENCRYPTION_KEY "${AWS_ENCRYPTION_KEY}"
+  fi
 
   local frontend_dockerfile="Dockerfile"
   if [[ -f "${APP_DIR}/vite-frontend/Dockerfile.prebuilt" && -f "${APP_DIR}/vite-frontend/prebuilt-dist/index.html" ]]; then
@@ -666,6 +670,7 @@ write_env_file() {
   DB_PASSWORD="${DB_PASSWORD:-$(random_string)}"
   JWT_SECRET="${JWT_SECRET:-$(random_string)}"
   OCI_ENCRYPTION_KEY="${OCI_ENCRYPTION_KEY:-$(random_string)}"
+  AWS_ENCRYPTION_KEY="${AWS_ENCRYPTION_KEY:-$(random_string)}"
   FRONTEND_NODE_VERSION="${FRONTEND_NODE_VERSION:-22.13.1}"
   FRONTEND_BUILD_MAX_OLD_SPACE_SIZE="${FRONTEND_BUILD_MAX_OLD_SPACE_SIZE:-1536}"
   VITE_LEGACY_BUILD="${VITE_LEGACY_BUILD:-false}"
@@ -727,6 +732,7 @@ DB_USER=${DB_USER}
 DB_PASSWORD=${DB_PASSWORD}
 JWT_SECRET=${JWT_SECRET}
 OCI_ENCRYPTION_KEY=${OCI_ENCRYPTION_KEY}
+AWS_ENCRYPTION_KEY=${AWS_ENCRYPTION_KEY}
 FRONTEND_NODE_VERSION=${FRONTEND_NODE_VERSION}
 FRONTEND_BUILD_MAX_OLD_SPACE_SIZE=${FRONTEND_BUILD_MAX_OLD_SPACE_SIZE}
 FRONTEND_DOCKERFILE=${FRONTEND_DOCKERFILE}

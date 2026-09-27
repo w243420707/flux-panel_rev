@@ -33,11 +33,24 @@ public class Node extends BaseEntity {
 
     private Integer oracleNode;
 
+    /** Cloud provider bound to this node: NONE, OCI, or AWS. */
+    @TableField(updateStrategy = FieldStrategy.NOT_NULL)
+    private String cloudProvider;
+
     @TableField(updateStrategy = FieldStrategy.NOT_NULL)
     private Long ociAccountId;
 
     @TableField(updateStrategy = FieldStrategy.NOT_NULL)
     private String ociInstanceOcid;
+
+    @TableField(updateStrategy = FieldStrategy.NOT_NULL)
+    private Long awsAccountId;
+
+    @TableField(updateStrategy = FieldStrategy.NOT_NULL)
+    private String awsInstanceId;
+
+    @TableField(updateStrategy = FieldStrategy.NOT_NULL)
+    private String awsRegion;
 
     @TableField(updateStrategy = FieldStrategy.NEVER)
     private Long changeIpLastAttemptAt;

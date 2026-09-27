@@ -13,6 +13,8 @@ const LimitPage = lazy(() => import("@/pages/limit"));
 const ConfigPage = lazy(() => import("@/pages/config"));
 const CloudflareDnsPage = lazy(() => import("@/pages/cloudflare-dns"));
 const OciPage = lazy(() => import("@/pages/oci"));
+const AwsPage = lazy(() => import("@/pages/aws"));
+const AwsSharedPage = lazy(() => import("@/pages/aws").then(module => ({ default: module.AwsSharedPage })));
 const SettingsPage = lazy(() =>
   import("@/pages/settings").then((module) => ({ default: module.SettingsPage }))
 );
@@ -158,6 +160,7 @@ function App() {
     >
       <Routes>
       <Route path="/" element={<LoginRoute />} />
+      <Route path="/aws-share/:token" element={<AwsSharedPage />} />
       <Route 
         path="/change-password" 
         element={
@@ -243,6 +246,14 @@ function App() {
         element={
           <ProtectedRoute>
             <OciPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/aws"
+        element={
+          <ProtectedRoute>
+            <AwsPage />
           </ProtectedRoute>
         }
       />

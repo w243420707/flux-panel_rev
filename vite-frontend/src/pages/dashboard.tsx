@@ -67,6 +67,9 @@ interface DashboardNodeSystemInfo {
 }
 
 export default function DashboardPage() {
+  const [isMobileViewport, setIsMobileViewport] = useState(() =>
+    window.matchMedia('(max-width: 640px)').matches
+  );
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const packageLoadingRef = useRef(false);
@@ -81,6 +84,15 @@ export default function DashboardPage() {
   const [addressList, setAddressList] = useState<AddressItem[]>([]);
   const [nodeCounts, setNodeCounts] = useState({ online: 0, total: 0 });
   const [networkSpeed, setNetworkSpeed] = useState({ upload: 0, download: 0 });
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 640px)');
+    const updateViewport = () => setIsMobileViewport(mediaQuery.matches);
+    updateViewport();
+    mediaQuery.addEventListener('change', updateViewport);
+
+    return () => mediaQuery.removeEventListener('change', updateViewport);
+  }, []);
   const websocketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -1018,7 +1030,8 @@ export default function DashboardPage() {
                              return `${(value / (1024 * 1024 * 1024)).toFixed(1)}G`;
                            }}
                          />
-                         <Tooltip 
+                         <Tooltip
+                           trigger={isMobileViewport ? 'click' : 'hover'}
                            content={({ active, payload, label }) => {
                              if (active && payload && payload.length) {
                                return (
@@ -1040,13 +1053,15 @@ export default function DashboardPage() {
                            maxBarSize={20}
                            isAnimationActive={false}
                          >
-                           <LabelList
-                             dataKey="flow"
-                             position="top"
-                             offset={8}
-                             formatter={(value) => formatFlow(Number(value ?? 0)).replace(/\s+/g, '\u00A0')}
-                             style={{ fontSize: 11, fill: '#c4b5fd' }}
-                           />
+                           {!isMobileViewport && (
+                             <LabelList
+                               dataKey="flow"
+                               position="top"
+                               offset={8}
+                               formatter={(value) => formatFlow(Number(value ?? 0)).replace(/\s+/g, '\u00A0')}
+                               style={{ fontSize: 11, fill: '#c4b5fd' }}
+                             />
+                           )}
                          </Bar>
                        </BarChart>
                      </ResponsiveContainer>
