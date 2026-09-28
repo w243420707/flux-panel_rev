@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { Card, CardBody, CardHeader } from "@heroui/card";
+import { Card, CardBody } from "@heroui/card";
+import "@/styles/node-card.css";
 import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
 import { Textarea } from "@heroui/input";
@@ -878,7 +879,7 @@ export default function NodePage() {
     const radius = 15;
     const circumference = 2 * Math.PI * radius;
     return (
-      <div className="relative h-7 w-7 shrink-0 @md:h-9 @md:w-9 @xl:h-11 @xl:w-11 @2xl:h-12 @2xl:w-12" title={`${label}: ${unavailable ? '未配置' : offline ? '离线' : `${percentage.toFixed(1)}%`}`} aria-label={label}>
+      <div className="node-card-ring" title={`${label}: ${unavailable ? '未配置' : offline ? '离线' : `${percentage.toFixed(1)}%`}`} aria-label={label}>
         <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90" aria-hidden="true">
           <circle cx="18" cy="18" r={radius} fill="none" stroke="currentColor" strokeWidth="3" className="text-default-200 dark:text-default-700" />
           <circle
@@ -894,7 +895,7 @@ export default function NodePage() {
             strokeDashoffset={circumference * (1 - percentage / 100)}
           />
         </svg>
-        <span className="absolute inset-0 flex items-center justify-center text-[8px] font-semibold text-default-600 dark:text-default-300 @xl:text-[10px]">
+        <span className="node-card-ring-value text-default-600 dark:text-default-300">
           {unavailable || offline ? '-' : `${percentage.toFixed(0)}%`}
         </span>
       </div>
@@ -1548,69 +1549,56 @@ export default function NodePage() {
             {nodeList.map((node) => (
               <Card 
                 key={node.id} 
-                className="@container shadow-sm border border-divider hover:shadow-md transition-shadow duration-200"
+                className="node-monitor-card shadow-sm border border-divider hover:shadow-md transition-shadow duration-200"
               >
-                <CardHeader className="pb-2">
-                  <div className="flex w-full items-center justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-foreground truncate text-sm @xl:text-base">{node.name}</h3>
-                      <p className="text-xs text-default-500 truncate @xl:text-sm">{getNodePrimaryAddress(node)}</p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <Chip
-                        color={getWallMonitorColor(node)}
-                        variant="flat"
-                        size="sm"
-                        className="text-[10px] @xl:text-xs"
-                      >
-                        {getWallMonitorLabel(node)}
-                      </Chip>
-                      <Chip 
-                        color={node.connectionStatus === 'online' ? 'success' : 'danger'} 
-                        variant="flat" 
-                        size="sm"
-                        className="text-[10px] @xl:text-xs"
-                      >
-                        {node.connectionStatus === 'online' ? '在线' : '离线'}
-                      </Chip>
-                      <Button
-                        size="sm"
-                        variant="light"
-                        className="min-h-8 shrink-0 justify-between gap-2 px-2 text-default-500"
-                        onPress={() => toggleNodeDetails(node.id)}
-                        aria-expanded={expandedNodeIds.has(node.id)}
-                      >
-                        <span>{expandedNodeIds.has(node.id) ? '收起详情' : '更多详情'}</span>
-                        <svg
-                          className={`h-4 w-4 transition-transform ${expandedNodeIds.has(node.id) ? 'rotate-180' : ''}`}
-                          viewBox="0 0 20 20"
-                          fill="currentColor"
-                          aria-hidden="true"
+                <CardBody className="node-card-body">
+                  <div className="node-card-summary">
+                    <div className="node-card-header">
+                      <div className="node-card-identity">
+                        <h3 className="node-card-name font-semibold text-foreground truncate" title={node.name}>{node.name}</h3>
+                        <p className="node-card-address text-default-500 truncate" title={getNodePrimaryAddress(node)}>{getNodePrimaryAddress(node)}</p>
+                      </div>
+                      <div className="node-card-controls">
+                        <Button
+                          size="sm"
+                          variant="light"
+                          className="node-card-toggle text-default-500"
+                          onPress={() => toggleNodeDetails(node.id)}
+                          aria-expanded={expandedNodeIds.has(node.id)}
                         >
-                          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.51a.75.75 0 01-1.08 0l-4.25-4.51a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-                        </svg>
-                      </Button>
+                          <span>{expandedNodeIds.has(node.id) ? '收起详情' : '更多详情'}</span>
+                          <svg
+                            className={`node-card-chevron transition-transform ${expandedNodeIds.has(node.id) ? 'rotate-180' : ''}`}
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                            aria-hidden="true"
+                          >
+                            <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.51a.75.75 0 01-1.08 0l-4.25-4.51a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                          </svg>
+                        </Button>
+                        <Chip color={getWallMonitorColor(node)} variant="flat" size="sm" className="node-card-status">
+                          {getWallMonitorLabel(node)}
+                        </Chip>
+                        <Chip color={node.connectionStatus === 'online' ? 'success' : 'danger'} variant="flat" size="sm" className="node-card-status">
+                          {node.connectionStatus === 'online' ? '在线' : '离线'}
+                        </Chip>
+                      </div>
                     </div>
-                  </div>
-                </CardHeader>
-
-                <CardBody className="pt-0 pb-3">
-                  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_6rem_minmax(0,1fr)] items-center gap-1 text-[10px] @md:grid-cols-[minmax(0,1fr)_7.5rem_minmax(0,1fr)] @xl:grid-cols-[max-content_minmax(11rem,1fr)_max-content] @xl:gap-3 @xl:text-xs">
-                    <div className="min-w-0 space-y-1 @xl:space-y-3">
-                      <div className="flex min-w-0 items-center justify-between gap-1 @xl:justify-start @xl:gap-4">
-                        <span className="min-w-0 break-words leading-3 text-default-500 @xl:text-xs">累计总流量</span>
-                        <span className="shrink-0 whitespace-nowrap text-right font-mono @xl:text-sm @xl:font-semibold">
+                    <div className="node-card-usage">
+                      <div className="node-card-data-row">
+                        <span className="node-card-label text-default-500">累计总流量</span>
+                        <span className="node-card-value font-mono">
                           {node.vpsUsage?.current ? formatTraffic(node.vpsUsage.current.totalBytes) : '-'}
                         </span>
                       </div>
-                      <div className="flex min-w-0 items-center justify-between gap-1 @xl:justify-start @xl:gap-4">
-                        <span className="min-w-0 break-words leading-3 text-default-500 @xl:text-xs">累计使用时长</span>
-                        <span className="shrink-0 whitespace-nowrap text-right @xl:text-sm @xl:font-semibold">
+                      <div className="node-card-data-row">
+                        <span className="node-card-label text-default-500">累计使用时长</span>
+                        <span className="node-card-value">
                           {node.vpsUsage?.current ? formatUsageDuration(node.vpsUsage.current) : '-'}
                         </span>
                       </div>
                     </div>
-                    <div className="flex min-w-0 items-center justify-around rounded border border-default-200 bg-default-50 px-1 py-1 dark:bg-default-100/20 @xl:gap-2 @xl:px-3 @xl:py-2">
+                    <div className="node-card-metrics">
                       <MetricRing
                         label="CPU"
                         value={node.connectionStatus === 'online' && node.systemInfo ? node.systemInfo.cpuUsage : 0}
@@ -1628,18 +1616,18 @@ export default function NodePage() {
                         unavailable={node.systemInfo?.swapUsage === undefined || !node.systemInfo.swapTotal}
                       />
                     </div>
-                    <div className="grid min-w-0 grid-cols-1 gap-1 @xl:w-fit @xl:gap-2 @xl:rounded @xl:bg-default-50 @xl:p-2.5 @xl:dark:bg-default-100/20">
-                      <div className="flex min-w-0 items-center justify-between gap-1 @xl:justify-start @xl:gap-4">
-                        <span className="min-w-0 break-words leading-3 text-default-600 @sm:whitespace-nowrap @xl:text-xs">上传速度</span>
-                        <span className="shrink-0 whitespace-nowrap font-mono @xl:text-sm @xl:font-semibold">
+                    <div className="node-card-speed">
+                      <div className="node-card-data-row">
+                        <span className="node-card-label text-default-600">上传速度</span>
+                        <span className="node-card-value font-mono">
                           {node.connectionStatus === 'online' && node.systemInfo
                             ? formatSpeed(node.systemInfo.uploadSpeed)
                             : '-'}
                         </span>
                       </div>
-                      <div className="flex min-w-0 items-center justify-between gap-1 @xl:justify-start @xl:gap-4">
-                        <span className="min-w-0 break-words leading-3 text-default-600 @sm:whitespace-nowrap @xl:text-xs">下载速度</span>
-                        <span className="shrink-0 whitespace-nowrap font-mono @xl:text-sm @xl:font-semibold">
+                      <div className="node-card-data-row">
+                        <span className="node-card-label text-default-600">下载速度</span>
+                        <span className="node-card-value font-mono">
                           {node.connectionStatus === 'online' && node.systemInfo
                             ? formatSpeed(node.systemInfo.downloadSpeed)
                             : '-'}
@@ -1649,7 +1637,7 @@ export default function NodePage() {
                   </div>
 
                   {expandedNodeIds.has(node.id) && (
-                    <div className="mt-3 space-y-3 border-t border-divider pt-3">
+                    <div className="node-card-details space-y-3 border-t border-divider pt-3">
                     <div className="grid grid-cols-1 gap-3">
                       <div>
                         <div className="flex justify-between text-xs mb-1">
