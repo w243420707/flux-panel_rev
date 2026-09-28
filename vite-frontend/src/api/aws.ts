@@ -121,6 +121,8 @@ export interface AwsInstance {
   elasticIp?: boolean;
   gfwStatus?: string;
   spot?: boolean;
+  stateReasonCode?: string;
+  spotInterrupted?: boolean;
 }
 
 export interface AwsInstanceFilter {

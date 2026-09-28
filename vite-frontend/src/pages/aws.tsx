@@ -183,6 +183,11 @@ function gfwLabel(status?: string) {
         ? "APK：节点离线"
         : "等待 APK 回报";
 }
+type InstanceNotice = {
+  label: string;
+  message?: string;
+  color: "danger" | "warning" | "success" | "default";
+};
 
 function operationAccepted(operation: aws.AwsOperation) {
   return (
@@ -628,6 +633,69 @@ export default function AwsPage() {
   const accountName = (id?: number) =>
     accounts.find((account) => account.id === id)?.name ||
     String(id || "未知账号");
+
+  const instanceNotice = useCallback(
+    (instance: aws.AwsInstance): InstanceNotice | null => {
+      const account = accounts.find((item) => item.id === instance.accountId);
+      if (!account) return { label: "账号无效", color: "danger" };
+      if (account.enabled === false)
+        return { label: "账号已禁用", color: "danger" };
+      if (account.expiresAt && account.expiresAt <= Date.now())
+        return { label: "账号已过期", color: "danger" };
+      const replacement = failoverLogs.find(
+        (item) =>
+          item.oldInstanceId === instance.instanceId ||
+          item.newInstanceId === instance.instanceId,
+      );
+      if (replacement) {
+        if (["PENDING", "CREATED"].includes(replacement.status || ""))
+          return {
+            label: "替补处理中",
+            color: "warning",
+            message: replacement.message,
+          };
+        if (replacement.status === "UNKNOWN")
+          return {
+            label: "替补待确认",
+            color: "warning",
+            message: replacement.message,
+          };
+        if (replacement.status === "FAILED")
+          return {
+            label: "替补失败",
+            color: "danger",
+            message: replacement.message,
+          };
+        if (replacement.status === "SUCCEEDED")
+          return {
+            label: "替补成功",
+            color: "success",
+            message: replacement.message,
+          };
+      }
+      const operation = operations.find(
+        (item) =>
+          item.instanceId === instance.instanceId &&
+          ["PENDING", "RUNNING", "FAILED", "UNKNOWN"].includes(item.status),
+      );
+      if (operation?.status === "PENDING" || operation?.status === "RUNNING")
+        return { label: "操作处理中", color: "warning", message: operation.message };
+      if (operation?.status === "UNKNOWN")
+        return { label: "操作待确认", color: "warning", message: operation.message };
+      if (operation?.status === "FAILED")
+        return { label: "最近操作失败", color: "danger", message: operation.message };
+      if (instance.spotInterrupted)
+        return { label: "Spot 已中断", color: "danger" };
+      if (instance.state === "terminated")
+        return { label: "实例已终止", color: "danger", message: "实例不存在或已被删除" };
+      if (instance.stateReasonCode === "Server.InsufficientInstanceCapacity")
+        return { label: "区域容量不足", color: "warning" };
+      if (instance.vcpu == null)
+        return { label: "vCPU 未知", color: "default", message: "无法读取实例规格配额" };
+      return null;
+    },
+    [accounts, failoverLogs, operations],
+  );
   const boundNode = useCallback(
     (instance: aws.AwsInstance) =>
       nodes.find(
@@ -1689,6 +1757,7 @@ export default function AwsPage() {
                       instance={instance}
                       accountName={accountName(instance.accountId)}
                       node={boundNode(instance)}
+                      notice={instanceNotice(instance)}
                       heading={
                         groupBy !== "none" &&
                         (index === 0 ||
@@ -3585,6 +3654,7 @@ function InstanceRows({
   instance,
   accountName,
   node,
+  notice,
   heading,
   disabled,
   selected,
@@ -3594,6 +3664,7 @@ function InstanceRows({
   instance: aws.AwsInstance;
   accountName: string;
   node?: aws.AwsBoundNode;
+  notice?: InstanceNotice | null;
   heading?: string;
   disabled: boolean;
   selected: boolean;
@@ -3656,6 +3727,18 @@ function InstanceRows({
           <p className="mt-2 text-xs text-default-500">
             {gfwLabel(node?.wallMonitorExternalStatus)}
           </p>
+          {notice && (
+            <div className="mt-2">
+              <Chip size="sm" variant="flat" color={notice.color}>
+                {notice.label}
+              </Chip>
+              {notice.message && (
+                <p className="mt-1 max-w-48 break-words text-xs text-default-500">
+                  {notice.message}
+                </p>
+              )}
+            </div>
+          )}
         </td>
         <td className="px-3 py-3">
           <p>{accountName}</p>
