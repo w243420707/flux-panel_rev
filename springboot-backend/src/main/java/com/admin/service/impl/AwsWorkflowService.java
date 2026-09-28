@@ -180,6 +180,68 @@ public class AwsWorkflowService {
         return jobs.selectList(new QueryWrapper<AwsFailoverJob>().orderByDesc("created_at").last("LIMIT 100"));
     }
 
+    /**
+     * Queues an explicit replacement for one AWS-backed node.  This is deliberately
+     * separate from the scheduler: an administrator must identify the current
+     * binding, and a retry with the same request id is returned by AwsOperationService
+     * instead of creating another instance.
+     */
+    public Map<String, Object> submitManualReplacement(AwsManualFailoverDto dto) {
+        Node old = resolveManualSource(dto);
+        AwsFailoverConfig config = configs.selectById(1L);
+        validateManualConfig(config);
+        String requestedId = dto == null ? null : dto.getRequestId();
+        final String requestId = requestedId == null || requestedId.isBlank() ? UUID.randomUUID().toString() : requestedId;
+        dto.setRequestId(requestId);
+        final Node sourceNode = old;
+        final AwsFailoverConfig sourceConfig = config;
+        final String manualSource = "manual:" + sourceNode.getId() + ":" + requestId;
+        // A manual retry is explicit.  It may proceed after a previous UNKNOWN job,
+        // but it is still serialized by AwsOperationService while the first request runs.
+        return operations.submit(requestId, sourceNode.getAwsAccountId(), sourceNode.getAwsRegion(),
+                sourceNode.getAwsInstanceId(), "failover", dto, () -> {
+                    AwsFailoverJob job = replaceInternal(sourceConfig, sourceNode, manualSource,
+                            "manual", false);
+                    Map<String, Object> result = new LinkedHashMap<>();
+                    result.put("failoverJobId", job == null ? null : job.getId());
+                    result.put("status", job == null ? "FAILED" : job.getStatus());
+                    result.put("message", job == null ? "替补失败，请检查配置、账号配额与权限" : job.getMessage());
+                    result.put("oldInstanceRetained", true);
+                    return result;
+                });
+    }
+
+    private Node resolveManualSource(AwsManualFailoverDto dto) {
+        boolean hasNode = dto != null && dto.getNodeId() != null;
+        boolean hasLocator = dto != null && dto.getAccountId() != null
+                && dto.getRegion() != null && !dto.getRegion().isBlank()
+                && dto.getInstanceId() != null && !dto.getInstanceId().isBlank();
+        if (!hasNode && !hasLocator) throw new IllegalArgumentException("请提供节点 ID，或完整的 AWS 账号、区域和实例 ID");
+        Node node;
+        if (hasNode) {
+            node = nodes.selectById(dto.getNodeId());
+        } else {
+            node = nodes.selectOne(new QueryWrapper<Node>().eq("cloud_provider", "AWS")
+                    .eq("aws_account_id", dto.getAccountId()).eq("aws_region", dto.getRegion().trim())
+                    .eq("aws_instance_id", dto.getInstanceId().trim()));
+        }
+        if (node == null || !"AWS".equals(node.getCloudProvider()) || node.getAwsAccountId() == null
+                || node.getAwsInstanceId() == null || node.getAwsRegion() == null)
+            throw new IllegalArgumentException("未找到匹配的 AWS 节点绑定");
+        if (hasNode && hasLocator && (!Objects.equals(node.getAwsAccountId(), dto.getAccountId())
+                || !Objects.equals(node.getAwsRegion(), dto.getRegion().trim())
+                || !Objects.equals(node.getAwsInstanceId(), dto.getInstanceId().trim())))
+            throw new IllegalArgumentException("AWS 实例与节点绑定不一致");
+        return node;
+    }
+
+    private void validateManualConfig(AwsFailoverConfig config) {
+        if (config == null || config.getBackupGroupId() == null || config.getTemplateId() == null
+                || templates.selectById(config.getTemplateId()) == null
+                || accounts.selectCount(new QueryWrapper<AwsAccount>().eq("group_id", config.getBackupGroupId()).eq("status", 0)) == 0)
+            throw new IllegalStateException("请先配置可用的替补模板和备用账号组");
+    }
+
     @Scheduled(initialDelay = 60000, fixedDelay = 30000)
     public void tick() {
         AwsFailoverConfig c = configs.selectById(1L);
@@ -204,7 +266,7 @@ public class AwsWorkflowService {
             Node node = nodes.selectById(nodeId);
             if (node == null || !"AWS".equals(node.getCloudProvider())) continue;
             String source = nodeId + ":" + node.getAwsAccountId() + ":" + node.getAwsRegion() + ":" + node.getAwsInstanceId();
-            if (jobs.selectCount(new QueryWrapper<AwsFailoverJob>().eq("source_key", source)) > 0) continue;
+            if (hasBlockingReplacementJob(node)) continue;
             if (jobs.selectCount(new QueryWrapper<AwsFailoverJob>().in("status", "PENDING", "CREATED", "SUCCEEDED", "UNKNOWN")) >= c.getMaxInstances()) return;
             try {
                 String reason = reason(c, node);
@@ -239,10 +301,15 @@ public class AwsWorkflowService {
     }
 
     void replace(AwsFailoverConfig c, Node old, String source, String reason) {
+        replaceInternal(c, old, source, reason, true);
+    }
+
+    private AwsFailoverJob replaceInternal(AwsFailoverConfig c, Node old, String source, String reason,
+                                           boolean requireActiveConfig) {
         AwsFailoverJob job = new AwsFailoverJob(); job.setId(UUID.randomUUID().toString()); job.setSourceKey(source);
         job.setNodeId(old.getId()); job.setOldAccountId(old.getAwsAccountId()); job.setOldInstanceId(old.getAwsInstanceId());
         job.setOldRegion(old.getAwsRegion()); job.setReason(reason); job.setStatus("PENDING"); job.setCreatedAt(System.currentTimeMillis());
-        try { jobs.insert(job); } catch (DuplicateKeyException claimed) { return; }
+        try { jobs.insert(job); } catch (DuplicateKeyException claimed) { return null; }
         boolean submitted = false;
         try {
             List<AwsAccount> candidates = new ArrayList<>(accounts.selectList(new QueryWrapper<AwsAccount>()
@@ -251,15 +318,16 @@ public class AwsWorkflowService {
             AwsEc2InstanceTemplate template = templates.selectById(c.getTemplateId());
             if (template == null) throw new IllegalStateException("替补模板已删除");
             String region = template.getRegion() == null || template.getRegion().isBlank() ? old.getAwsRegion() : template.getRegion();
+            int requiredVcpu = c.getRequiredVcpu() == null ? 2 : Math.max(1, c.getRequiredVcpu());
             AwsAccount target = null;
             for (AwsAccount candidate : candidates) {
                 try {
-                    if (number(accountService.quota(candidate.getId(), region).get("available")) >= c.getRequiredVcpu()) { target = candidate; break; }
+                    if (number(accountService.quota(candidate.getId(), region).get("available")) >= requiredVcpu) { target = candidate; break; }
                 } catch (RuntimeException unavailable) { /* Skip unusable account; never classify it as zero quota. */ }
             }
             if (target == null) throw new IllegalStateException("没有可用备用账号");
             job.setNewAccountId(target.getId()); job.setNewRegion(region); jobs.updateById(job);
-            if (!sameConfig(c, configs.selectById(1L))) throw new IllegalStateException("配置已修改");
+            if (requireActiveConfig && !sameConfig(c, configs.selectById(1L))) throw new IllegalStateException("配置已修改");
             AwsEc2CreateDto create = new AwsEc2CreateDto(); create.setTemplateId(c.getTemplateId());
             create.setAccountId(target.getId()); create.setRegion(region); create.setName(old.getName() + "-replacement");
             create.setClientToken(job.getId());
@@ -273,7 +341,7 @@ public class AwsWorkflowService {
             String ipv6 = Objects.toString(ready.get("ipv6"), "");
             String ip = ipv4.isBlank() ? ipv6 : ipv4;
             AwsFailoverConfig latest = configs.selectById(1L);
-            if (!sameConfig(c, latest) || !ids(latest.getNodeIdsJson()).contains(old.getId()))
+            if (requireActiveConfig && (!sameConfig(c, latest) || !ids(latest.getNodeIdsJson()).contains(old.getId())))
                 throw new IllegalStateException("配置已停用，请手动核对新实例");
             if (nodes.replaceAwsBinding(old.getId(), old.getAwsAccountId(), old.getAwsInstanceId(), old.getAwsRegion(),
                     target.getId(), job.getNewInstanceId(), region, ip, ipv4, ipv6) != 1) throw new IllegalStateException("节点绑定已变化");
@@ -290,6 +358,7 @@ public class AwsWorkflowService {
         } finally {
             job.setFinishedAt(System.currentTimeMillis()); jobs.updateById(job); notifyTelegram(c, job);
         }
+        return job;
     }
 
     private void notifyTelegram(AwsFailoverConfig c, AwsFailoverJob job) {
@@ -327,6 +396,15 @@ public class AwsWorkflowService {
     }
 
     static List<Long> ids(String json) { return json == null || json.isBlank() ? List.of() : JSON.parseArray(json, Long.class); }
+    private String sourceKey(Node node) {
+        return node.getId() + ":" + node.getAwsAccountId() + ":" + node.getAwsRegion() + ":" + node.getAwsInstanceId();
+    }
+    private boolean hasBlockingReplacementJob(Node node) {
+        return jobs.selectCount(new QueryWrapper<AwsFailoverJob>()
+                .eq("node_id", node.getId()).eq("old_account_id", node.getAwsAccountId())
+                .eq("old_instance_id", node.getAwsInstanceId()).eq("old_region", node.getAwsRegion())
+                .in("status", "PENDING", "CREATED", "SUCCEEDED", "UNKNOWN")) > 0;
+    }
     private boolean sameConfig(AwsFailoverConfig expected, AwsFailoverConfig actual) {
         if (actual == null || !Integer.valueOf(1).equals(actual.getEnabled())) return false;
         return Objects.equals(expected.getTemplateId(), actual.getTemplateId())

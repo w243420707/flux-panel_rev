@@ -9,6 +9,7 @@ import com.admin.common.dto.AwsEc2ProfileSaveDto;
 import com.admin.common.dto.AwsEc2TemplateIdDto;
 import com.admin.common.dto.AwsEc2TemplateSaveDto;
 import com.admin.common.dto.AwsFailoverConfigDto;
+import com.admin.common.dto.AwsManualFailoverDto;
 import com.admin.common.dto.AwsShareGroupIdDto;
 import com.admin.common.dto.AwsShareGroupSaveDto;
 import com.admin.common.lang.R;
@@ -132,6 +133,14 @@ public class AwsEc2Controller {
     @RequireRole
     @PostMapping("/failover/logs")
     public R failoverLogs() { return R.ok(workflows.logs()); }
+
+    /** Explicit administrator-triggered replacement; the source binding is rechecked server-side. */
+    @RequireRole
+    @PostMapping("/failover/manual")
+    public R manualFailover(@RequestBody AwsManualFailoverDto dto) {
+        try { return R.ok(workflows.submitManualReplacement(dto)); }
+        catch (IllegalArgumentException | IllegalStateException e) { return R.err(e.getMessage()); }
+    }
 
     @RequireRole
     @PostMapping("/operation/get")

@@ -382,3 +382,11 @@ export const saveAwsFailoverConfig = (data: AwsFailoverConfig) =>
 
 export const listAwsFailoverLogs = () =>
   Network.post<AwsFailoverLog[]>("/aws/failover/logs");
+
+export const submitAwsManualFailover = (data: {
+  nodeId?: number;
+  accountId?: number;
+  region?: string;
+  instanceId?: string;
+  requestId: string;
+}) => Network.post<AwsOperation>("/aws/failover/manual", data);

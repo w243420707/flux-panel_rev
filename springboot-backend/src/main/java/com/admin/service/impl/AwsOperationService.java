@@ -12,6 +12,7 @@ import javax.annotation.Resource;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
@@ -59,7 +60,10 @@ public class AwsOperationService {
                 try {
                     Map<String, Object> result = task.call();
                     String message = result == null ? "操作完成" : String.valueOf(result.getOrDefault("message", "操作完成"));
-                    mapper.finish(id, "SUCCEEDED", message, JSON.toJSONString(result), System.currentTimeMillis());
+                    String taskStatus = result == null ? "SUCCEEDED" : String.valueOf(result.getOrDefault("status", "SUCCEEDED"));
+                    String finalStatus = Set.of("FAILED", "UNKNOWN").contains(taskStatus)
+                            ? taskStatus : "SUCCEEDED";
+                    mapper.finish(id, finalStatus, message, JSON.toJSONString(result), System.currentTimeMillis());
                 } catch (Exception e) {
                     // Do not persist or log raw SDK messages (signed requests may contain credentials).
                     mapper.finish(id, "FAILED", "AWS 操作失败，请检查权限、实例状态和配置", null, System.currentTimeMillis());

@@ -25,7 +25,11 @@ import { getNodeList } from "@/api";
 import { isAdmin } from "@/utils/auth";
 
 type WorkspaceTab = "instances" | "accounts" | "templates" | "sharing" | "logs";
-type InstanceAction = aws.AwsActionPayload["action"] | "rotate-ip" | "check";
+type InstanceAction =
+  | aws.AwsActionPayload["action"]
+  | "rotate-ip"
+  | "check"
+  | "failover";
 type ResourceEditor = {
   kind: "group" | "proxy";
   id?: number;
@@ -112,6 +116,7 @@ const actionNames: Record<InstanceAction, string> = {
   "ipv6-unassign": "释放 IPv6",
   "rotate-ip": "更换公网 IP",
   check: "查看 APK 检测",
+  failover: "替补",
 };
 const selectClass =
   "min-h-12 w-full rounded-medium border border-default-200 bg-content1 px-3 text-sm";
@@ -1061,6 +1066,30 @@ export default function AwsPage() {
               "\n此处只读取 APK 最近回报，不主动探测，也不会触发自动换 IP。"
             : "该实例尚未绑定面板节点，无法获取 APK 检测结果。请先在节点管理中绑定该实例。",
         });
+      } else if (action === "failover") {
+        const node = boundNode(instance);
+        if (!node) throw new Error("该实例尚未绑定面板节点，无法执行替补");
+        if (
+          !window.confirm(
+            "即将为当前节点创建替补 EC2 实例，旧实例会保留且可能产生费用。\n账号：" +
+              accountName(instance.accountId) +
+              "\n区域：" +
+              instance.region +
+              "\n实例：" +
+              instance.instanceId +
+              "\n确认继续吗？",
+          )
+        )
+          return;
+        acceptOperation(
+          unpack(
+            await aws.submitAwsManualFailover({
+              nodeId: node.id,
+              requestId,
+            }),
+            "提交替补任务失败",
+          ),
+        );
       } else if (action === "rotate-ip") {
         acceptOperation(
           unpack(
@@ -2906,12 +2935,15 @@ export default function AwsPage() {
                   "terminate",
                   "reinstall",
                   "rotate-ip",
+                  "failover",
                 ].includes(actionForm.action) && (
                   <p className="text-sm text-warning">
                     {actionForm.action === "terminate"
                       ? "删除不可撤销，实例和随实例删除的磁盘数据将丢失，请确认备份。"
                       : actionForm.action === "reinstall"
                         ? "重装会替换系统盘并导致中断，旧根卷保留（可能继续计费）。只能对运行中的实例执行。"
+                        : actionForm.action === "failover"
+                          ? "将按自动替补配置创建新实例；旧实例会保留，创建或绑定失败时需要人工核对。"
                         : "此操作可能导致服务中断或公网地址变化，请确认目标。"}
                   </p>
                 )}
@@ -3293,6 +3325,17 @@ function InstanceRows({
           </p>
         </td>
         <td className="px-3 py-3">
+          {node && (
+            <Button
+              size="sm"
+              variant="flat"
+              color="warning"
+              isDisabled={disabled}
+              onPress={() => onAction("failover")}
+            >
+              替补
+            </Button>
+          )}
           <SelectField
             label="选择操作"
             value=""
