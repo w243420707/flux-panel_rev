@@ -1259,7 +1259,7 @@ auto_update_cleanup_snapshot() {
 }
 
 auto_update_rollback() {
-  local exit_code="$1" restored=1
+  local exit_code="$1" restored=1 stack_changed="${AUTO_ROLLBACK_STACK_CHANGED:-0}"
   trap - EXIT
   if [[ "${exit_code}" -eq 0 || "${AUTO_ROLLBACK_ACTIVE:-0}" -ne 1 ]]; then
     exit "${exit_code}"
@@ -1278,14 +1278,19 @@ auto_update_rollback() {
   fi
   load_env
 
-  if compose up -d --force-recreate --remove-orphans \
-      && wait_for_health "${APP_SLUG}-mysql" 180 \
-      && wait_for_health "${APP_SLUG}-backend" 240 \
-      && wait_for_health "${APP_SLUG}-frontend" 120; then
-    warn "Previous panel release is healthy again."
-    auto_update_cleanup_snapshot
+  if [[ "${stack_changed}" -eq 1 ]]; then
+    if compose up -d --force-recreate --remove-orphans \
+        && wait_for_health "${APP_SLUG}-mysql" 180 \
+        && wait_for_health "${APP_SLUG}-backend" 240 \
+        && wait_for_health "${APP_SLUG}-frontend" 120; then
+      warn "Previous panel release is healthy again."
+      auto_update_cleanup_snapshot
+    else
+      err "Panel rollback could not be verified. The previous images and environment backup were kept."
+    fi
   else
-    err "Panel rollback could not be verified. The previous images and environment backup were kept."
+    warn "Automatic update failed before containers changed; the current panel containers were left running."
+    auto_update_cleanup_snapshot
   fi
   exit "${exit_code}"
 }
@@ -1315,6 +1320,7 @@ auto_update_apply() (
   fi
 
   AUTO_ROLLBACK_ACTIVE=1
+  AUTO_ROLLBACK_STACK_CHANGED=0
   trap 'auto_update_rollback "$?"' EXIT
   DEPLOY_REF="${tag}"
   DEPLOY_REF_ARG="${target_commit}"
@@ -1375,6 +1381,7 @@ start_stack() {
   esac
 
   log "Starting containers in background..."
+  AUTO_ROLLBACK_STACK_CHANGED=1
   compose_up_with_port_retry "${recreate}" || return $?
   wait_for_health "${APP_SLUG}-mysql" 180 || die "MySQL did not become healthy. Check the MySQL container logs before retrying."
   wait_for_health "${APP_SLUG}-backend" 240 || die "Backend did not become healthy. Nginx was not reconfigured; check the backend container logs before retrying."

@@ -71,6 +71,7 @@ prepare_case() {
   FAIL_STAGE=""
   APPLY_STATUS=0
   GITHUB_TOKEN=""
+  AUTO_ROLLBACK_STACK_CHANGED=0
 
   log() { :; }
   warn() { :; }
@@ -202,6 +203,7 @@ test_update_success() {
   expect_status 0 update_flow
   assert_count build_panel_services 1
   assert_count compose_up 1
+  assert_equal 1 "${AUTO_ROLLBACK_STACK_CHANGED}" 'Stack change marker'
   assert_count mark_deployed_commit 1
   assert_count configure_nginx 1
   assert_equal '' "${DEPLOY_LOCK_FD}" 'Lock release'
@@ -270,6 +272,44 @@ test_apply_rolls_back() {
   assert_count rollback 1
   assert_count env:DEPLOY_REF 0
 }
+test_apply_failure_before_stack_change_keeps_containers() {
+  source_function auto_update_rollback
+  AUTO_ROLLBACK_ACTIVE=1
+  AUTO_ROLLBACK_STACK_CHANGED=0
+  AUTO_ROLLBACK_COMMIT="${OLD_SHA}"
+  AUTO_ROLLBACK_BACKEND_ID=fixture-backend
+  AUTO_ROLLBACK_FRONTEND_ID=fixture-frontend
+  AUTO_ROLLBACK_BACKEND_TAG=flux-panel-test-backend:rollback
+  AUTO_ROLLBACK_FRONTEND_TAG=flux-panel-test-frontend:rollback
+  AUTO_ROLLBACK_ENV_FILE="${CASE_DIR}/rollback.env"
+  printf 'fixture env\n' > "${AUTO_ROLLBACK_ENV_FILE}"
+  git() {
+    case "$*" in
+      *checkout*) record checkout ;;
+      *) return 0 ;;
+    esac
+  }
+  docker() {
+    case "$1" in
+      image)
+        case "$2" in
+          inspect) printf 'sha256:fixture-image\n' ;;
+          rm) record cleanup_image ;;
+          *) fail "Unexpected Docker image invocation: $*" ;;
+        esac
+        ;;
+      tag) record snapshot_image ;;
+      *) fail "Unexpected Docker invocation: $*" ;;
+    esac
+  }
+  load_env() { record load_env; }
+  local rollback_status=0 rollback_output
+  if rollback_output="$(auto_update_rollback 41 2>&1)"; then rollback_status=0; else rollback_status=$?; fi
+  assert_equal 41 "${rollback_status}" 'Rollback exit status'
+  assert_count compose_up 0
+  assert_count cleanup_image 2
+  assert_count checkout 1
+}
 test_normal_dependency_returns() {
   source_function sync_build_env_values
   source_function ensure_runtime_ports
@@ -335,6 +375,7 @@ done
 run_test 'Competing update is blocked until lock is released (mock flock)' test_lock_contention
 run_test 'Nested update preserves its caller lock' test_inherited_lock
 run_test 'Failed update inside apply invokes rollback despite conditional context' test_apply_rolls_back
+run_test 'Failure before container startup leaves the current stack running' test_apply_failure_before_stack_change_keeps_containers
 run_test 'Unchanged environment/ports/images return success normally' test_normal_dependency_returns
 
 printf '\nResult: %s passed, %s failed\n' "${passed}" "${failed}"
