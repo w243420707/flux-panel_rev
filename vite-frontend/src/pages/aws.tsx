@@ -493,6 +493,12 @@ export default function AwsPage() {
     [],
   );
   const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([]);
+  const [accountFilter, setAccountFilter] = useState({
+    keyword: "",
+    groupId: "",
+    region: "",
+    status: "",
+  });
   const [shareForm, setShareForm] = useState<Partial<aws.AwsShareGroup> | null>(
     null,
   );
@@ -516,17 +522,60 @@ export default function AwsPage() {
     [instances, selectedInstanceKeys],
   );
 
-  const visibleAccounts = accounts;
+  const accountRegions = useMemo(
+    () =>
+      [
+        ...new Set(
+          accounts.flatMap((account) =>
+            (account.regions || account.region || "")
+              .split(",")
+              .map((region) => region.trim())
+              .filter(Boolean),
+          ),
+        ),
+      ].sort(),
+    [accounts],
+  );
+  const visibleAccounts = useMemo(() => {
+    const keyword = accountFilter.keyword.trim().toLowerCase();
+    return accounts.filter((account) => {
+      const expired = !!account.expiresAt && account.expiresAt <= Date.now();
+      const status = expired
+        ? "expired"
+        : account.enabled === false
+          ? "disabled"
+          : "enabled";
+      const haystack = [
+        account.name,
+        account.accessKeyId,
+        account.groupName,
+        account.remark,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return (
+        (!keyword || haystack.includes(keyword)) &&
+        (!accountFilter.groupId || String(account.groupId || "") === accountFilter.groupId) &&
+        (!accountFilter.region ||
+          (account.regions || account.region || "")
+            .split(",")
+            .map((region) => region.trim())
+            .includes(accountFilter.region)) &&
+        (!accountFilter.status || accountFilter.status === status)
+      );
+    });
+  }, [accounts, accountFilter]);
   const allAccountsSelected =
     visibleAccounts.length > 0 &&
     visibleAccounts.every((account) => selectedAccountIds.includes(account.id));
 
   useEffect(() => {
-    const available = new Set(accounts.map((account) => account.id));
+    const available = new Set(visibleAccounts.map((account) => account.id));
     setSelectedAccountIds((current) =>
       current.filter((id) => available.has(id)),
     );
-  }, [accounts]);
+  }, [visibleAccounts]);
 
   const accountName = (id?: number) =>
     accounts.find((account) => account.id === id)?.name ||
@@ -1050,7 +1099,7 @@ export default function AwsPage() {
 
   const batchAccountStatus = (enabled: boolean) =>
     perform(enabled ? "batch-account-enable" : "batch-account-disable", async () => {
-      const targets = accounts.filter((account) =>
+      const targets = visibleAccounts.filter((account) =>
         selectedAccountIds.includes(account.id),
       );
       if (!targets.length) throw new Error("请先选择 AWS 账号");
@@ -1079,7 +1128,7 @@ export default function AwsPage() {
 
   const batchDeleteAccounts = () =>
     perform("batch-account-delete", async () => {
-      const targets = accounts.filter((account) =>
+      const targets = visibleAccounts.filter((account) =>
         selectedAccountIds.includes(account.id),
       );
       if (!targets.length) throw new Error("请先选择 AWS 账号");
@@ -1635,6 +1684,54 @@ export default function AwsPage() {
 
       {tab === "accounts" && (
         <section className="space-y-6">
+          <div className="grid gap-3 rounded-medium border border-default-200 p-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Input
+              label="搜索账号"
+              placeholder="名称、脱敏 Access Key、备注"
+              value={accountFilter.keyword}
+              onValueChange={(keyword) =>
+                setAccountFilter((current) => ({ ...current, keyword }))
+              }
+            />
+            <SelectField
+              label="账号组"
+              value={accountFilter.groupId}
+              onChange={(groupId) =>
+                setAccountFilter((current) => ({ ...current, groupId }))
+              }
+            >
+              <option value="">全部账号组</option>
+              {groups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </SelectField>
+            <SelectField
+              label="区域"
+              value={accountFilter.region}
+              onChange={(region) =>
+                setAccountFilter((current) => ({ ...current, region }))
+              }
+            >
+              <option value="">全部区域</option>
+              {accountRegions.map((region) => (
+                <option key={region}>{region}</option>
+              ))}
+            </SelectField>
+            <SelectField
+              label="账号状态"
+              value={accountFilter.status}
+              onChange={(status) =>
+                setAccountFilter((current) => ({ ...current, status }))
+              }
+            >
+              <option value="">全部状态</option>
+              <option value="enabled">正常</option>
+              <option value="disabled">已禁用</option>
+              <option value="expired">已过期</option>
+            </SelectField>
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <input
@@ -1726,8 +1823,8 @@ export default function AwsPage() {
             </div>
           </div>
           <div className="divide-y divide-default-200 border-y border-default-200">
-            {accounts.length ? (
-              accounts.map((account) => (
+            {visibleAccounts.length ? (
+              visibleAccounts.map((account) => (
                 <div
                   key={account.id}
                   className="flex flex-wrap items-center justify-between gap-3 py-4"
@@ -1894,7 +1991,7 @@ export default function AwsPage() {
               ))
             ) : (
               <p className="py-10 text-center text-default-500">
-                暂无 AWS 账号
+                {accounts.length ? "没有符合筛选条件的账号" : "暂无 AWS 账号"}
               </p>
             )}
           </div>
