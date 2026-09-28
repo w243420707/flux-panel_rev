@@ -396,9 +396,6 @@ public class AwsWorkflowService {
     }
 
     static List<Long> ids(String json) { return json == null || json.isBlank() ? List.of() : JSON.parseArray(json, Long.class); }
-    private String sourceKey(Node node) {
-        return node.getId() + ":" + node.getAwsAccountId() + ":" + node.getAwsRegion() + ":" + node.getAwsInstanceId();
-    }
     private boolean hasBlockingReplacementJob(Node node) {
         return jobs.selectCount(new QueryWrapper<AwsFailoverJob>()
                 .eq("node_id", node.getId()).eq("old_account_id", node.getAwsAccountId())
