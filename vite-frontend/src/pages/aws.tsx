@@ -492,6 +492,7 @@ export default function AwsPage() {
   const [selectedInstanceKeys, setSelectedInstanceKeys] = useState<string[]>(
     [],
   );
+  const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([]);
   const [shareForm, setShareForm] = useState<Partial<aws.AwsShareGroup> | null>(
     null,
   );
@@ -514,6 +515,18 @@ export default function AwsPage() {
       ),
     [instances, selectedInstanceKeys],
   );
+
+  const visibleAccounts = accounts;
+  const allAccountsSelected =
+    visibleAccounts.length > 0 &&
+    visibleAccounts.every((account) => selectedAccountIds.includes(account.id));
+
+  useEffect(() => {
+    const available = new Set(accounts.map((account) => account.id));
+    setSelectedAccountIds((current) =>
+      current.filter((id) => available.has(id)),
+    );
+  }, [accounts]);
 
   const accountName = (id?: number) =>
     accounts.find((account) => account.id === id)?.name ||
@@ -1033,6 +1046,64 @@ export default function AwsPage() {
       setAccountForm(null);
       toast.success("AWS 账号已保存");
       await refresh();
+    });
+
+  const batchAccountStatus = (enabled: boolean) =>
+    perform(enabled ? "batch-account-enable" : "batch-account-disable", async () => {
+      const targets = accounts.filter((account) =>
+        selectedAccountIds.includes(account.id),
+      );
+      if (!targets.length) throw new Error("请先选择 AWS 账号");
+      if (
+        !window.confirm(
+          `${enabled ? "启用" : "禁用"}选中的 ${targets.length} 个 AWS 账号？` +
+            (enabled
+              ? ""
+              : "禁用不会删除 AWS 资源，但会停止同步、创建、换 IP和替补。"),
+        )
+      )
+        return;
+      const settled = await Promise.allSettled(
+        targets.map(async (account) => {
+          const response = await aws.setAwsAccountEnabled(account.id, enabled);
+          return unpack(response, "更新账号状态失败");
+        }),
+      );
+      const failed = settled.filter((item) => item.status === "rejected").length;
+      setSelectedAccountIds([]);
+      await refresh();
+      toast.success(
+        `${enabled ? "启用" : "禁用"}完成：成功 ${targets.length - failed} 个，失败 ${failed} 个`,
+      );
+    });
+
+  const batchDeleteAccounts = () =>
+    perform("batch-account-delete", async () => {
+      const targets = accounts.filter((account) =>
+        selectedAccountIds.includes(account.id),
+      );
+      if (!targets.length) throw new Error("请先选择 AWS 账号");
+      const preview = targets
+        .slice(0, 5)
+        .map((account) => account.name)
+        .join("、");
+      const suffix = targets.length > 5 ? ` 等 ${targets.length} 个账号` : "";
+      if (
+        !window.confirm(
+          `批量删除 AWS 账号「${preview}${suffix}」？\n不会删除 AWS 云端资源；有节点、模板或任务引用的账号会单独失败。`,
+        )
+      )
+        return;
+      const settled = await Promise.allSettled(
+        targets.map(async (account) => {
+          const response = await aws.deleteAwsAccount(account.id);
+          return unpack(response, "删除账号失败");
+        }),
+      );
+      const failed = settled.filter((item) => item.status === "rejected").length;
+      setSelectedAccountIds([]);
+      await refresh();
+      toast.success(`删除完成：成功 ${targets.length - failed} 个，失败 ${failed} 个`);
     });
   const openAction = (instance: aws.AwsInstance, action: InstanceAction) =>
     setActionForm({
@@ -1564,7 +1635,59 @@ export default function AwsPage() {
 
       {tab === "accounts" && (
         <section className="space-y-6">
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="checkbox"
+                aria-label="选择全部 AWS 账号"
+                checked={allAccountsSelected}
+                onChange={() =>
+                  setSelectedAccountIds(
+                    allAccountsSelected
+                      ? []
+                      : visibleAccounts.map((account) => account.id),
+                  )
+                }
+              />
+              <span className="text-sm text-default-500">
+                已选 {selectedAccountIds.length} 个账号
+              </span>
+              <Button
+                size="sm"
+                variant="flat"
+                isDisabled={!selectedAccountIds.length || !!busy}
+                onPress={() => void batchAccountStatus(true)}
+              >
+                批量启用
+              </Button>
+              <Button
+                size="sm"
+                variant="flat"
+                color="warning"
+                isDisabled={!selectedAccountIds.length || !!busy}
+                onPress={() => void batchAccountStatus(false)}
+              >
+                批量禁用
+              </Button>
+              <Button
+                size="sm"
+                variant="flat"
+                color="danger"
+                isDisabled={!selectedAccountIds.length || !!busy}
+                onPress={() => void batchDeleteAccounts()}
+              >
+                批量删除
+              </Button>
+              <Button
+                size="sm"
+                variant="light"
+                isDisabled={!selectedAccountIds.length || !!busy}
+                onPress={() => setSelectedAccountIds([])}
+              >
+                清空选择
+              </Button>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
             <Button
               variant="flat"
               onPress={() => {
@@ -1600,6 +1723,7 @@ export default function AwsPage() {
             >
               新增代理
             </Button>
+            </div>
           </div>
           <div className="divide-y divide-default-200 border-y border-default-200">
             {accounts.length ? (
@@ -1608,6 +1732,18 @@ export default function AwsPage() {
                   key={account.id}
                   className="flex flex-wrap items-center justify-between gap-3 py-4"
                 >
+                  <input
+                    type="checkbox"
+                    aria-label={`选择账号 ${account.name}`}
+                    checked={selectedAccountIds.includes(account.id)}
+                    onChange={() =>
+                      setSelectedAccountIds((current) =>
+                        current.includes(account.id)
+                          ? current.filter((id) => id !== account.id)
+                          : [...current, account.id],
+                      )
+                    }
+                  />
                   <div>
                     <div className="flex items-center gap-2">
                       <h2 className="font-semibold">{account.name}</h2>
