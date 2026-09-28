@@ -69,6 +69,7 @@ const emptyAccount: aws.AwsAccountPayload = {
   groupName: "",
   proxy: "",
   remark: "",
+  expiresAt: null,
 };
 const emptyTemplate: aws.AwsTemplatePayload = {
   name: "",
@@ -137,6 +138,11 @@ function dateLabel(value?: string | number | null) {
     typeof value === "number" && value < 10_000_000_000 ? value * 1000 : value,
   );
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+}
+function accountExpiryLabel(value?: number | null) {
+  if (!value) return "永不过期";
+  const days = Math.ceil((value - Date.now()) / 86_400_000);
+  return days <= 0 ? "已过期" : `剩余 ${days} 天`;
 }
 function localDateTime(value?: number | null) {
   if (!value) return "";
@@ -1000,6 +1006,7 @@ export default function AwsPage() {
             mfaSerial: account.mfaSerialNumber,
             roleArn: account.roleArn,
             roleSessionName: account.roleSessionName,
+            expiresAt: account.expiresAt ?? null,
           }
         : { ...emptyAccount },
     );
@@ -1616,6 +1623,17 @@ export default function AwsPage() {
                           ?.name ||
                           account.groupName ||
                           "未分组"}
+                      </Chip>
+                      <Chip
+                        size="sm"
+                        color={
+                          account.expiresAt && account.expiresAt <= Date.now()
+                            ? "danger"
+                            : "default"
+                        }
+                        variant="flat"
+                      >
+                        {accountExpiryLabel(account.expiresAt)}
                       </Chip>
                     </div>
                     <p className="mt-2 text-xs text-default-500">
@@ -2493,6 +2511,18 @@ export default function AwsPage() {
                     setAccountForm({ ...accountForm, regions })
                   }
                   placeholder="us-east-1,ap-southeast-1"
+                />
+                <Input
+                  label="账号有效期（留空永不过期）"
+                  type="datetime-local"
+                  value={localDateTime(accountForm.expiresAt)}
+                  onValueChange={(value) =>
+                    setAccountForm({
+                      ...accountForm,
+                      expiresAt: value ? new Date(value).getTime() : null,
+                    })
+                  }
+                  description="到期后账号会自动按禁用处理，不会删除 AWS 资源。"
                 />
                 <details className="rounded-medium border border-default-200 p-3">
                   <summary className="cursor-pointer text-sm">

@@ -155,7 +155,9 @@ public class AwsWorkflowService {
         if (!Set.of("ordered", "random").contains(selection)) return R.err("账号选择顺序无效");
         if (enabled && (conditions.isEmpty() || selected.isEmpty() || dto.getTemplateId() == null
                 || templates.selectById(dto.getTemplateId()) == null || dto.getBackupGroupId() == null
-                || accounts.selectCount(new QueryWrapper<AwsAccount>().eq("group_id", dto.getBackupGroupId()).eq("status", 0)) == 0))
+                || accounts.selectCount(new QueryWrapper<AwsAccount>().eq("group_id", dto.getBackupGroupId())
+                .and(q -> q.eq("status", 0).or().isNull("status"))
+                .and(q -> q.isNull("expires_at").or().gt("expires_at", System.currentTimeMillis()))) == 0))
             return R.err("启用前必须选择节点、条件、可用创建模板和含备用账号的分组");
         if (conditions.contains("traffic_limit") && (dto.getTrafficLimitBytes() == null || dto.getTrafficLimitBytes() <= 0))
             return R.err("请设置大于0的流量上限");
@@ -238,7 +240,9 @@ public class AwsWorkflowService {
     private void validateManualConfig(AwsFailoverConfig config) {
         if (config == null || config.getBackupGroupId() == null || config.getTemplateId() == null
                 || templates.selectById(config.getTemplateId()) == null
-                || accounts.selectCount(new QueryWrapper<AwsAccount>().eq("group_id", config.getBackupGroupId()).eq("status", 0)) == 0)
+                || accounts.selectCount(new QueryWrapper<AwsAccount>().eq("group_id", config.getBackupGroupId())
+                .and(q -> q.eq("status", 0).or().isNull("status"))
+                .and(q -> q.isNull("expires_at").or().gt("expires_at", System.currentTimeMillis()))) == 0)
             throw new IllegalStateException("请先配置可用的替补模板和备用账号组");
     }
 
@@ -313,7 +317,10 @@ public class AwsWorkflowService {
         boolean submitted = false;
         try {
             List<AwsAccount> candidates = new ArrayList<>(accounts.selectList(new QueryWrapper<AwsAccount>()
-                    .eq("group_id", c.getBackupGroupId()).eq("status", 0).ne("id", old.getAwsAccountId()).orderByAsc("id")));
+                    .eq("group_id", c.getBackupGroupId()).ne("id", old.getAwsAccountId())
+                    .and(q -> q.eq("status", 0).or().isNull("status"))
+                    .and(q -> q.isNull("expires_at").or().gt("expires_at", System.currentTimeMillis()))
+                    .orderByAsc("id")));
             if ("random".equals(c.getAccountSelection())) Collections.shuffle(candidates);
             AwsEc2InstanceTemplate template = templates.selectById(c.getTemplateId());
             if (template == null) throw new IllegalStateException("替补模板已删除");

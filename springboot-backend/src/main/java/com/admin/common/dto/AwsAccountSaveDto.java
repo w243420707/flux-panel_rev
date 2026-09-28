@@ -28,6 +28,7 @@ public class AwsAccountSaveDto {
     private Long groupId;
     private Long proxyId;
     private Boolean enabled;
+    private Long expiresAt;
     private String remark;
     private String note;
     private String group;

@@ -492,6 +492,7 @@ CREATE TABLE IF NOT EXISTS `aws_account` (
   `group_name` varchar(120) DEFAULT NULL,
   `group_id` bigint(20) DEFAULT NULL,
   `proxy_pool_id` bigint(20) DEFAULT NULL,
+  `expires_at` bigint(20) DEFAULT NULL,
   `created_time` bigint(20) DEFAULT NULL,
   `updated_time` bigint(20) DEFAULT NULL,
   `status` int(11) DEFAULT NULL,

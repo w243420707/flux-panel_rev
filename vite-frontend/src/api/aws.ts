@@ -17,6 +17,7 @@ export interface AwsAccountSummary {
   sessionTokenConfigured?: boolean;
   mfaConfigured?: boolean;
   enabled?: boolean;
+  expiresAt?: number | null;
   instanceCount?: number;
   vcpuQuota?: number;
   vcpuUsed?: number;
@@ -62,6 +63,7 @@ export interface AwsAccountPayload {
   clearSessionToken?: boolean;
   clearMfa?: boolean;
   clearProxy?: boolean;
+  expiresAt?: number | null;
 }
 
 export interface AwsAccountGroup {

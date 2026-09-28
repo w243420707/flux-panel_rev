@@ -47,6 +47,8 @@ public class AwsAccount extends BaseEntity {
     private String groupName;
     private Long groupId;
     private Long proxyPoolId;
+    /** Epoch milliseconds; null means the account never expires. */
+    private Long expiresAt;
 
     /** Compatibility aliases for callers that use AWS's standard credential names. */
     @JsonIgnore

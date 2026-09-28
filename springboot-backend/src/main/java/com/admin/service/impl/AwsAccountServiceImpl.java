@@ -60,7 +60,8 @@ public class AwsAccountServiceImpl implements AwsAccountService {
             item.put("sessionTokenConfigured", StringUtils.hasText(account.getSessionTokenEncrypted()));
             item.put("mfaConfigured", StringUtils.hasText(account.getMfaSerialNumber()) && StringUtils.hasText(account.getMfaSecretEncrypted()));
             item.put("mfaSerialNumber", account.getMfaSerialNumber()); item.put("roleArn", account.getRoleArn()); item.put("roleSessionName", account.getRoleSessionName());
-            item.put("enabled", account.getStatus() == null || account.getStatus() == 0);
+            item.put("enabled", isUsable(account));
+            item.put("expiresAt", account.getExpiresAt());
             item.put("remark", account.getRemark()); result.add(item);
         }
         return result;
@@ -97,6 +98,7 @@ public class AwsAccountServiceImpl implements AwsAccountService {
             if (!preserveKey) { account.setAccessKeyEncrypted(crypto.encrypt(accessKey)); account.setAccessKeyId(maskedKey(accessKey)); }
             else if (!StringUtils.hasText(account.getAccessKeyEncrypted())) { account.setAccessKeyEncrypted(crypto.encrypt(account.getAccessKeyId())); account.setAccessKeyId(maskedKey(account.getAccessKeyId())); }
             account.setName(name); account.setRegion(regions.get(0)); account.setRegions(String.join(",", regions));
+            account.setExpiresAt(dto.getExpiresAt());
             account.setRemark(limited(dto.resolvedRemark(), 1000, "备注")); account.setGroupId(group == null ? null : group.getId()); account.setGroupName(group == null ? "" : group.getName());
             if (dto.getEnabled() != null) account.setStatus(dto.getEnabled() ? 0 : 1);
             if (dto.getProxyId() != null) { account.setProxyPoolId(dto.getProxyId()); account.setProxy(""); account.setProxyEncrypted(""); }
@@ -141,6 +143,7 @@ public class AwsAccountServiceImpl implements AwsAccountService {
         if (id == null) return R.err("AWS 账号 ID 无效");
         AwsAccount account = accountMapper.selectById(id);
         if (account == null) return R.err("AWS 账号不存在");
+        if (enabled && isExpired(account)) return R.err("账号有效期已过，请先编辑有效期后再启用");
         int status = enabled ? 0 : 1;
         accountMapper.update(null, new UpdateWrapper<AwsAccount>().eq("id", id).set("status", status)
                 .set("updated_time", System.currentTimeMillis()));
@@ -207,10 +210,18 @@ public class AwsAccountServiceImpl implements AwsAccountService {
         return StringUtils.hasText(account.getProxyEncrypted()) ? decrypt(account.getProxyEncrypted(), "代理凭据") : trim(account.getProxy());
     }
     public void prepareAccount(AwsAccount account) {
-        if (account.getStatus() != null && account.getStatus() != 0) throw new IllegalStateException("AWS 账号已停用");
+        if (!isUsable(account)) throw new IllegalStateException(isExpired(account) ? "AWS 账号已过期" : "AWS 账号已停用");
         account.setAccessKeyResolved(decryptAccessKey(account)); account.setProxyResolved(decryptProxy(account));
         if (StringUtils.hasText(account.getMfaSerialNumber())) account.setMfaTokenCode(generateTotp(decryptMfaSecret(account), Instant.now()));
         account.setRoleExternalId(decryptOptional(account.getRoleExternalIdEncrypted()));
+    }
+
+    private boolean isExpired(AwsAccount account) {
+        return account.getExpiresAt() != null && account.getExpiresAt() <= System.currentTimeMillis();
+    }
+
+    private boolean isUsable(AwsAccount account) {
+        return (account.getStatus() == null || account.getStatus() == 0) && !isExpired(account);
     }
     public static String generateTotp(String secret, Instant instant) {
         try {

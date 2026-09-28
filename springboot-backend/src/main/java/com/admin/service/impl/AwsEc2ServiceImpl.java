@@ -88,7 +88,10 @@ public class AwsEc2ServiceImpl implements AwsEc2Service {
         String instanceId = dto == null ? null : dto.getInstanceId();
         Long accountId = dto == null ? null : dto.getAccountId();
         List<AwsAccount> accounts = accountId == null
-                ? accountMapper.selectList(new QueryWrapper<AwsAccount>().and(q -> q.eq("status", 0).or().isNull("status")).orderByAsc("id"))
+                ? accountMapper.selectList(new QueryWrapper<AwsAccount>()
+                .and(q -> q.eq("status", 0).or().isNull("status"))
+                .and(q -> q.isNull("expires_at").or().gt("expires_at", System.currentTimeMillis()))
+                .orderByAsc("id"))
                 : List.of(accountService.requireAccount(accountId));
         List<Map<String, Object>> result = new ArrayList<>();
         for (AwsAccount account : accounts) {
