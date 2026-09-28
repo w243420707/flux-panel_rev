@@ -14,6 +14,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import javax.annotation.Resource;
 import java.net.URI;
@@ -49,7 +50,9 @@ public class AwsWorkflowService {
             Map<String, Object> view = new LinkedHashMap<String, Object>();
             view.put("id", group.getId()); view.put("name", group.getName()); view.put("expiresAt", group.getExpiresAt());
             view.put("permissions", group.getPermissions()); view.put("nodeIds", ids(group.getNodeIdsJson()));
-            view.put("nodeCount", ids(group.getNodeIdsJson()).size()); view.put("accessToken", group.getAccessToken());
+            view.put("instanceRefs", instanceRefs(group.getInstanceRefsJson()));
+            view.put("nodeCount", ids(group.getNodeIdsJson()).size() + instanceRefs(group.getInstanceRefsJson()).size());
+            view.put("accessToken", group.getAccessToken());
             return view;
         }).toList();
     }
@@ -60,10 +63,14 @@ public class AwsWorkflowService {
             return R.err("请输入分享组名称（最多255字）");
         if (!Set.of("read", "operate").contains(dto.getPermissions())) return R.err("分享权限只能为只读或启停操作");
         List<Long> selected = validateNodes(dto.getNodeIds());
+        List<AwsShareInstanceRefDto> direct = validateInstanceRefs(dto.getInstanceRefs());
+        if (selected.isEmpty() && direct.isEmpty()) return R.err("至少选择一个节点或 EC2 实例");
         AwsShareGroup group = dto.getId() == null || dto.getId() == 0 ? new AwsShareGroup() : shares.selectById(dto.getId());
         if (group == null) return R.err("分享组不存在");
         group.setName(dto.getName().trim()); group.setPermissions(dto.getPermissions());
-        group.setNodeIdsJson(JSON.toJSONString(selected)); group.setExpiresAt(dto.getExpiresAt());
+        group.setNodeIdsJson(JSON.toJSONString(selected));
+        group.setInstanceRefsJson(JSON.toJSONString(direct));
+        group.setExpiresAt(dto.getExpiresAt());
         group.setUpdatedTime(System.currentTimeMillis());
         if (group.getAccessToken() == null) group.setAccessToken(UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", ""));
         if (group.getId() == null) {
@@ -90,25 +97,51 @@ public class AwsWorkflowService {
             view.put("gfwStatus", node.getWallMonitorExternalStatus()); view.put("lastProbeAt", node.getWallMonitorExternalLastCheckAt());
             instances.add(view);
         }
+        for (AwsShareInstanceRefDto ref : instanceRefs(group.getInstanceRefsJson())) {
+            Map<String, Object> view = new LinkedHashMap<>();
+            view.put("accountId", ref.getAccountId()); view.put("region", ref.getRegion());
+            view.put("instanceId", ref.getInstanceId()); view.put("name", ref.getName());
+            view.put("state", "UNKNOWN"); view.put("publicIpv4", null); view.put("ipv6", null);
+            try {
+                AwsEc2ListDto query = new AwsEc2ListDto(); query.setAccountId(ref.getAccountId());
+                query.setRegion(ref.getRegion()); query.setInstanceId(ref.getInstanceId());
+                Map<String, Object> current = ec2.listInstances(query).stream().findFirst().orElse(null);
+                if (current != null) view.putAll(current);
+            } catch (RuntimeException ignored) {
+                // A share must remain readable even when a target account is temporarily unavailable.
+            }
+            instances.add(view);
+        }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("name", group.getName()); result.put("permissions", group.getPermissions());
         result.put("expiresAt", group.getExpiresAt()); result.put("instances", instances);
         return result;
     }
 
-    public Map<String, Object> sharedAction(String token, Long nodeId, String action, String requestId) {
+    public Map<String, Object> sharedAction(String token, Long nodeId, Long accountId, String region,
+                                            String instanceId, String action, String requestId) {
         AwsShareGroup group = requireShare(token);
-        if (!"operate".equals(group.getPermissions()) || !ids(group.getNodeIdsJson()).contains(nodeId)
+        boolean nodeTarget = nodeId != null && ids(group.getNodeIdsJson()).contains(nodeId);
+        boolean directTarget = accountId != null && StringUtils.hasText(region) && StringUtils.hasText(instanceId)
+                && isSharedDirect(group, accountId, region.trim(), instanceId.trim());
+        if (!"operate".equals(group.getPermissions()) || (!nodeTarget && !directTarget)
                 || action == null || !Set.of("start", "stop", "reboot").contains(action))
             throw new IllegalArgumentException("分享权限不允许此操作");
-        Node node = nodes.selectById(nodeId);
-        if (node == null || !"AWS".equals(node.getCloudProvider())) throw new IllegalArgumentException("节点不可用");
         AwsEc2ActionDto dto = new AwsEc2ActionDto();
-        dto.setAccountId(node.getAwsAccountId()); dto.setInstanceId(node.getAwsInstanceId());
-        dto.setRegion(node.getAwsRegion()); dto.setAction(action);
+        if (nodeTarget) {
+            Node node = nodes.selectById(nodeId);
+            if (node == null || !"AWS".equals(node.getCloudProvider())) throw new IllegalArgumentException("节点不可用");
+            dto.setAccountId(node.getAwsAccountId()); dto.setInstanceId(node.getAwsInstanceId()); dto.setRegion(node.getAwsRegion());
+        } else {
+            dto.setAccountId(accountId); dto.setInstanceId(instanceId.trim()); dto.setRegion(region.trim());
+        }
+        dto.setAction(action);
         Map<String, Object> queued = operations.submit(requestId, dto.getAccountId(), dto.getRegion(), dto.getInstanceId(), action, () -> {
             AwsShareGroup current = requireShare(token);
-            if (!"operate".equals(current.getPermissions()) || !ids(current.getNodeIdsJson()).contains(nodeId))
+            boolean stillShared = nodeTarget
+                    ? ids(current.getNodeIdsJson()).contains(nodeId)
+                    : isSharedDirect(current, dto.getAccountId(), dto.getRegion(), dto.getInstanceId());
+            if (!"operate".equals(current.getPermissions()) || !stillShared)
                 throw new IllegalArgumentException("分享权限已撤销");
             return ec2.action(dto);
         });
@@ -390,6 +423,33 @@ public class AwsWorkflowService {
             if (node == null || !"AWS".equals(node.getCloudProvider())) throw new IllegalArgumentException("只能选择已绑定 AWS 的节点");
         }
         return result;
+    }
+
+    private List<AwsShareInstanceRefDto> validateInstanceRefs(List<AwsShareInstanceRefDto> selected) {
+        if (selected == null) return List.of();
+        if (selected.size() > 200) throw new IllegalArgumentException("最多分享200个 EC2 实例");
+        Map<String, AwsShareInstanceRefDto> unique = new LinkedHashMap<>();
+        for (AwsShareInstanceRefDto ref : selected) {
+            if (ref == null || ref.getAccountId() == null || !StringUtils.hasText(ref.getRegion())
+                    || !StringUtils.hasText(ref.getInstanceId()) || !accountService.accountExists(ref.getAccountId()))
+                throw new IllegalArgumentException("分享的 EC2 实例参数无效");
+            accountService.prepareAccount(accountService.requireAccount(ref.getAccountId()));
+            String id = ref.getInstanceId().trim();
+            if (!id.matches("i-[a-f0-9]{8,17}")) throw new IllegalArgumentException("分享的 EC2 实例 ID 无效");
+            ref.setRegion(ref.getRegion().trim()); ref.setInstanceId(id);
+            unique.put(ref.getAccountId() + ":" + ref.getRegion() + ":" + id, ref);
+        }
+        return new ArrayList<>(unique.values());
+    }
+
+    private List<AwsShareInstanceRefDto> instanceRefs(String json) {
+        return json == null || json.isBlank() ? List.of() : JSON.parseArray(json, AwsShareInstanceRefDto.class);
+    }
+
+    private boolean isSharedDirect(AwsShareGroup group, Long accountId, String region, String instanceId) {
+        return instanceRefs(group.getInstanceRefsJson()).stream().anyMatch(ref ->
+                Objects.equals(ref.getAccountId(), accountId) && Objects.equals(ref.getRegion(), region)
+                        && Objects.equals(ref.getInstanceId(), instanceId));
     }
 
     static long nextRun(String cron, long now) {

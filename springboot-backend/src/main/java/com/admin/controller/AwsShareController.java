@@ -14,7 +14,15 @@ public class AwsShareController {
     public R instances(@PathVariable String token) { return R.ok(service.sharedInstances(token)); }
     @PostMapping("/action")
     public R action(@PathVariable String token, @RequestBody ShareAction dto) {
-        return R.ok(service.sharedAction(token, dto.getNodeId(), dto.getAction(), dto.getRequestId()));
+        return R.ok(service.sharedAction(token, dto.getNodeId(), dto.getAccountId(), dto.getRegion(),
+                dto.getInstanceId(), dto.getAction(), dto.getRequestId()));
     }
-    @Data public static class ShareAction { private Long nodeId; private String action; private String requestId; }
+    @Data public static class ShareAction {
+        private Long nodeId;
+        private Long accountId;
+        private String region;
+        private String instanceId;
+        private String action;
+        private String requestId;
+    }
 }

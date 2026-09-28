@@ -12,5 +12,6 @@ public class AwsShareGroup extends BaseEntity {
     private Long expiresAt;
     private String permissions;
     private String nodeIdsJson;
+    private String instanceRefsJson;
     private String accessToken;
 }

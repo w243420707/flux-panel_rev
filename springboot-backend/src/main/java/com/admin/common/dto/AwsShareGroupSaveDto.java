@@ -9,4 +9,5 @@ public class AwsShareGroupSaveDto {
     private Long expiresAt;
     private String permissions;
     private java.util.List<Long> nodeIds;
+    private java.util.List<AwsShareInstanceRefDto> instanceRefs;
 }

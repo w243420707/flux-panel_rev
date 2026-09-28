@@ -190,9 +190,17 @@ export interface AwsShareGroup {
   expiresAt?: number | null;
   permissions: "read" | "operate";
   nodeIds?: number[];
+  instanceRefs?: AwsShareInstanceRef[];
   nodeCount?: number;
   accessToken?: string;
   url?: string;
+}
+
+export interface AwsShareInstanceRef {
+  accountId: number;
+  region: string;
+  instanceId: string;
+  name?: string;
 }
 
 export interface AwsFailoverConfig {

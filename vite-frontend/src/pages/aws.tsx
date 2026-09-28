@@ -157,6 +157,9 @@ function uuid() {
 function instanceKey(instance: aws.AwsInstance) {
   return [instance.accountId, instance.region, instance.instanceId].join(":");
 }
+function shareInstanceKey(instance: aws.AwsShareInstanceRef) {
+  return [instance.accountId, instance.region, instance.instanceId].join(":");
+}
 function stateColor(
   state?: string,
 ): "success" | "warning" | "danger" | "default" {
@@ -290,6 +293,51 @@ function NodeChoices({
         <p className="text-sm text-default-500">
           暂无已绑定 AWS 的节点，请先在节点管理中绑定实例。
         </p>
+      )}
+    </div>
+  );
+}
+
+function InstanceChoices({
+  instances,
+  selected,
+  accountName,
+  onChange,
+}: {
+  instances: aws.AwsInstance[];
+  selected: aws.AwsShareInstanceRef[];
+  accountName: (id?: number) => string;
+  onChange: (value: aws.AwsShareInstanceRef[]) => void;
+}) {
+  return (
+    <div className="max-h-56 space-y-2 overflow-y-auto rounded-medium border border-default-200 p-3">
+      {instances.length ? (
+        instances.map((instance) => {
+          const ref: aws.AwsShareInstanceRef = {
+            accountId: instance.accountId || 0,
+            region: instance.region || "",
+            instanceId: instance.instanceId,
+            name: instance.name,
+          };
+          const key = shareInstanceKey(ref);
+          const checked = selected.some((item) => shareInstanceKey(item) === key);
+          return (
+            <Check
+              key={key}
+              label={`${instance.name || "未命名"} · ${accountName(instance.accountId)} · ${instance.region || "未知区域"} · ${instance.instanceId}`}
+              checked={checked}
+              onChange={(value) =>
+                onChange(
+                  value
+                    ? [...selected, ref]
+                    : selected.filter((item) => shareInstanceKey(item) !== key),
+                )
+              }
+            />
+          );
+        })
+      ) : (
+        <p className="text-sm text-default-500">暂无已同步的 EC2 实例，请先同步实例。</p>
       )}
     </div>
   );
@@ -1330,8 +1378,11 @@ export default function AwsPage() {
     });
   const saveShare = () =>
     perform("share", async () => {
-      if (!shareForm?.name?.trim() || !shareForm.nodeIds?.length)
-        throw new Error("请填写分享组名称并选择节点");
+      if (
+        !shareForm?.name?.trim() ||
+        (!(shareForm.nodeIds?.length) && !(shareForm.instanceRefs?.length))
+      )
+        throw new Error("请填写分享组名称并选择节点或 EC2 实例");
       if (shareForm.expiresAt && shareForm.expiresAt <= Date.now())
         throw new Error("到期时间必须晚于当前时间");
       unpack(await aws.saveAwsShareGroup(shareForm), "保存分享组失败");
@@ -2202,6 +2253,7 @@ export default function AwsPage() {
                     name: "",
                     permissions: "read",
                     nodeIds: [],
+                    instanceRefs: [],
                     expiresAt: null,
                   })
                 }
@@ -2221,7 +2273,7 @@ export default function AwsPage() {
                   <div>
                     <p className="font-medium">{share.name}</p>
                     <p className="text-xs text-default-500">
-                      {share.nodeIds?.length ?? share.nodeCount ?? 0} 个节点 ·{" "}
+                      {(share.nodeIds?.length || 0) + (share.instanceRefs?.length || 0)} 个目标 ·{" "}
                       {share.permissions === "operate"
                         ? "允许启停重启"
                         : "只读"}{" "}
@@ -2243,7 +2295,11 @@ export default function AwsPage() {
                       size="sm"
                       variant="flat"
                       onPress={() =>
-                        setShareForm({ ...share, nodeIds: share.nodeIds || [] })
+                        setShareForm({
+                          ...share,
+                          nodeIds: share.nodeIds || [],
+                          instanceRefs: share.instanceRefs || [],
+                        })
                       }
                     >
                       编辑
@@ -3457,6 +3513,17 @@ export default function AwsPage() {
                     setShareForm({ ...shareForm, nodeIds })
                   }
                 />
+                <div>
+                  <p className="mb-2 text-sm">直接分享 EC2 实例（可不绑定面板节点）</p>
+                  <InstanceChoices
+                    instances={instances}
+                    accountName={accountName}
+                    selected={shareForm.instanceRefs || []}
+                    onChange={(instanceRefs) =>
+                      setShareForm({ ...shareForm, instanceRefs })
+                    }
+                  />
+                </div>
               </div>
             )}
           </ModalBody>
@@ -3659,7 +3726,8 @@ function InstanceRows({
 }
 
 interface SharedInstance {
-  nodeId: number;
+  nodeId?: number;
+  accountId?: number;
   name: string;
   instanceId: string;
   region: string;
@@ -3735,7 +3803,10 @@ export function AwsSharedPage() {
       ) : data ? (
         <div className="divide-y divide-default-200 border-y border-default-200">
           {data.instances.map((instance) => (
-            <section className="space-y-2 py-4" key={instance.nodeId}>
+            <section
+              className="space-y-2 py-4"
+              key={instance.nodeId ?? `${instance.accountId}:${instance.region}:${instance.instanceId}`}
+            >
               <div className="flex items-center gap-2">
                 <h2 className="font-semibold">{instance.name}</h2>
                 <Chip size="sm" variant="flat">
@@ -3743,6 +3814,7 @@ export function AwsSharedPage() {
                 </Chip>
               </div>
               <p className="text-xs text-default-500">
+                {instance.accountId ? `账号 ${instance.accountId} · ` : ""}
                 {instance.region} · {instance.instanceId}
               </p>
               <p className="break-all font-mono text-sm">
@@ -3778,6 +3850,9 @@ export function AwsSharedPage() {
                           nodeId: instance.nodeId,
                           action,
                           requestId: uuid(),
+                          accountId: instance.accountId,
+                          region: instance.region,
+                          instanceId: instance.instanceId,
                         })
                           .then(() =>
                             toast.success("请求已接受，请稍后刷新确认结果"),

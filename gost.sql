@@ -592,6 +592,7 @@ CREATE TABLE IF NOT EXISTS `aws_share_group` (
   `expires_at` bigint(20) DEFAULT NULL,
   `permissions` varchar(1000) NOT NULL DEFAULT 'read',
   `node_ids_json` longtext DEFAULT NULL,
+  `instance_refs_json` longtext DEFAULT NULL,
   `access_token` varchar(255) DEFAULT NULL,
   `created_time` bigint(20) DEFAULT NULL,
   `updated_time` bigint(20) DEFAULT NULL,
