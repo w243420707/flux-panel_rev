@@ -10,6 +10,7 @@ public interface AwsAccountService {
     List<Map<String, Object>> listAccounts();
     R saveAccount(AwsAccountSaveDto dto);
     R deleteAccount(Long id);
+    R setAccountEnabled(Long id, boolean enabled);
     Map<String, String> getPrivateSecrets(Long id);
     Map<String, Object> testAccount(Long id, String region);
     boolean accountExists(Long id);

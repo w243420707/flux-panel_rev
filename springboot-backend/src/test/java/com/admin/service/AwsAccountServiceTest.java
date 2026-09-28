@@ -21,6 +21,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 class AwsAccountServiceTest {
@@ -68,6 +69,19 @@ class AwsAccountServiceTest {
         assertNotEquals("JBSWY3DPEHPK3PXP", saved.getMfaSecretEncrypted());
         assertEquals("secret-value-123456", service.decryptSecret(saved));
         assertEquals("JBSWY3DPEHPK3PXP", service.decryptMfaSecret(saved));
+    }
+
+    @Test
+    void canDisableAndEnableAccountWithoutDeletingCredentialsOrResources() {
+        AwsAccount existing = new AwsAccount();
+        existing.setId(9L);
+        existing.setStatus(0);
+        when(mapper.selectById(9L)).thenReturn(existing);
+
+        assertEquals(0, service.setAccountEnabled(9L, false).getCode());
+        assertEquals(0, service.setAccountEnabled(9L, true).getCode());
+        verify(mapper, times(2)).update(isNull(), any(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class));
+        verify(mapper, never()).deleteById(9L);
     }
 
     @Test

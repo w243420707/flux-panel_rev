@@ -291,6 +291,9 @@ export const saveAwsAccount = (data: AwsAccountPayload) =>
 export const deleteAwsAccount = (id: number) =>
   Network.post<void>("/aws/account/delete", { id });
 
+export const setAwsAccountEnabled = (id: number, enabled: boolean) =>
+  Network.post<void>("/aws/account/status", { id, enabled });
+
 export const getAwsAccountSecrets = (id: number) =>
   Network.post<AwsAccountSecrets>("/aws/account/private-secret", { id });
 

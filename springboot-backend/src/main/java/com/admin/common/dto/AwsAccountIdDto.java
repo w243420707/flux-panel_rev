@@ -7,4 +7,5 @@ public class AwsAccountIdDto {
     private Long id;
     private Long accountId;
     private String region;
+    private Boolean enabled;
 }

@@ -47,6 +47,13 @@ public class AwsAccountController {
     }
 
     @RequireRole
+    @PostMapping("/status")
+    public R status(@RequestBody AwsAccountIdDto dto) {
+        Long id = dto == null ? null : dto.getId() != null ? dto.getId() : dto.getAccountId();
+        return service.setAccountEnabled(id, dto != null && Boolean.TRUE.equals(dto.getEnabled()));
+    }
+
+    @RequireRole
     @PostMapping({"/private-secret", "/private-secrets"})
     public R privateSecret(@RequestBody AwsAccountIdDto dto, HttpServletResponse response) {
         response.setHeader("Cache-Control", "no-store");

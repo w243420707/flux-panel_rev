@@ -1604,6 +1604,13 @@ export default function AwsPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <h2 className="font-semibold">{account.name}</h2>
+                      <Chip
+                        size="sm"
+                        color={account.enabled === false ? "danger" : "success"}
+                        variant="flat"
+                      >
+                        {account.enabled === false ? "已禁用" : "正常"}
+                      </Chip>
                       <Chip size="sm" variant="flat">
                         {groups.find((group) => group.id === account.groupId)
                           ?.name ||
@@ -1630,7 +1637,7 @@ export default function AwsPage() {
                       size="sm"
                       variant="flat"
                       isLoading={busy === "test:" + account.id}
-                      isDisabled={!!busy}
+                      isDisabled={!!busy || account.enabled === false}
                       onPress={() =>
                         void perform("test:" + account.id, async () => {
                           const data = unpack(
@@ -1651,7 +1658,7 @@ export default function AwsPage() {
                     <Button
                       size="sm"
                       variant="flat"
-                      isDisabled={!!busy}
+                      isDisabled={!!busy || account.enabled === false}
                       onPress={() =>
                         void perform("quota", async () =>
                           setQuota({
@@ -1665,6 +1672,37 @@ export default function AwsPage() {
                       }
                     >
                       vCPU 配额
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="flat"
+                      color={account.enabled === false ? "success" : "warning"}
+                      isDisabled={!!busy}
+                      onPress={() =>
+                        void perform("status:" + account.id, async () => {
+                          const nextEnabled = account.enabled === false;
+                          if (
+                            !window.confirm(
+                              (nextEnabled ? "启用" : "禁用") +
+                                " AWS 账号「" +
+                                account.name +
+                                "」？" +
+                                (nextEnabled
+                                  ? ""
+                                  : "禁用后不会删除 AWS 资源，但不会再用于同步、创建、换 IP或替补。"),
+                            )
+                          )
+                            return;
+                          unpack(
+                            await aws.setAwsAccountEnabled(account.id, nextEnabled),
+                            "更新账号状态失败",
+                          );
+                          await refresh();
+                          toast.success(nextEnabled ? "账号已启用" : "账号已禁用");
+                        })
+                      }
+                    >
+                      {account.enabled === false ? "启用" : "禁用"}
                     </Button>
                     <Button
                       size="sm"

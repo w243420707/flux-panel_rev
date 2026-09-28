@@ -137,6 +137,17 @@ public class AwsAccountServiceImpl implements AwsAccountService {
         accountMapper.deleteById(id); clientFactory.invalidate(id); return R.ok();
     }
 
+    @Override @Transactional public R setAccountEnabled(Long id, boolean enabled) {
+        if (id == null) return R.err("AWS 账号 ID 无效");
+        AwsAccount account = accountMapper.selectById(id);
+        if (account == null) return R.err("AWS 账号不存在");
+        int status = enabled ? 0 : 1;
+        accountMapper.update(null, new UpdateWrapper<AwsAccount>().eq("id", id).set("status", status)
+                .set("updated_time", System.currentTimeMillis()));
+        clientFactory.invalidate(id);
+        return R.ok(Map.of("id", id, "enabled", enabled));
+    }
+
     @Override public Map<String, String> getPrivateSecrets(Long id) {
         AwsAccount account = requireAccount(id); Map<String, String> result = new LinkedHashMap<>();
         result.put("accessKeyId", decryptAccessKey(account)); result.put("accessSecret", decryptSecret(account)); result.put("secretAccessKey", result.get("accessSecret"));
