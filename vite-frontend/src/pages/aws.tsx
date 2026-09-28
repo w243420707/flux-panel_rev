@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { useParams } from "react-router-dom";
+import { Accordion, AccordionItem } from "@heroui/accordion";
 import { Button } from "@heroui/button";
 import { Chip } from "@heroui/chip";
 import { Input, Textarea } from "@heroui/input";
@@ -17,11 +18,22 @@ import {
   ModalFooter,
   ModalHeader,
 } from "@heroui/modal";
+import { Select, SelectItem, SelectSection } from "@heroui/select";
 import { Spinner } from "@heroui/spinner";
 import toast from "react-hot-toast";
 
 import * as aws from "@/api/aws";
 import { getNodeList } from "@/api";
+import {
+  AWS_REGION_CODES,
+  AWS_REGION_GROUPS,
+  AWS_REGION_SET,
+  isAwsRegionCode,
+  isOptInRegion,
+  joinRegionList,
+  regionName,
+  splitRegionList,
+} from "@/config/aws-regions";
 import { isAdmin } from "@/utils/auth";
 
 type WorkspaceTab = "instances" | "accounts" | "templates" | "sharing" | "logs";
@@ -260,6 +272,142 @@ function SelectField({
         {children}
       </select>
     </label>
+  );
+}
+/**
+ * 启用区域多选。
+ *
+ * 值仍然是后端契约里的逗号分隔字符串，第一个即默认区域。
+ * 顺序不做重排，直接沿用 React Aria 的 Set 插入顺序，
+ * 所以编辑已有账号时打开即保持原顺序，不动它就是零改动。
+ */
+function RegionMultiSelect({
+  value,
+  onChange,
+  isInvalid = false,
+}: {
+  value?: string;
+  onChange: (regions: string) => void;
+  isInvalid?: boolean;
+}) {
+  const selected = useMemo(() => splitRegionList(value), [value]);
+  // 不在标准列表里的区域（私有区域、历史数据）单独成组并保持勾选，
+  // 否则多选控件会在保存时把它们静默丢掉。
+  const unknown = useMemo(
+    () => selected.filter((code) => !AWS_REGION_SET.has(code)),
+    [selected],
+  );
+  // 必须 memo：每帧新建 Set 会让内部 selection state 反复重建。
+  const selectedKeys = useMemo(() => new Set(selected), [selected]);
+
+  const handleSelectionChange = (keys: any) => {
+    const next =
+      keys === "all"
+        ? [...AWS_REGION_CODES, ...unknown]
+        : Array.from(keys as Set<string>, (key) => String(key));
+
+    onChange(joinRegionList(next));
+  };
+
+  // 未知区域单独成组放到最前面。
+  // 整个 children 必须写在同一个数组表达式里：HeroUI 的 children 类型是
+  // CollectionChildren，多个并列的 JSX 子表达式过不了类型检查。
+  const options = [
+    unknown.length > 0 ? (
+      <SelectSection key="unknown" title="当前账号已配置（不在标准列表）">
+        {unknown.map((code) => (
+          <SelectItem key={code} textValue={`${code} ${regionName(code)}`}>
+            <div className="flex items-center justify-between gap-3">
+              <span>{code}</span>
+              <span className="text-xs text-default-500">
+                {isAwsRegionCode(code) ? "保留原有配置" : "格式异常，请确认"}
+              </span>
+            </div>
+          </SelectItem>
+        ))}
+      </SelectSection>
+    ) : null,
+    ...AWS_REGION_GROUPS.map((group) => (
+      <SelectSection key={group.id} title={group.label}>
+        {group.regions.map((region) => (
+          <SelectItem
+            key={region.code}
+            textValue={`${region.code} ${region.name}`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span>{region.name}</span>
+              <span className="text-xs text-default-500">
+                {region.code}
+                {region.optIn ? " · 需先开通" : ""}
+              </span>
+            </div>
+          </SelectItem>
+        ))}
+      </SelectSection>
+    )),
+  ];
+
+  return (
+    <div className="space-y-2">
+      <Select
+        isRequired
+        classNames={{ trigger: "min-h-12", value: "text-sm" }}
+        description="第一个选中的区域为默认区域，创建实例与更换 IP 优先使用它。"
+        errorMessage="请至少选择一个区域"
+        isInvalid={isInvalid}
+        label="启用区域"
+        placeholder="请选择至少一个区域"
+        renderValue={(items) => {
+          if (!items.length) return null;
+          const codes = items.map((item) => String(item.key ?? ""));
+
+          if (codes.length === 1) return <span>{codes[0]}</span>;
+
+          return (
+            <span className="truncate">
+              {codes[0]}
+              <span className="text-default-500">
+                {" "}
+                等 {codes.length} 个区域
+              </span>
+            </span>
+          );
+        }}
+        selectedKeys={selectedKeys}
+        selectionMode="multiple"
+        variant="bordered"
+        onSelectionChange={handleSelectionChange}
+      >
+        {options}
+      </Select>
+
+      {selected.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-default-400">
+            已选 {selected.length} 个：
+          </span>
+          {selected.map((code, index) => (
+            <Chip
+              key={code}
+              color={
+                index === 0
+                  ? "primary"
+                  : AWS_REGION_SET.has(code)
+                    ? "default"
+                    : "warning"
+              }
+              size="sm"
+              title={regionName(code)}
+              variant="flat"
+            >
+              {code}
+              {index === 0 ? " · 默认" : ""}
+              {isOptInRegion(code) ? " · 需开通" : ""}
+            </Chip>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 function NodeChoices({
@@ -528,6 +676,28 @@ export default function AwsPage() {
   const [accountForm, setAccountForm] = useState<aws.AwsAccountPayload | null>(
     null,
   );
+  const [regionError, setRegionError] = useState(false);
+  // 高级设置里已经填了哪些项，用于折叠标题上的摘要提示。
+  const advancedConfigured = useMemo(() => {
+    if (!accountForm?.id) return [];
+
+    const list: string[] = [];
+
+    if (accountForm.groupId) list.push("账号组");
+    if (accountForm.proxyId || accountForm.proxy) list.push("代理");
+    if (accountForm.mfaSerial || accountForm.mfaSecret) list.push("MFA");
+    if (accountForm.sessionToken) list.push("Session Token");
+    if (
+      accountForm.roleArn ||
+      accountForm.roleExternalId ||
+      accountForm.roleSessionName
+    )
+      list.push("角色");
+    if (accountForm.expiresAt) list.push("有效期");
+    if (accountForm.remark) list.push("备注");
+
+    return list;
+  }, [accountForm]);
   const [resourceForm, setResourceForm] = useState<ResourceEditor | null>(null);
   const [importForm, setImportForm] = useState<{
     text: string;
@@ -1167,6 +1337,7 @@ export default function AwsPage() {
     URL.revokeObjectURL(url);
   };
   const openAccount = (account?: aws.AwsAccountSummary) => {
+    setRegionError(false);
     setAccountForm(
       account
         ? {
@@ -1176,7 +1347,10 @@ export default function AwsPage() {
             // The list value is masked; never put the decrypted key in the form.
             accessKeyId: account.accessKeyId || "",
             region: account.region,
-            regions: account.regions || account.region,
+            // 保序去重，并保留不在标准列表里的区域，避免保存时被静默丢弃。
+            regions: joinRegionList(
+              splitRegionList(account.regions || account.region),
+            ),
             groupId: account.groupId,
             groupName: account.groupName,
             proxyId: account.proxyId,
@@ -1198,12 +1372,20 @@ export default function AwsPage() {
         (!accountForm.id && !accountForm.secretAccessKey.trim())
       )
         throw new Error("请填写账号名称、Access Key 和 Secret Key");
-      const region = (accountForm.regions || "").split(",")[0].trim();
-      if (!region) throw new Error("请填写至少一个 AWS 区域");
+      const regions = joinRegionList(splitRegionList(accountForm.regions));
+      const region = splitRegionList(accountForm.regions)[0] || "";
+
+      if (!region) {
+        setRegionError(true);
+        throw new Error("请至少选择一个区域");
+      }
+
+      setRegionError(false);
       unpack(
         await aws.saveAwsAccount({
           ...accountForm,
           region,
+          regions,
           name: accountForm.name.trim(),
         }),
         "保存账号失败",
@@ -2752,201 +2934,265 @@ export default function AwsPage() {
           <ModalBody>
             {accountForm && (
               <div className="space-y-4">
-                <Input
-                  label="账号名称"
-                  value={accountForm.name}
-                  onValueChange={(name) =>
-                    setAccountForm({ ...accountForm, name })
-                  }
-                />
-                <Input
-                  label="Access Key ID"
-                  value={accountForm.accessKeyId}
-                  onValueChange={(accessKeyId) =>
-                    setAccountForm({ ...accountForm, accessKeyId })
-                  }
-                />
-                <Input
-                  label="Secret Access Key"
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder={
-                    accountForm.id ? "留空保持原值" : "请输入 Secret Key"
-                  }
-                  value={accountForm.secretAccessKey}
-                  onValueChange={(secretAccessKey) =>
-                    setAccountForm({ ...accountForm, secretAccessKey })
-                  }
-                />
-                <Input
-                  label="Session Token（可选）"
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder={
-                    accountForm.id ? "留空保持原值" : "临时凭据 Token"
-                  }
-                  value={accountForm.sessionToken || ""}
-                  onValueChange={(sessionToken) =>
-                    setAccountForm({ ...accountForm, sessionToken })
-                  }
-                />
+                {/* 首屏只留这四项，其余全部收进下面的高级设置 */}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Input
-                    label="MFA 设备 ARN（可选）"
-                    value={accountForm.mfaSerial || ""}
-                    onValueChange={(mfaSerial) =>
-                      setAccountForm({ ...accountForm, mfaSerial })
+                    className="sm:col-span-2"
+                    label="账号名称"
+                    value={accountForm.name}
+                    onValueChange={(name) =>
+                      setAccountForm({ ...accountForm, name })
                     }
                   />
                   <Input
-                    label="MFA TOTP 密钥（可选）"
-                    type="password"
-                    placeholder={
-                      accountForm.id ? "留空保持原值" : "Base32 密钥"
-                    }
-                    value={accountForm.mfaSecret || ""}
-                    onValueChange={(mfaSecret) =>
-                      setAccountForm({ ...accountForm, mfaSecret })
+                    label="Access Key ID"
+                    value={accountForm.accessKeyId}
+                    onValueChange={(accessKeyId) =>
+                      setAccountForm({ ...accountForm, accessKeyId })
                     }
                   />
-                  <SelectField
-                    label="账号组"
-                    value={accountForm.groupId}
-                    onChange={(value) =>
-                      setAccountForm({
-                        ...accountForm,
-                        groupId: value ? Number(value) : undefined,
-                        groupName:
-                          groups.find((group) => group.id === Number(value))
-                            ?.name || "",
-                      })
+                  <Input
+                    label="Secret Access Key"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder={
+                      accountForm.id ? "留空保持原值" : "请输入 Secret Key"
                     }
-                  >
-                    <option value="">不分组</option>
-                    {groups.map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {group.name}
-                      </option>
-                    ))}
-                  </SelectField>
-                  <SelectField
-                    label="代理池"
-                    value={accountForm.proxyId}
-                    onChange={(value) =>
-                      setAccountForm({
-                        ...accountForm,
-                        proxyId: value ? Number(value) : undefined,
-                      })
+                    value={accountForm.secretAccessKey}
+                    onValueChange={(secretAccessKey) =>
+                      setAccountForm({ ...accountForm, secretAccessKey })
                     }
-                  >
-                    <option value="">不使用代理池</option>
-                    {proxies.map((proxy) => (
-                      <option key={proxy.id} value={proxy.id}>
-                        {proxy.name}
-                      </option>
-                    ))}
-                  </SelectField>
+                  />
+                  <div className="sm:col-span-2">
+                    <RegionMultiSelect
+                      isInvalid={regionError}
+                      value={accountForm.regions}
+                      onChange={(regions) => {
+                        setRegionError(false);
+                        setAccountForm({ ...accountForm, regions });
+                      }}
+                    />
+                  </div>
                 </div>
-                <Input
-                  label="账号独立代理（可选）"
-                  type="password"
-                  autoComplete="new-password"
-                  isDisabled={!!accountForm.proxyId}
-                  placeholder={
-                    accountForm.id
-                      ? "留空保持原值"
-                      : "http://user:pass@host:port 或 socks5://host:port"
-                  }
-                  value={accountForm.proxy || ""}
-                  onValueChange={(proxy) =>
-                    setAccountForm({ ...accountForm, proxy })
-                  }
-                />
-                <Input
-                  label="启用区域（逗号分隔，首个为默认区域）"
-                  value={accountForm.regions || ""}
-                  onValueChange={(regions) =>
-                    setAccountForm({ ...accountForm, regions })
-                  }
-                  placeholder="us-east-1,ap-southeast-1"
-                />
-                <Input
-                  label="账号有效期（留空永不过期）"
-                  type="datetime-local"
-                  value={localDateTime(accountForm.expiresAt)}
-                  onValueChange={(value) =>
-                    setAccountForm({
-                      ...accountForm,
-                      expiresAt: value ? new Date(value).getTime() : null,
-                    })
-                  }
-                  description="到期后账号会自动按禁用处理，不会删除 AWS 资源。"
-                />
-                <details className="rounded-medium border border-default-200 p-3">
-                  <summary className="cursor-pointer text-sm">
-                    角色与清除选项
-                  </summary>
-                  <div className="mt-3 space-y-3">
-                    <Input
-                      label="Role ARN（可选）"
-                      value={accountForm.roleArn || ""}
-                      onValueChange={(roleArn) =>
-                        setAccountForm({ ...accountForm, roleArn })
-                      }
-                    />
-                    <Input
-                      label="Role External ID（可选）"
-                      type="password"
-                      placeholder="留空保持原值"
-                      value={accountForm.roleExternalId || ""}
-                      onValueChange={(roleExternalId) =>
-                        setAccountForm({ ...accountForm, roleExternalId })
-                      }
-                    />
-                    <Input
-                      label="Role Session Name（可选）"
-                      value={accountForm.roleSessionName || ""}
-                      onValueChange={(roleSessionName) =>
-                        setAccountForm({ ...accountForm, roleSessionName })
-                      }
-                    />
-                    {accountForm.id && (
-                      <>
-                        <Check
-                          label="清除已保存的 Session Token"
-                          checked={accountForm.clearSessionToken}
-                          onChange={(clearSessionToken) =>
+
+                <Accordion
+                  className="px-0"
+                  isCompact
+                  itemClasses={{ base: "border border-default-200" }}
+                  showDivider={false}
+                  variant="light"
+                >
+                  <AccordionItem
+                    key="advanced"
+                    aria-label="高级设置"
+                    subtitle={
+                      advancedConfigured.length > 0
+                        ? `已配置：${advancedConfigured.join(" · ")}`
+                        : "凭据令牌、MFA、账号组与代理、角色、有效期、备注"
+                    }
+                    title={
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">高级设置</span>
+                        {advancedConfigured.length > 0 && (
+                          <Chip color="primary" size="sm" variant="flat">
+                            已配置 {advancedConfigured.length} 项
+                          </Chip>
+                        )}
+                      </div>
+                    }
+                  >
+                    <div className="space-y-5">
+                      <div className="space-y-3">
+                        <p className="text-xs font-medium text-default-500">
+                          凭据
+                        </p>
+                        <Input
+                          label="Session Token（可选）"
+                          type="password"
+                          autoComplete="new-password"
+                          placeholder={
+                            accountForm.id ? "留空保持原值" : "临时凭据 Token"
+                          }
+                          value={accountForm.sessionToken || ""}
+                          onValueChange={(sessionToken) =>
+                            setAccountForm({ ...accountForm, sessionToken })
+                          }
+                        />
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Input
+                            label="MFA 设备 ARN（可选）"
+                            value={accountForm.mfaSerial || ""}
+                            onValueChange={(mfaSerial) =>
+                              setAccountForm({ ...accountForm, mfaSerial })
+                            }
+                          />
+                          <Input
+                            label="MFA TOTP 密钥（可选）"
+                            type="password"
+                            placeholder={
+                              accountForm.id ? "留空保持原值" : "Base32 密钥"
+                            }
+                            value={accountForm.mfaSecret || ""}
+                            onValueChange={(mfaSecret) =>
+                              setAccountForm({ ...accountForm, mfaSecret })
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <p className="text-xs font-medium text-default-500">
+                          调度与网络
+                        </p>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <SelectField
+                            label="账号组"
+                            value={accountForm.groupId}
+                            onChange={(value) =>
+                              setAccountForm({
+                                ...accountForm,
+                                groupId: value ? Number(value) : undefined,
+                                groupName:
+                                  groups.find(
+                                    (group) => group.id === Number(value),
+                                  )?.name || "",
+                              })
+                            }
+                          >
+                            <option value="">不分组</option>
+                            {groups.map((group) => (
+                              <option key={group.id} value={group.id}>
+                                {group.name}
+                              </option>
+                            ))}
+                          </SelectField>
+                          <SelectField
+                            label="代理池"
+                            value={accountForm.proxyId}
+                            onChange={(value) =>
+                              setAccountForm({
+                                ...accountForm,
+                                proxyId: value ? Number(value) : undefined,
+                              })
+                            }
+                          >
+                            <option value="">不使用代理池</option>
+                            {proxies.map((proxy) => (
+                              <option key={proxy.id} value={proxy.id}>
+                                {proxy.name}
+                              </option>
+                            ))}
+                          </SelectField>
+                        </div>
+                        <Input
+                          label="账号独立代理（可选）"
+                          type="password"
+                          autoComplete="new-password"
+                          isDisabled={!!accountForm.proxyId}
+                          placeholder={
+                            accountForm.id
+                              ? "留空保持原值"
+                              : "http://user:pass@host:port 或 socks5://host:port"
+                          }
+                          value={accountForm.proxy || ""}
+                          onValueChange={(proxy) =>
+                            setAccountForm({ ...accountForm, proxy })
+                          }
+                        />
+                        <Input
+                          label="账号有效期（留空永不过期）"
+                          type="datetime-local"
+                          value={localDateTime(accountForm.expiresAt)}
+                          onValueChange={(value) =>
                             setAccountForm({
                               ...accountForm,
-                              clearSessionToken,
+                              expiresAt: value
+                                ? new Date(value).getTime()
+                                : null,
                             })
                           }
+                          description="到期后账号会自动按禁用处理，不会删除 AWS 资源。"
                         />
-                        <Check
-                          label="清除 MFA 设置"
-                          checked={accountForm.clearMfa}
-                          onChange={(clearMfa) =>
-                            setAccountForm({ ...accountForm, clearMfa })
+                      </div>
+
+                      <div className="space-y-3">
+                        <p className="text-xs font-medium text-default-500">
+                          角色与清除
+                        </p>
+                        <Input
+                          label="Role ARN（可选）"
+                          value={accountForm.roleArn || ""}
+                          onValueChange={(roleArn) =>
+                            setAccountForm({ ...accountForm, roleArn })
                           }
                         />
-                        <Check
-                          label="清除独立代理"
-                          checked={accountForm.clearProxy}
-                          onChange={(clearProxy) =>
-                            setAccountForm({ ...accountForm, clearProxy })
-                          }
-                        />
-                      </>
-                    )}
-                  </div>
-                </details>
-                <Textarea
-                  label="备注"
-                  value={accountForm.remark || ""}
-                  onValueChange={(remark) =>
-                    setAccountForm({ ...accountForm, remark })
-                  }
-                />
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Input
+                            label="Role External ID（可选）"
+                            type="password"
+                            placeholder="留空保持原值"
+                            value={accountForm.roleExternalId || ""}
+                            onValueChange={(roleExternalId) =>
+                              setAccountForm({
+                                ...accountForm,
+                                roleExternalId,
+                              })
+                            }
+                          />
+                          <Input
+                            label="Role Session Name（可选）"
+                            value={accountForm.roleSessionName || ""}
+                            onValueChange={(roleSessionName) =>
+                              setAccountForm({
+                                ...accountForm,
+                                roleSessionName,
+                              })
+                            }
+                          />
+                        </div>
+                        {accountForm.id && (
+                          <div className="space-y-2 rounded-medium border border-divider bg-content2/40 p-3">
+                            <p className="text-xs text-default-500">
+                              清除操作不可撤销，仅在勾选后执行。
+                            </p>
+                            <Check
+                              label="清除已保存的 Session Token"
+                              checked={accountForm.clearSessionToken}
+                              onChange={(clearSessionToken) =>
+                                setAccountForm({
+                                  ...accountForm,
+                                  clearSessionToken,
+                                })
+                              }
+                            />
+                            <Check
+                              label="清除 MFA 设置"
+                              checked={accountForm.clearMfa}
+                              onChange={(clearMfa) =>
+                                setAccountForm({ ...accountForm, clearMfa })
+                              }
+                            />
+                            <Check
+                              label="清除独立代理"
+                              checked={accountForm.clearProxy}
+                              onChange={(clearProxy) =>
+                                setAccountForm({ ...accountForm, clearProxy })
+                              }
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <Textarea
+                        label="备注"
+                        value={accountForm.remark || ""}
+                        onValueChange={(remark) =>
+                          setAccountForm({ ...accountForm, remark })
+                        }
+                      />
+                    </div>
+                  </AccordionItem>
+                </Accordion>
               </div>
             )}
           </ModalBody>

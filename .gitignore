@@ -258,3 +258,6 @@ gitee/
 *.cert
 android-app/
 ios-app/
+
+# 工作区/记忆文件
+.workbuddy/
