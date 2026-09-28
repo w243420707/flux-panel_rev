@@ -48,6 +48,12 @@ type ActionForm = {
   maxAttempts: number;
   releaseOld: boolean;
 };
+type BatchIpForm = {
+  strategy: aws.AwsChangeIpPayload["strategy"];
+  cidr: string;
+  maxAttempts: number;
+  releaseOld: boolean;
+};
 type ApiResult<T> = { code: number; msg?: string; data: T };
 
 const emptyAccount: aws.AwsAccountPayload = {
@@ -471,6 +477,10 @@ export default function AwsPage() {
     useState<aws.AwsTemplatePayload | null>(null);
   const [createForm, setCreateForm] = useState<CreateForm | null>(null);
   const [actionForm, setActionForm] = useState<ActionForm | null>(null);
+  const [batchIpForm, setBatchIpForm] = useState<BatchIpForm | null>(null);
+  const [selectedInstanceKeys, setSelectedInstanceKeys] = useState<string[]>(
+    [],
+  );
   const [shareForm, setShareForm] = useState<Partial<aws.AwsShareGroup> | null>(
     null,
   );
@@ -485,6 +495,14 @@ export default function AwsPage() {
   const mounted = useRef(true);
   const currentAccounts = useRef(accounts);
   currentAccounts.current = accounts;
+
+  const selectedInstances = useMemo(
+    () =>
+      instances.filter((instance) =>
+        selectedInstanceKeys.includes(instanceKey(instance)),
+      ),
+    [instances, selectedInstanceKeys],
+  );
 
   const accountName = (id?: number) =>
     accounts.find((account) => account.id === id)?.name ||
@@ -732,6 +750,162 @@ export default function AwsPage() {
         );
       });
   }, [instances, filter, shares, groupBy, boundNode]);
+
+  useEffect(() => {
+    const available = new Set(instances.map(instanceKey));
+    setSelectedInstanceKeys((current) =>
+      current.filter((key) => available.has(key)),
+    );
+  }, [instances]);
+
+  const allVisibleSelected =
+    visibleInstances.length > 0 &&
+    visibleInstances.every((instance) =>
+      selectedInstanceKeys.includes(instanceKey(instance)),
+    );
+
+  const toggleInstanceSelection = (instance: aws.AwsInstance) => {
+    const key = instanceKey(instance);
+    setSelectedInstanceKeys((current) =>
+      current.includes(key)
+        ? current.filter((value) => value !== key)
+        : [...current, key],
+    );
+  };
+
+  const toggleAllVisibleInstances = () => {
+    if (allVisibleSelected) {
+      const visibleKeys = new Set(visibleInstances.map(instanceKey));
+      setSelectedInstanceKeys((current) =>
+        current.filter((key) => !visibleKeys.has(key)),
+      );
+      return;
+    }
+    setSelectedInstanceKeys((current) => [
+      ...new Set([...current, ...visibleInstances.map(instanceKey)]),
+    ]);
+  };
+
+  const submitBatchOperations = async (
+    targets: aws.AwsInstance[],
+    submit: (instance: aws.AwsInstance) => Promise<aws.AwsOperation>,
+  ) => {
+    const settled = await Promise.allSettled(targets.map(submit));
+    const operations = settled.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    if (operations.length) {
+      setOperations((current) => {
+        const ids = new Set(
+          operations.map((item) => item.operationId || item.id),
+        );
+        return [
+          ...operations,
+          ...current.filter((item) => !ids.has(item.operationId || item.id)),
+        ].slice(0, 100);
+      });
+    }
+    const failed = settled.filter(
+      (result) =>
+        result.status === "rejected" ||
+        result.value.status === "FAILED" ||
+        result.value.status === "UNKNOWN",
+    ).length;
+    return { submitted: operations.length - failed, failed };
+  };
+
+  const batchStatusCheck = () =>
+    perform("batch-status", async () => {
+      const targets = selectedInstances;
+      if (!targets.length) throw new Error("请先选择实例");
+      const settled = await Promise.allSettled(
+        targets.map((instance) =>
+          aws.checkAwsInstanceGfw({
+            accountId: instance.accountId,
+            region: instance.region,
+            instanceId: instance.instanceId,
+          }),
+        ),
+      );
+      const failed = settled.filter((result) => result.status === "rejected").length;
+      setSelectedInstanceKeys([]);
+      toast.success(
+        failed
+          ? `已完成 ${targets.length - failed} 个，${failed} 个失败`
+          : `已完成 ${targets.length} 个实例状态查询`,
+      );
+      await refreshInstances();
+    });
+
+  const batchTerminate = () =>
+    perform("batch-terminate", async () => {
+      const targets = selectedInstances;
+      if (!targets.length) throw new Error("请先选择实例");
+      const preview = targets
+        .slice(0, 5)
+        .map((item) => `${item.name || "未命名"} (${item.instanceId})`)
+        .join("\n");
+      const suffix = targets.length > 5 ? `\n以及其他 ${targets.length - 5} 个实例` : "";
+      if (
+        !window.confirm(
+          `删除选中的 ${targets.length} 个 EC2 实例？此操作不可撤销。\n${preview}${suffix}`,
+        )
+      )
+        return;
+      const result = await submitBatchOperations(targets, async (instance) =>
+        unpack(
+          await aws.operateAwsInstance({
+            accountId: instance.accountId,
+            region: instance.region,
+            instanceId: instance.instanceId,
+            action: "terminate",
+            requestId: uuid(),
+          }),
+          "提交删除任务失败",
+        ),
+      );
+      setSelectedInstanceKeys([]);
+      toast.success(`已提交 ${result.submitted} 个删除任务，失败 ${result.failed} 个`);
+    });
+
+  const batchChangeIp = () => {
+    if (!selectedInstances.length) {
+      toast.error("请先选择实例");
+      return;
+    }
+    setBatchIpForm({
+      strategy: "AUTO",
+      cidr: "",
+      maxAttempts: 5,
+      releaseOld: false,
+    });
+  };
+
+  const executeBatchChangeIp = () =>
+    perform("batch-ip", async () => {
+      const targets = selectedInstances;
+      const form = batchIpForm;
+      if (!targets.length || !form) throw new Error("请先选择实例");
+      const result = await submitBatchOperations(targets, async (instance) =>
+        unpack(
+          await aws.changeAwsInstanceIp({
+            accountId: instance.accountId,
+            region: instance.region,
+            instanceId: instance.instanceId,
+            strategy: form.strategy,
+            cidr: form.cidr || undefined,
+            maxAttempts: form.maxAttempts,
+            releaseOld: form.releaseOld,
+            requestId: uuid(),
+          }),
+          "提交换 IP 任务失败",
+        ),
+      );
+      setBatchIpForm(null);
+      setSelectedInstanceKeys([]);
+      toast.success(`已提交 ${result.submitted} 个换 IP 任务，失败 ${result.failed} 个`);
+    });
+
   const pageCount = Math.max(1, Math.ceil(visibleInstances.length / 20));
   const effectivePage = Math.min(page, pageCount);
   const pageInstances = visibleInstances.slice(
@@ -1228,6 +1402,44 @@ export default function AwsPage() {
               </Button>
             </div>
           </div>
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-medium border border-default-200 px-3 py-2">
+            <span className="mr-2 text-sm text-default-500">
+              已选 {selectedInstanceKeys.length} 个实例
+            </span>
+            <Button
+              size="sm"
+              variant="flat"
+              isDisabled={!selectedInstanceKeys.length || !!busy}
+              onPress={batchChangeIp}
+            >
+              批量换 IP
+            </Button>
+            <Button
+              size="sm"
+              variant="flat"
+              isDisabled={!selectedInstanceKeys.length || !!busy}
+              onPress={() => void batchStatusCheck()}
+            >
+              批量查状态
+            </Button>
+            <Button
+              size="sm"
+              color="danger"
+              variant="flat"
+              isDisabled={!selectedInstanceKeys.length || !!busy}
+              onPress={() => void batchTerminate()}
+            >
+              批量删除
+            </Button>
+            <Button
+              size="sm"
+              variant="light"
+              isDisabled={!selectedInstanceKeys.length || !!busy}
+              onPress={() => setSelectedInstanceKeys([])}
+            >
+              清空选择
+            </Button>
+          </div>
           <p className="mb-3 text-sm text-default-500">
             共 {visibleInstances.length} 个实例 · APK
             状态来自绑定节点最近回报；AWS 运行状态不代表大陆可达。
@@ -1241,6 +1453,14 @@ export default function AwsPage() {
               <table className="w-full min-w-[1040px] text-left text-sm">
                 <thead className="border-b border-default-200 text-default-500">
                   <tr>
+                    <th className="w-12 px-3 py-3">
+                      <input
+                        type="checkbox"
+                        aria-label="选择当前筛选的全部实例"
+                        checked={allVisibleSelected}
+                        onChange={toggleAllVisibleInstances}
+                      />
+                    </th>
                     {[
                       "实例",
                       "状态 / APK",
@@ -1271,6 +1491,8 @@ export default function AwsPage() {
                           : undefined
                       }
                       disabled={!!busy}
+                      selected={selectedInstanceKeys.includes(instanceKey(instance))}
+                      onSelectedChange={() => toggleInstanceSelection(instance)}
                       onAction={(action) => openAction(instance, action)}
                     />
                   ))}
@@ -2581,6 +2803,83 @@ export default function AwsPage() {
       </Modal>
 
       <Modal
+        isOpen={!!batchIpForm}
+        onClose={() => !busy && setBatchIpForm(null)}
+        size="lg"
+      >
+        <ModalContent>
+          <ModalHeader>批量更换 IP（{selectedInstances.length} 个实例）</ModalHeader>
+          <ModalBody>
+            {batchIpForm && (
+              <div className="space-y-4">
+                <p className="text-sm text-warning">
+                  每个实例会单独提交任务；动态 IP 可能导致实例停止并重新启动。
+                  不是面板创建的 Elastic IP 不会被自动释放。
+                </p>
+                <SelectField
+                  label="换 IP 方式"
+                  value={batchIpForm.strategy}
+                  onChange={(strategy) =>
+                    setBatchIpForm({
+                      ...batchIpForm,
+                      strategy: strategy as aws.AwsChangeIpPayload["strategy"],
+                    })
+                  }
+                >
+                  <option value="AUTO">自动判断</option>
+                  <option value="DYNAMIC">动态公网 IP</option>
+                  <option value="EIP">Elastic IP</option>
+                </SelectField>
+                <Input
+                  label="目标 IPv4 CIDR（可选）"
+                  placeholder="例如 1.2.0.0/16"
+                  value={batchIpForm.cidr}
+                  onValueChange={(cidr) => setBatchIpForm({ ...batchIpForm, cidr })}
+                />
+                <Input
+                  label="最大尝试次数（1–10）"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={String(batchIpForm.maxAttempts)}
+                  onValueChange={(value) =>
+                    setBatchIpForm({
+                      ...batchIpForm,
+                      maxAttempts: Math.min(10, Math.max(1, Number(value) || 1)),
+                    })
+                  }
+                />
+                <Check
+                  label="释放旧的面板托管 Elastic IP"
+                  checked={batchIpForm.releaseOld}
+                  onChange={(releaseOld) =>
+                    setBatchIpForm({ ...batchIpForm, releaseOld })
+                  }
+                />
+              </div>
+            )}
+          </ModalBody>
+          <ModalFooter>
+            <Button
+              variant="light"
+              isDisabled={!!busy}
+              onPress={() => setBatchIpForm(null)}
+            >
+              取消
+            </Button>
+            <Button
+              color="primary"
+              isLoading={busy === "batch-ip"}
+              isDisabled={!!busy}
+              onPress={() => void executeBatchChangeIp()}
+            >
+              提交批量任务
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      <Modal
         isOpen={!!actionForm}
         onClose={() => !busy && setActionForm(null)}
         size="2xl"
@@ -2888,6 +3187,8 @@ function InstanceRows({
   node,
   heading,
   disabled,
+  selected,
+  onSelectedChange,
   onAction,
 }: {
   instance: aws.AwsInstance;
@@ -2895,6 +3196,8 @@ function InstanceRows({
   node?: aws.AwsBoundNode;
   heading?: string;
   disabled: boolean;
+  selected: boolean;
+  onSelectedChange: () => void;
   onAction: (action: InstanceAction) => void;
 }) {
   const actions: InstanceAction[] = [
@@ -2915,7 +3218,7 @@ function InstanceRows({
       {heading && (
         <tr className="bg-default-50">
           <td
-            colSpan={6}
+            colSpan={7}
             className="px-3 py-2 text-xs font-semibold text-default-500"
           >
             {heading}
@@ -2923,6 +3226,14 @@ function InstanceRows({
         </tr>
       )}
       <tr>
+        <td className="w-12 px-3 py-3 align-top">
+          <input
+            type="checkbox"
+            aria-label={`选择实例 ${instance.name || instance.instanceId}`}
+            checked={selected}
+            onChange={onSelectedChange}
+          />
+        </td>
         <td className="max-w-56 px-3 py-3">
           <p className="break-words font-medium">
             {instance.name || "未命名实例"}

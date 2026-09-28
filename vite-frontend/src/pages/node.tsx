@@ -123,6 +123,7 @@ interface NodeForm {
 
 export default function NodePage() {
   const [nodeList, setNodeList] = useState<Node[]>([]);
+  const [showAllNodes, setShowAllNodes] = useState(false);
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<number>>(() => new Set());
   const [loading, setLoading] = useState(false);
   const [dialogVisible, setDialogVisible] = useState(false);
@@ -205,7 +206,14 @@ export default function NodePage() {
   };
 
   const expandAllNodeDetails = () => {
-    setExpandedNodeIds(new Set(nodeListRef.current.map(node => node.id)));
+    const nodesToExpand = showAllNodes
+      ? nodeListRef.current
+      : nodeListRef.current.filter(node => node.connectionStatus === 'online');
+    setExpandedNodeIds(previous => {
+      const next = new Set(previous);
+      nodesToExpand.forEach(node => next.add(node.id));
+      return next;
+    });
   };
 
   const collapseAllNodeDetails = () => {
@@ -214,6 +222,9 @@ export default function NodePage() {
 
   const [totalSpeed, setTotalSpeed] = useState({ upload: 0, download: 0 });
   nodeListRef.current = nodeList;
+  const visibleNodeList = showAllNodes
+    ? nodeList
+    : nodeList.filter(node => node.connectionStatus === 'online');
 
   useEffect(() => {
     initWebSocket();
@@ -1467,8 +1478,8 @@ export default function NodePage() {
     
       <div className="px-3 lg:px-6 py-8">
         {/* 页面头部 */}
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
-        <div className="flex shrink-0 flex-nowrap items-center gap-2">
+        <div className="mb-6 flex justify-end">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Chip
               variant="flat"
               color="primary"
@@ -1485,19 +1496,27 @@ export default function NodePage() {
             >
               总下载 {formatSpeed(totalSpeed.download)}
             </Chip>
-        </div>
-
-        <Button
+            <Button
+              size="sm"
+              variant="flat"
+              color="default"
+              className="shrink-0"
+              onPress={() => setShowAllNodes(previous => !previous)}
+              aria-pressed={showAllNodes}
+            >
+              {showAllNodes ? '仅显示在线' : '显示全部'}
+            </Button>
+            <Button
               size="sm"
               variant="flat"
               color="default"
               className="shrink-0"
               onPress={expandAllNodeDetails}
-              isDisabled={nodeList.length === 0}
+              isDisabled={visibleNodeList.length === 0}
             >
               全部展开
             </Button>
-        <Button
+            <Button
               size="sm"
               variant="flat"
               color="default"
@@ -1507,17 +1526,16 @@ export default function NodePage() {
             >
               全部收起
             </Button>
-        <Button
+            <Button
               size="sm"
               variant="flat"
               color="primary"
               className="shrink-0"
               onPress={handleAdd}
-             
             >
               新增
             </Button>
-     
+          </div>
         </div>
 
         {/* 节点列表 */}
@@ -1544,9 +1562,16 @@ export default function NodePage() {
               </div>
             </CardBody>
           </Card>
+        ) : visibleNodeList.length === 0 ? (
+          <Card className="shadow-sm border border-gray-200 dark:border-gray-700">
+            <CardBody className="py-12 text-center">
+              <p className="text-default-600">当前没有在线节点</p>
+              <p className="mt-1 text-sm text-default-500">点击右上角“显示全部”查看离线节点</p>
+            </CardBody>
+          </Card>
         ) : (
           <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,620px),1fr))]">
-            {nodeList.map((node) => (
+            {visibleNodeList.map((node) => (
               <Card 
                 key={node.id} 
                 className="node-monitor-card shadow-sm border border-divider hover:shadow-md transition-shadow duration-200"
