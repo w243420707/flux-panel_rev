@@ -10,6 +10,8 @@ COMPOSE_FILE="docker-compose.deploy.yml"
 ENV_FILE="${APP_DIR}/.env"
 UPDATE_STATE_DIR="${UPDATE_STATE_DIR:-${APP_DIR}/update-state}"
 RAW_DEPLOY_URL="${RAW_DEPLOY_URL:-https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/main/deploy.sh}"
+SELF_HEAL_FAILURE_THRESHOLD="${SELF_HEAL_FAILURE_THRESHOLD:-3}"
+SELF_HEAL_REBOOT_COOLDOWN="${SELF_HEAL_REBOOT_COOLDOWN:-1800}"
 
 ACTION=""
 DOMAIN=""
@@ -36,6 +38,10 @@ PREVIOUS_COMMIT=""
 CURRENT_COMMIT=""
 BUILD_SERVICES=()
 DEPLOY_LOCK_FD=""
+SELF_HEAL_STATE_FILE=""
+SELF_HEAL_FAILURES=0
+SELF_HEAL_LAST_REBOOT=0
+SELF_HEAL_LAST_FAILURE=""
 DOCKER_IPV4_HOSTS_TOKEN="flux-panel-rev-docker-ipv4-fallback"
 DOCKER_IPV4_HOSTS_ACTIVE=0
 GITHUB_IPV4_HOSTS_TOKEN="flux-panel-rev-github-ipv4-fallback"
@@ -80,6 +86,7 @@ Commands:
   install       Install or reinstall the panel
   update        Pull latest code, rebuild images, restart services
   auto-update   Process a backend-written update request
+  self-heal     Check and repair the running panel stack
   uninstall     Stop and remove services
   status        Show service status
   logs          Follow service logs
@@ -108,7 +115,7 @@ EOF
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      install|update|auto-update|uninstall|status|logs|cleanup|renew-cert|menu)
+      install|update|auto-update|self-heal|uninstall|status|logs|cleanup|renew-cert|menu)
         ACTION="$1"
         ;;
       --domain)
@@ -715,7 +722,7 @@ write_env_file() {
   if [[ "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     PANEL_VERSION="${release_version}"
   else
-    PANEL_VERSION="${PANEL_VERSION:-1.3.91}"
+    PANEL_VERSION="${PANEL_VERSION:-1.3.102}"
   fi
   PANEL_COMMIT="${CURRENT_COMMIT:-$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)}"
   FRONTEND_PORT="${FRONTEND_PORT:-${FRONTEND_PORT_ENV:-6366}}"
@@ -1127,6 +1134,46 @@ release_deploy_lock() {
   fi
 }
 
+try_acquire_deploy_lock() {
+  [[ -n "${DEPLOY_LOCK_FD}" ]] && return 0
+  ensure_update_state_dir
+  exec {DEPLOY_LOCK_FD}>"${UPDATE_STATE_DIR}/deploy.lock"
+  if ! flock -n "${DEPLOY_LOCK_FD}"; then
+    eval "exec ${DEPLOY_LOCK_FD}>&-" 2>/dev/null || true
+    DEPLOY_LOCK_FD=""
+    return 1
+  fi
+}
+
+install_self_heal_timer() {
+  ensure_update_state_dir
+  cat > "/etc/systemd/system/${APP_SLUG}-self-heal.service" <<EOF
+[Unit]
+Description=${APP_NAME} panel self-healing check
+After=docker.service nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/${APP_SLUG} self-heal --yes
+TimeoutStartSec=10min
+EOF
+  cat > "/etc/systemd/system/${APP_SLUG}-self-heal.timer" <<EOF
+[Unit]
+Description=${APP_NAME} panel self-healing timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Persistent=true
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now "${APP_SLUG}-self-heal.timer"
+}
+
 install_update_timer() {
   ensure_update_state_dir
   cat > "/etc/systemd/system/${APP_SLUG}-auto-update.service" <<EOF
@@ -1153,11 +1200,14 @@ WantedBy=timers.target
 EOF
   systemctl daemon-reload
   systemctl enable --now "${APP_SLUG}-auto-update.timer"
+  install_self_heal_timer
 }
 
 remove_update_timer() {
   systemctl disable --now "${APP_SLUG}-auto-update.timer" >/dev/null 2>&1 || true
+  systemctl disable --now "${APP_SLUG}-self-heal.timer" >/dev/null 2>&1 || true
   rm -f "/etc/systemd/system/${APP_SLUG}-auto-update.timer" "/etc/systemd/system/${APP_SLUG}-auto-update.service"
+  rm -f "/etc/systemd/system/${APP_SLUG}-self-heal.timer" "/etc/systemd/system/${APP_SLUG}-self-heal.service"
   systemctl daemon-reload >/dev/null 2>&1 || true
 }
 
@@ -1354,6 +1404,182 @@ wait_for_health() {
 
   warn "${container} did not become healthy within ${timeout}s. Current status: ${status:-unknown}"
   return 1
+}
+
+self_heal_state_path() {
+  SELF_HEAL_STATE_FILE="${UPDATE_STATE_DIR}/self-heal.state"
+}
+
+self_heal_read_state() {
+  self_heal_state_path
+  SELF_HEAL_FAILURES=0
+  SELF_HEAL_LAST_REBOOT=0
+  [[ -f "${SELF_HEAL_STATE_FILE}" ]] || return 0
+
+  local key value
+  while IFS='=' read -r key value; do
+    case "${key}" in
+      failures) SELF_HEAL_FAILURES="${value:-0}" ;;
+      last_reboot) SELF_HEAL_LAST_REBOOT="${value:-0}" ;;
+    esac
+  done < "${SELF_HEAL_STATE_FILE}"
+  [[ "${SELF_HEAL_FAILURES}" =~ ^[0-9]+$ ]] || SELF_HEAL_FAILURES=0
+  [[ "${SELF_HEAL_LAST_REBOOT}" =~ ^[0-9]+$ ]] || SELF_HEAL_LAST_REBOOT=0
+}
+
+self_heal_write_state() {
+  self_heal_state_path
+  local tmp="${SELF_HEAL_STATE_FILE}.tmp.$$"
+  printf 'failures=%s\nlast_reboot=%s\n' \
+    "${SELF_HEAL_FAILURES:-0}" "${SELF_HEAL_LAST_REBOOT:-0}" > "${tmp}"
+  chmod 600 "${tmp}"
+  mv -f "${tmp}" "${SELF_HEAL_STATE_FILE}"
+}
+
+self_heal_container_ready() {
+  local container="$1" status has_health
+  status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container}" 2>/dev/null || true)"
+  has_health="$(docker inspect -f '{{if .State.Health}}yes{{else}}no{{end}}' "${container}" 2>/dev/null || true)"
+  [[ "${has_health}" == "yes" && "${status}" == "healthy" ]] || \
+    [[ "${has_health}" == "no" && "${status}" == "running" ]]
+}
+
+self_heal_probe_http() {
+  local url="$1"
+  curl -fsS --connect-timeout 3 --max-time 8 -o /dev/null "${url}" >/dev/null 2>&1
+}
+
+self_heal_probe_nginx_entry() {
+  local host="${DOMAIN:-}" scheme=http port=80
+  [[ -n "${host}" ]] || return 0
+  host="$(sanitize_domain "${host}")"
+  if [[ "${SSL_ENABLED:-false}" == "true" || "${PANEL_URL:-}" == https://* ]]; then
+    scheme=https
+    port=443
+  fi
+  curl -k -fsS --connect-timeout 3 --max-time 8 \
+    --resolve "${host}:${port}:127.0.0.1" "${scheme}://${host}/" \
+    -o /dev/null >/dev/null 2>&1
+}
+
+self_heal_probe() {
+  SELF_HEAL_LAST_FAILURE=""
+
+  if ! systemctl is-active --quiet docker; then
+    SELF_HEAL_LAST_FAILURE="Docker service is not active"
+    return 1
+  fi
+  local service container
+  for service in mysql backend frontend; do
+    container="${APP_SLUG}-${service}"
+    if ! self_heal_container_ready "${container}"; then
+      SELF_HEAL_LAST_FAILURE="Container ${container} is not healthy"
+      return 1
+    fi
+  done
+  if ! self_heal_probe_http "http://127.0.0.1:${FRONTEND_PORT}/"; then
+    SELF_HEAL_LAST_FAILURE="Frontend local entry failed"
+    return 1
+  fi
+  if ! self_heal_probe_http "http://127.0.0.1:${FRONTEND_PORT}/flow/test"; then
+    SELF_HEAL_LAST_FAILURE="Frontend to backend proxy failed"
+    return 1
+  fi
+  if ! systemctl is-active --quiet nginx || ! nginx -t >/dev/null 2>&1; then
+    SELF_HEAL_LAST_FAILURE="Nginx service or configuration failed"
+    return 1
+  fi
+  if ! self_heal_probe_nginx_entry; then
+    SELF_HEAL_LAST_FAILURE="Nginx local entry failed"
+    return 1
+  fi
+}
+
+self_heal_restart_unhealthy() {
+  local service container
+  local unhealthy=()
+  for service in mysql backend frontend; do
+    container="${APP_SLUG}-${service}"
+    if ! self_heal_container_ready "${container}"; then
+      unhealthy+=("${container}")
+    fi
+  done
+  [[ "${#unhealthy[@]}" -eq 0 ]] || docker restart "${unhealthy[@]}"
+}
+
+self_heal_repair() {
+  local repair_status=0
+  if ! systemctl is-active --quiet docker; then
+    systemctl restart docker || repair_status=1
+  fi
+  compose up -d --no-build --remove-orphans || repair_status=1
+  self_heal_restart_unhealthy || repair_status=1
+  wait_for_health "${APP_SLUG}-mysql" 120 || repair_status=1
+  wait_for_health "${APP_SLUG}-backend" 180 || repair_status=1
+  wait_for_health "${APP_SLUG}-frontend" 120 || repair_status=1
+  if nginx -t >/dev/null 2>&1; then
+    if ! systemctl reload nginx && ! systemctl restart nginx; then
+      repair_status=1
+    fi
+  else
+    repair_status=1
+  fi
+  return "${repair_status}"
+}
+
+self_heal_maybe_reboot() {
+  self_heal_read_state
+  local now
+  now="$(date +%s)"
+  if (( SELF_HEAL_LAST_REBOOT > 0 && now - SELF_HEAL_LAST_REBOOT < SELF_HEAL_REBOOT_COOLDOWN )); then
+    warn "Self-healing is still failing, but VPS reboot cooldown is active."
+    return 1
+  fi
+  SELF_HEAL_LAST_REBOOT="${now}"
+  self_heal_write_state
+  warn "Panel self-healing failed after container and Nginx recovery; rebooting the VPS."
+  systemctl reboot
+}
+
+self_heal_flow() {
+  load_env
+  [[ -f "${APP_DIR}/${COMPOSE_FILE}" && -f "${ENV_FILE}" ]] || {
+    warn "Panel stack is not installed at ${APP_DIR}."
+    return 0
+  }
+  ensure_update_state_dir
+  self_heal_read_state
+
+  if self_heal_probe; then
+    if (( SELF_HEAL_FAILURES > 0 )); then
+      log "Panel self-healing check recovered the stack."
+    fi
+    SELF_HEAL_FAILURES=0
+    self_heal_write_state
+    return 0
+  fi
+
+  SELF_HEAL_FAILURES=$((SELF_HEAL_FAILURES + 1))
+  self_heal_write_state
+  warn "Panel self-healing check failed (${SELF_HEAL_FAILURES}/${SELF_HEAL_FAILURE_THRESHOLD}): ${SELF_HEAL_LAST_FAILURE}"
+  if (( SELF_HEAL_FAILURES < SELF_HEAL_FAILURE_THRESHOLD )); then
+    return 0
+  fi
+
+  if ! try_acquire_deploy_lock; then
+    warn "A panel install or update is running; self-healing will retry on the next timer tick."
+    return 0
+  fi
+  self_heal_repair || true
+  release_deploy_lock
+
+  if self_heal_probe; then
+    log "Panel self-healing restored the stack without rebooting the VPS."
+    SELF_HEAL_FAILURES=0
+    self_heal_write_state
+    return 0
+  fi
+  self_heal_maybe_reboot || true
 }
 
 start_stack() {
@@ -1910,6 +2136,7 @@ status_flow() {
   systemctl --no-pager --full status nginx 2>/dev/null || true
   systemctl --no-pager --full status docker 2>/dev/null || true
   systemctl --no-pager --full status certbot.timer 2>/dev/null || true
+  systemctl --no-pager --full status "${APP_SLUG}-self-heal.timer" 2>/dev/null || true
 }
 
 logs_flow() {
@@ -2015,6 +2242,7 @@ main() {
       ;;
     update) update_flow ;;
     auto-update) auto_update_flow ;;
+    self-heal) self_heal_flow ;;
     uninstall) uninstall_flow ;;
     status) status_flow ;;
     logs) logs_flow ;;
@@ -2025,4 +2253,6 @@ main() {
   esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

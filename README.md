@@ -22,6 +22,7 @@
 - Cloudflare DNS 智能池：自动解析 APK 确认正常的全部节点 IP；被墙 IP 立即移除，节点更换 IP 并恢复后自动重新加入，不再使用固定 70%/30% 备用池和轮换策略。
 - 自动部署：支持 VPS 一键安装、更新、卸载、状态查看、日志查看、证书续期和 Docker 缓存清理。
 - 运行维护：面板容器后台运行并随 Docker 自动恢复，节点端使用 systemd 开机自启。
+- 面板自愈：宿主机每分钟检查 Docker、三项容器健康状态、前端到后端代理链路和 Nginx；连续 3 次异常会自动分级修复，仍无法恢复时才重启 VPS，并带有部署锁和重启冷却保护。可用 `flux-panel-rev self-heal` 手动执行一次检查。
 - 长期复用：面板前后端从本仓库源码构建，不再依赖第三方面板镜像；节点端资源由独立公开仓库长期托管。
 - Android 探针仓库：`flux-panel-android-probe`，不参与面板 Docker 构建，也不接入节点转发配置。
 
@@ -98,6 +99,8 @@ curl -fsSL https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/head
 ```
 
 如果设置页提示缺少当前部署 SHA，请执行上述更新，不会在版本未知时盲目自动重建。“立即检查”只查看最新提交，不直接启动更新；开启自动更新后由定时检查安排执行。私库 Token 只需此仓库的 `Contents: Read-only` 权限；API 通过 Bearer、Git 通过限定 GitHub 域名的 Basic Header 认证，不写入 Git URL。
+
+面板自愈定时器每分钟运行一次，安装或更新面板时自动启用。手动排查可执行 `flux-panel-rev self-heal`，查看定时器状态和最近日志可执行 `systemctl status flux-panel-rev-self-heal.timer` 与 `journalctl -u flux-panel-rev-self-heal.service -n 100 --no-pager`。
 
 ### 面板端卸载
 
@@ -194,6 +197,10 @@ Swap 是内存不足时的缓冲，可以降低节点进程被 OOM 强制终止�
 - TCP 和 UDP 服务会同时创建，使用 UDP 场景时请确认 VPS 防火墙和安全组已放行对应 UDP 端口。
 
 ## 更新日志
+
+### 2026-10-13 v1.3.102
+
+- 新增面板 VPS 分级自愈：定时检查容器和 Nginx 链路，自动执行无构建恢复，连续故障且恢复失败后才重启 VPS。
 
 ### 2026-09-29 v1.3.101
 
