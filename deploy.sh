@@ -722,7 +722,7 @@ write_env_file() {
   if [[ "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     PANEL_VERSION="${release_version}"
   else
-    PANEL_VERSION="${PANEL_VERSION:-1.3.102}"
+    PANEL_VERSION="${PANEL_VERSION:-1.3.103}"
   fi
   PANEL_COMMIT="${CURRENT_COMMIT:-$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)}"
   FRONTEND_PORT="${FRONTEND_PORT:-${FRONTEND_PORT_ENV:-6366}}"
@@ -1691,7 +1691,7 @@ write_nginx_http_config() {
   cat > "${NGINX_CONF}" <<EOF
 map \$http_upgrade \$connection_upgrade_${APP_SLUG//-/_} {
     default upgrade;
-    '' close;
+    '' '';
 }
 
 server {
@@ -1754,7 +1754,7 @@ write_nginx_ssl_config() {
   cat > "${NGINX_CONF}" <<EOF
 map \$http_upgrade \$connection_upgrade_${APP_SLUG//-/_} {
     default upgrade;
-    '' close;
+    '' '';
 }
 
 server {
