@@ -722,7 +722,7 @@ write_env_file() {
   if [[ "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     PANEL_VERSION="${release_version}"
   else
-    PANEL_VERSION="${PANEL_VERSION:-1.3.103}"
+    PANEL_VERSION="${PANEL_VERSION:-1.3.104}"
   fi
   PANEL_COMMIT="${CURRENT_COMMIT:-$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)}"
   FRONTEND_PORT="${FRONTEND_PORT:-${FRONTEND_PORT_ENV:-6366}}"
@@ -825,6 +825,29 @@ collect_install_config() {
   fi
 }
 
+restore_saved_install_artifacts() {
+  local backup_dir="$1"
+  local artifact
+
+  if [[ -f "${backup_dir}/.env" && ! -f "${APP_DIR}/.env" ]]; then
+    cp -a "${backup_dir}/.env" "${APP_DIR}/.env"
+    log "Restored existing deployment settings from ${backup_dir}/.env."
+  fi
+
+  if [[ -d "${backup_dir}/update-state" ]]; then
+    mkdir -p "${APP_DIR}/update-state"
+    for artifact in request.json result.json github-token self-heal.state; do
+      if [[ -e "${backup_dir}/update-state/${artifact}" ]]; then
+        cp -a "${backup_dir}/update-state/${artifact}" "${APP_DIR}/update-state/${artifact}"
+      fi
+    done
+    for artifact in "${backup_dir}/update-state"/rollback-*.env; do
+      [[ -e "${artifact}" ]] || continue
+      cp -a "${artifact}" "${APP_DIR}/update-state/"
+    done
+  fi
+}
+
 sync_repo() {
   REPO_URL="${PANEL_UPDATE_REPOSITORY:-${REPO_URL}}"
   if [[ "${REPO_URL}" != *://* ]]; then
@@ -832,20 +855,61 @@ sync_repo() {
   fi
   configure_github_ipv4_fallback || true
 
+  local displaced_app_dir=""
+  local clone_error="Cannot clone ${REPO_URL}. The VPS cannot reach GitHub; check DNS/network access or use the panel's local-source deployment."
+
   if [[ -d "${APP_DIR}/.git" ]]; then
     log "Updating repository in ${APP_DIR}..."
     git -C "${APP_DIR}" remote set-url origin "${REPO_URL}" || return $?
     PREVIOUS_COMMIT="$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)"
   else
-    if [[ -d "${APP_DIR}" && -n "$(find "${APP_DIR}" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
-      die "${APP_DIR} exists and is not a Git checkout. Move it away first."
-    fi
-    log "Cloning ${REPO_URL} to ${APP_DIR}..."
     mkdir -p "$(dirname "${APP_DIR}")"
+    if [[ -e "${APP_DIR}" ]]; then
+      # The deploy lock creates update-state before the first clone. Remove only
+      # that known empty-install residue; preserve all other files in a backup.
+      local unexpected_entry
+      unexpected_entry="$(find "${APP_DIR}" -mindepth 1 ! -path "${APP_DIR}/update-state" ! -path "${APP_DIR}/update-state/deploy.lock" -print -quit 2>/dev/null || true)"
+      if [[ -z "${unexpected_entry}" ]]; then
+        rm -f "${APP_DIR}/update-state/deploy.lock"
+        rmdir "${APP_DIR}/update-state" "${APP_DIR}" 2>/dev/null || true
+      fi
+    fi
+
+    if [[ -e "${APP_DIR}" ]]; then
+      displaced_app_dir="${APP_DIR}.pre-git-$(date +%Y%m%d%H%M%S)"
+      local suffix=0
+      while [[ -e "${displaced_app_dir}" ]]; do
+        suffix=$((suffix + 1))
+        displaced_app_dir="${APP_DIR}.pre-git-$(date +%Y%m%d%H%M%S)-${suffix}"
+      done
+      log "Existing non-Git directory found. Backing it up to ${displaced_app_dir} and continuing."
+      mv "${APP_DIR}" "${displaced_app_dir}" || die "Cannot move ${APP_DIR} to ${displaced_app_dir}. Check permissions and disk space."
+    fi
+
+    log "Cloning ${REPO_URL} to ${APP_DIR}..."
     if ! git_authenticated clone "${REPO_URL}" "${APP_DIR}"; then
+      rm -rf "${APP_DIR}"
       warn "GitHub clone failed; retrying once after IPv4 fallback setup..."
       configure_github_ipv4_fallback || true
-      git_authenticated clone "${REPO_URL}" "${APP_DIR}" || die "Cannot clone ${REPO_URL}. The VPS cannot reach GitHub; check DNS/network access or use the panel's local-source deployment."
+      if ! git_authenticated clone "${REPO_URL}" "${APP_DIR}"; then
+        rm -rf "${APP_DIR}"
+        if [[ -n "${displaced_app_dir}" ]]; then
+          mv "${displaced_app_dir}" "${APP_DIR}" || die "Clone failed and the backup could not be restored from ${displaced_app_dir}."
+        fi
+        die "${clone_error}"
+      fi
+    fi
+
+    if [[ -n "${displaced_app_dir}" ]]; then
+      restore_saved_install_artifacts "${displaced_app_dir}"
+      warn "Backup retained at ${displaced_app_dir}; remove it manually after verifying the installation."
+    fi
+
+    # The install lock was opened inside the displaced directory. Rebind it
+    # to the freshly cloned checkout before continuing the install.
+    if [[ -n "${DEPLOY_LOCK_FD}" ]]; then
+      release_deploy_lock
+      acquire_deploy_lock
     fi
   fi
 
