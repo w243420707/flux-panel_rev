@@ -46,6 +46,7 @@ DOCKER_IPV4_HOSTS_TOKEN="flux-panel-rev-docker-ipv4-fallback"
 DOCKER_IPV4_HOSTS_ACTIVE=0
 GITHUB_IPV4_HOSTS_TOKEN="flux-panel-rev-github-ipv4-fallback"
 GITHUB_IPV4_HOSTS_ACTIVE=0
+NGINX_IPV6_ENABLED=0
 
 log() { printf '\033[1;32m[INFO]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }
@@ -722,7 +723,7 @@ write_env_file() {
   if [[ "${release_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     PANEL_VERSION="${release_version}"
   else
-    PANEL_VERSION="${PANEL_VERSION:-1.3.104}"
+    PANEL_VERSION="${PANEL_VERSION:-1.3.105}"
   fi
   PANEL_COMMIT="${CURRENT_COMMIT:-$(git -C "${APP_DIR}" rev-parse HEAD 2>/dev/null || true)}"
   FRONTEND_PORT="${FRONTEND_PORT:-${FRONTEND_PORT_ENV:-6366}}"
@@ -1718,6 +1719,19 @@ cleanup_builder_cache() {
   fi
 }
 
+detect_nginx_ipv6() {
+  NGINX_IPV6_ENABLED=0
+  if curl -6 -fsS --max-time 5 --noproxy '*' https://api64.ipify.org >/dev/null 2>&1; then
+    NGINX_IPV6_ENABLED=1
+  fi
+}
+
+nginx_ipv6_listen() {
+  if [[ "${NGINX_IPV6_ENABLED}" -eq 1 ]]; then
+    printf '    listen [::]:%s;\n' "$1"
+  fi
+}
+
 nginx_conf_path() {
   if [[ -d /etc/nginx/sites-available && -d /etc/nginx/sites-enabled ]]; then
     NGINX_CONF="/etc/nginx/sites-available/${APP_SLUG}.conf"
@@ -1751,6 +1765,7 @@ write_nginx_http_config() {
   local server_name="$1"
   local frontend_port="$2"
   mkdir -p "/var/www/${APP_SLUG}"
+  detect_nginx_ipv6
 
   cat > "${NGINX_CONF}" <<EOF
 map \$http_upgrade \$connection_upgrade_${APP_SLUG//-/_} {
@@ -1760,8 +1775,7 @@ map \$http_upgrade \$connection_upgrade_${APP_SLUG//-/_} {
 
 server {
     listen 80;
-    listen [::]:80;
-    server_name ${server_name};
+$(nginx_ipv6_listen 80)    server_name ${server_name};
 
     client_max_body_size 100m;
 
@@ -1814,6 +1828,7 @@ EOF
 write_nginx_ssl_config() {
   local domain="$1"
   local frontend_port="$2"
+  detect_nginx_ipv6
 
   cat > "${NGINX_CONF}" <<EOF
 map \$http_upgrade \$connection_upgrade_${APP_SLUG//-/_} {
@@ -1823,8 +1838,7 @@ map \$http_upgrade \$connection_upgrade_${APP_SLUG//-/_} {
 
 server {
     listen 80;
-    listen [::]:80;
-    server_name ${domain};
+$(nginx_ipv6_listen 80)    server_name ${domain};
 
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/${APP_SLUG};
@@ -1838,8 +1852,7 @@ server {
 
 server {
     listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name ${domain};
+$(if [[ "${NGINX_IPV6_ENABLED}" -eq 1 ]]; then printf '    listen [::]:443 ssl http2;\n'; fi)    server_name ${domain};
 
     ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
@@ -1936,13 +1949,23 @@ domain_points_here() {
 
 verify_domain_dns() {
   local domain="$1"
-  local current resolved answer
+  local current resolved answer resolved_ipv6
   [[ -n "${domain}" ]] || return 1
 
   current="$(public_ips)"
   resolved="$(domain_ips "${domain}")"
+  resolved_ipv6=""
+  if command -v dig >/dev/null 2>&1; then
+    resolved_ipv6="$(dig +short AAAA "${domain}" 2>/dev/null | sed '/^$/d' | sort -u || true)"
+  fi
+
   if ip_sets_intersect "${current}" "${resolved}"; then
     log "DNS check passed for ${domain}."
+    if [[ -n "${resolved_ipv6}" ]] && ! curl -6 -fsS --max-time 5 --noproxy '*' https://api64.ipify.org >/dev/null 2>&1; then
+      warn "DNS has an AAAA record, but this VPS has no working public IPv6 route."
+      warn "Let's Encrypt may validate the AAAA address first; remove the stale AAAA record or restore IPv6 before requesting HTTPS."
+      return 1
+    fi
     return 0
   fi
 
@@ -1973,6 +1996,27 @@ verify_domain_dns() {
         ;;
     esac
   done
+}
+
+verify_acme_challenge_locally() {
+  local domain="$1"
+  local token challenge_file response
+  token="$(random_string)"
+  challenge_file="/var/www/${APP_SLUG}/.well-known/acme-challenge/${token}"
+  mkdir -p "$(dirname "${challenge_file}")"
+  printf '%s\n' "${token}" > "${challenge_file}"
+
+  response="$(curl -4 --noproxy '*' -fsS --max-time 10 \
+    --resolve "${domain}:80:127.0.0.1" \
+    "http://${domain}/.well-known/acme-challenge/${token}" 2>/dev/null || true)"
+  rm -f "${challenge_file}"
+
+  if [[ "${response}" != "${token}" ]]; then
+    warn "Nginx cannot serve the ACME challenge locally for ${domain}."
+    warn "Check the generated Nginx site, duplicate server blocks, and port 80 availability before requesting HTTPS."
+    return 1
+  fi
+  return 0
 }
 
 install_certbot_renewal() {
@@ -2011,6 +2055,16 @@ request_certificate() {
   [[ "${SKIP_SSL}" -eq 0 ]] || return 1
 
   if ! verify_domain_dns "${domain}"; then
+    warn "Skipping certificate request because DNS or IPv6 validation failed."
+    set_env_value SSL_ENABLED false
+    set_env_value PANEL_URL "http://${domain}"
+    return 1
+  fi
+
+  if ! verify_acme_challenge_locally "${domain}"; then
+    warn "Skipping certificate request because the local ACME challenge check failed."
+    set_env_value SSL_ENABLED false
+    set_env_value PANEL_URL "http://${domain}"
     return 1
   fi
 

@@ -57,7 +57,7 @@ curl -L https://raw.githubusercontent.com/w243420707/flux-panel_rev/refs/heads/m
 0. 退出
 ```
 
-安装时按提示输入面板域名。使用 HTTPS 时，请先把域名 A/AAAA 记录解析到当前 VPS，并确保 VPS 安全组或防火墙放行 `80` 和 `443` 端口。脚本会自动检查解析、配置 Nginx、申请 Let's Encrypt 证书并设置自动续期。
+安装时按提示输入面板域名。使用 HTTPS 时，请先把域名 A 记录解析到当前 VPS；如果配置了 AAAA 记录，必须确认 VPS 具备可用的公网 IPv6。还要确保云安全组或防火墙放行 TCP `80` 和 `443` 端口。脚本会自动检查解析、验证 ACME challenge 路由、配置 Nginx、申请 Let's Encrypt 证书并设置自动续期；证书申请失败时会保留 HTTP，并在日志中提示对应检查项。
 
 默认信息：
 
@@ -197,6 +197,10 @@ Swap 是内存不足时的缓冲，可以降低节点进程被 OOM 强制终止�
 - TCP 和 UDP 服务会同时创建，使用 UDP 场景时请确认 VPS 防火墙和安全组已放行对应 UDP 端口。
 
 ## 更新日志
+
+### 2026-10-16 v1.3.105
+
+- 优化 HTTPS 证书申请：申请前验证 Nginx 的 ACME challenge 路由，检查 IPv6 是否可用并提示错误 AAAA 记录，避免 Let’s Encrypt 失败原因不明确；证书申请失败时继续保留 HTTP，并明确写入 HTTP 面板地址。
 
 ### 2026-10-16 v1.3.104
 
