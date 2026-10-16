@@ -16,6 +16,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.HashSet;
 
 @Service
 public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBindingMapper, CloudflareDnsBinding> implements CloudflareDnsBindingService {
@@ -39,8 +41,31 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
         Integer useTunnelNodes = dto.getUseTunnelNodes() == null ? 1 : (dto.getUseTunnelNodes() == 1 ? 1 : 0);
         List<Long> nodeIds = normalizeNodeIds(dto.getNodeIds());
         List<Long> preferredNodeIds = normalizeNodeIds(dto.getSmartPoolPreferredNodeIds());
+        List<List<Long>> rotationGroups;
+        try {
+            rotationGroups = normalizeRotationGroups(dto.getRotationGroups());
+        } catch (IllegalArgumentException e) {
+            return R.err(e.getMessage());
+        }
+        boolean rotationEnabled = dto.getRotationEnabled() != null && dto.getRotationEnabled() == 1;
         if (useTunnelNodes == 0 && nodeIds.isEmpty()) {
             return R.err("手动模式下请选择至少一个节点");
+        }
+        if (rotationEnabled) {
+            if (rotationGroups.size() < 2) {
+                return R.err("分组轮训至少需要配置两个节点组");
+            }
+            List<Long> allowedNodeIds = useTunnelNodes == 0 ? nodeIds : new ArrayList<>();
+            if (useTunnelNodes == 0) {
+                Set<Long> allowed = new HashSet<>(allowedNodeIds);
+                for (List<Long> group : rotationGroups) {
+                    for (Long nodeId : group) {
+                        if (!allowed.contains(nodeId)) {
+                            return R.err("轮训分组包含绑定范围外的节点");
+                        }
+                    }
+                }
+            }
         }
 
         List<String> domains = normalizeDomains(dto.getDomains());
@@ -72,6 +97,18 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
         binding.setRecordType(resolveRecordType(dto.getRecordType()));
         binding.setSmartPoolEnabled(dto.getSmartPoolEnabled() != null && dto.getSmartPoolEnabled() == 1 ? 1 : 0);
         binding.setSmartPoolPreferredNodeIds(TunnelNodeUtil.toJsonArray(preferredNodeIds));
+        binding.setRotationEnabled(rotationEnabled ? 1 : 0);
+        binding.setRotationGroups(rotationEnabled ? JSON.toJSONString(rotationGroups) : null);
+        binding.setRotationIntervalMinutes(rotationEnabled ? Math.max(dto.getRotationIntervalMinutes() == null ? 5 : dto.getRotationIntervalMinutes(), 5) : null);
+        if (!rotationEnabled) {
+            binding.setRotationCurrentGroupIndex(null);
+            binding.setRotationLastSwitchAt(null);
+            binding.setRotationNextSwitchAt(null);
+        } else if (binding.getRotationCurrentGroupIndex() == null || binding.getRotationCurrentGroupIndex() >= rotationGroups.size()) {
+            binding.setRotationCurrentGroupIndex(0);
+            binding.setRotationLastSwitchAt(null);
+            binding.setRotationNextSwitchAt(System.currentTimeMillis() + binding.getRotationIntervalMinutes() * 60_000L);
+        }
         if (binding.getSmartPoolEnabled() == 0) {
             binding.setSmartPoolActiveNodeIds(null);
             binding.setSmartPoolBackupNodeIds(null);
@@ -115,6 +152,27 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
             }
         }
         return R.ok();
+    }
+
+    private List<List<Long>> normalizeRotationGroups(List<List<Long>> rawGroups) {
+        List<List<Long>> groups = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
+        if (rawGroups == null) {
+            return groups;
+        }
+        for (List<Long> rawGroup : rawGroups) {
+            List<Long> group = normalizeNodeIds(rawGroup);
+            if (group.isEmpty()) {
+                continue;
+            }
+            for (Long nodeId : group) {
+                if (!seen.add(nodeId)) {
+                    throw new IllegalArgumentException("轮训节点不能重复出现在多个分组");
+                }
+            }
+            groups.add(group);
+        }
+        return groups;
     }
 
     private List<Long> normalizeNodeIds(List<Long> rawIds) {

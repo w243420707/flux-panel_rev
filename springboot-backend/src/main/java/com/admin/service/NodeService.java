@@ -39,6 +39,11 @@ public interface NodeService extends IService<Node> {
                                        String clientIp);
 
     /**
+     * 原子写入云厂商换出的公网 IP，并要求 APK 重新确认该地址。
+     */
+    boolean refreshAddressAfterChangeIp(Long id, long attemptAt, String newIp);
+
+    /**
      * 异步刷新节点运行时公网 IP，避免阻塞节点 WebSocket 心跳和指标上报。
      */
     void refreshRuntimeNodeServerIpAsync(Long id,

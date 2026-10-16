@@ -456,6 +456,29 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     }
 
     @Override
+    public boolean refreshAddressAfterChangeIp(Long id, long attemptAt, String newIp) {
+        if (id == null || StrUtil.isBlank(newIp)) return false;
+        String normalizedIp = normalizeNodeAddressForStorage(newIp.trim());
+        if (StrUtil.isBlank(normalizedIp)) return false;
+        boolean updated = baseMapper.updateAddressAfterChangeIp(id, attemptAt, normalizedIp) == 1;
+        if (!updated) return false;
+        try {
+            refreshMultiNodeTunnelIps(id);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    refreshForwardConfigsByNode(id);
+                } catch (Exception e) {
+                    log.warn("Refresh forward configs after cloud IP change failed, nodeId={}, error={}", id, e.getMessage());
+                }
+            }, deferredForwardExecutor);
+            CompletableFuture.runAsync(() -> syncCloudflareDnsByNode(id, "cloud-change-ip"), nodeRuntimeDnsExecutor);
+        } catch (Exception e) {
+            log.warn("Refresh dependent configs after cloud IP change failed, nodeId={}, error={}", id, e.getMessage());
+        }
+        return true;
+    }
+
+    @Override
     public boolean refreshRuntimeNodeServerIp(Long id,
                                               String reportedPublicIp,
                                               String reportedPublicIpv4,
@@ -607,7 +630,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
     private void syncCloudflareDnsByNode(Long nodeId, String trigger) {
         try {
-            cloudflareDnsSyncService.requestSyncAll(trigger);
+            cloudflareDnsSyncService.requestSyncByNode(nodeId, trigger);
         } catch (Exception e) {
             log.warn("Cloudflare DNS sync after node IP change failed, nodeId={}, trigger={}, error={}",
                     nodeId, trigger, e.getMessage());

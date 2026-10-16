@@ -95,31 +95,45 @@ public class ProbeSyncController {
 
         int accepted = 0;
         int ignored = 0;
+        boolean refreshNodes = false;
         for (ProbeNodeReportDto result : report.getResults()) {
             if (result == null || result.getNodeId() == null || result.getReachable() == null) {
                 ignored++;
                 continue;
             }
             String message = trimMessage(result.getMessage());
+            Long checkedAt = result.getCheckedAt() != null ? result.getCheckedAt() : report.getCheckedAt();
+            // 先尝试排队换 IP，再落库本次不可达状态。这样新 IP 在 APK 确认前保持 UNKNOWN
+            // 时，可以绕过上一轮成功换 IP后的冷却；普通重复不可达仍由数据库冷却条件拦截。
+            if (Boolean.FALSE.equals(result.getReachable())) {
+                if (result.getHost() == null || result.getHost().trim().isEmpty()) {
+                    ociChangeIpService.requestAfterUnreachableReport(result.getNodeId());
+                } else {
+                    ociChangeIpService.requestAfterUnreachableReport(result.getNodeId(), result.getHost(), checkedAt);
+                }
+            }
             R markResult;
             if (Boolean.TRUE.equals(result.getReachable())) {
-                markResult = nodeWallMonitorService.markNodeAvailableByExternalProbe(result.getNodeId(), message);
+                markResult = (result.getHost() == null && checkedAt == null)
+                        ? nodeWallMonitorService.markNodeAvailableByExternalProbe(result.getNodeId(), message)
+                        : nodeWallMonitorService.markNodeAvailableByExternalProbe(result.getNodeId(), message, result.getHost(), checkedAt);
             } else {
-                markResult = nodeWallMonitorService.markNodeUnavailableByExternalProbe(result.getNodeId(), message);
+                markResult = (result.getHost() == null && checkedAt == null)
+                        ? nodeWallMonitorService.markNodeUnavailableByExternalProbe(result.getNodeId(), message)
+                        : nodeWallMonitorService.markNodeUnavailableByExternalProbe(result.getNodeId(), message, result.getHost(), checkedAt);
             }
             if (markResult.getCode() != 0) {
                 ignored++;
                 continue;
             }
-            if (Boolean.FALSE.equals(result.getReachable())) {
-                ociChangeIpService.requestAfterUnreachableReport(result.getNodeId());
-            }
             accepted++;
+            refreshNodes |= Boolean.FALSE.equals(result.getReachable());
         }
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("accepted", accepted);
         data.put("ignored", ignored);
+        data.put("refreshNodes", refreshNodes);
         data.put("serverTime", System.currentTimeMillis());
         return R.ok(data);
     }

@@ -54,6 +54,11 @@ interface CloudflareDnsBinding {
   smartPoolBackupNodeIds?: string | number[];
   smartPoolLastSwitchAt?: number;
   smartPoolNextRotateAt?: number;
+  rotationEnabled?: number;
+  rotationGroups?: string | number[][];
+  rotationIntervalMinutes?: number;
+  rotationCurrentGroupIndex?: number;
+  rotationNextSwitchAt?: number;
   lastSyncAt?: number;
   lastSyncStatus?: string;
   lastSyncMessage?: string;
@@ -85,6 +90,9 @@ interface BindingForm {
   recordType: string;
   smartPoolEnabled: boolean;
   smartPoolPreferredNodeIds: number[];
+  rotationEnabled: boolean;
+  rotationGroups: number[][];
+  rotationIntervalMinutes: number;
 }
 
 const defaultSetting: CloudflareDnsSetting = {
@@ -103,6 +111,9 @@ const defaultBindingForm: BindingForm = {
   recordType: "AUTO",
   smartPoolEnabled: true,
   smartPoolPreferredNodeIds: [],
+  rotationEnabled: false,
+  rotationGroups: [[]],
+  rotationIntervalMinutes: 60,
 };
 
 export default function CloudflareDnsPage() {
@@ -205,6 +216,27 @@ export default function CloudflareDnsPage() {
     }
     return ids;
   };
+
+  const normalizeRotationGroups = (value?: string | number[][]): number[][] => {
+    let parsed: unknown = value;
+    if (typeof value === "string") {
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        parsed = [];
+      }
+    }
+    if (!Array.isArray(parsed)) {
+      return [[]];
+    }
+    const groups = parsed
+      .filter(Array.isArray)
+      .map((group) => normalizeNodeIds(group as number[]));
+    return groups.length > 0 ? groups : [[]];
+  };
+
+  const filterRotationGroups = (groups: number[][], allowedIds: number[]) =>
+    groups.map((group) => filterNodeIds(group, allowedIds));
 
   const selectedKeysToNodeIds = (keys: any): number[] => {
     if (keys === "all") {
@@ -462,6 +494,9 @@ export default function CloudflareDnsPage() {
       recordType: binding.recordType || "AUTO",
       smartPoolEnabled: binding.smartPoolEnabled === 1,
       smartPoolPreferredNodeIds: normalizeNodeIds(binding.smartPoolPreferredNodeIds),
+      rotationEnabled: binding.rotationEnabled === 1,
+      rotationGroups: normalizeRotationGroups(binding.rotationGroups),
+      rotationIntervalMinutes: Math.max(binding.rotationIntervalMinutes || 60, 5),
     });
     setBindingModalOpen(true);
   };
@@ -480,6 +515,18 @@ export default function CloudflareDnsPage() {
       toast.error("请选择节点");
       return;
     }
+    if (bindingForm.rotationEnabled) {
+      const rotationGroups = filterRotationGroups(bindingForm.rotationGroups, getFormBindingNodeIds()).filter((group) => group.length > 0);
+      if (rotationGroups.length < 2) {
+        toast.error("请至少配置两个轮训节点组");
+        return;
+      }
+      const selectedRotationNodeIds = rotationGroups.flat();
+      if (new Set(selectedRotationNodeIds).size !== selectedRotationNodeIds.length) {
+        toast.error("同一个节点不能重复放入多个轮训组");
+        return;
+      }
+    }
 
     setBindingSubmitLoading(true);
     try {
@@ -493,6 +540,9 @@ export default function CloudflareDnsPage() {
         recordType: bindingForm.recordType,
         smartPoolEnabled: bindingForm.smartPoolEnabled ? 1 : 0,
         smartPoolPreferredNodeIds: filterNodeIds(bindingForm.smartPoolPreferredNodeIds, getFormBindingNodeIds()),
+        rotationEnabled: bindingForm.rotationEnabled ? 1 : 0,
+        rotationGroups: filterRotationGroups(bindingForm.rotationGroups, getFormBindingNodeIds()).filter((group) => group.length > 0),
+        rotationIntervalMinutes: Math.max(bindingForm.rotationIntervalMinutes, 5),
       });
       if (res.code === 0) {
         toast.success(res.msg || "DNS 绑定已保存");
@@ -547,40 +597,89 @@ export default function CloudflareDnsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="flex items-center gap-3">
+      <div className="dns-page dns-page-loading">
+        <div className="flex items-center gap-3 text-default-600">
           <Spinner size="sm" />
-          <span className="text-default-600">正在加载...</span>
+          <span>正在加载 DNS 配置</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="px-3 lg:px-6 py-8 space-y-5">
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <Card className="shadow-sm border border-divider xl:col-span-1">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between w-full">
+    <div className="dns-page">
+      <header className="dns-page-header">
+        <div className="min-w-0">
+          <p className="dns-eyebrow">NETWORK / DNS</p>
+          <h1 className="dns-page-title">Cloudflare DNS</h1>
+          <p className="dns-page-description">集中管理解析记录、节点可用性和故障切换策略。</p>
+        </div>
+        <div className="dns-page-actions">
+          <Button size="sm" variant="flat" color="secondary" onPress={handleSyncAll} isLoading={syncAllLoading}>
+            全量同步
+          </Button>
+          <Button size="sm" color="primary" onPress={openAddBinding}>
+            新增绑定
+          </Button>
+        </div>
+      </header>
+
+      <div className="dns-summary-strip" aria-label="DNS 状态摘要">
+        <div className="dns-summary-item">
+          <span className="dns-summary-label">同步服务</span>
+          <span className="dns-summary-value">
+            <span className={`dns-status-dot ${setting.enabled === 1 ? "is-success" : "is-neutral"}`} aria-hidden="true" />
+            {setting.enabled === 1 ? "运行中" : "已停用"}
+          </span>
+        </div>
+        <div className="dns-summary-item">
+          <span className="dns-summary-label">DNS 绑定</span>
+          <span className="dns-summary-value tabular-nums">{bindings.length} 条</span>
+        </div>
+        <div className="dns-summary-item">
+          <span className="dns-summary-label">Android 探针</span>
+          <span className="dns-summary-value">
+            <span className={`dns-status-dot ${probeApiKey ? "is-success" : "is-warning"}`} aria-hidden="true" />
+            {probeApiKey ? "已配置" : "待配置"}
+          </span>
+        </div>
+        <div className="dns-summary-item dns-summary-item-wide">
+          <span className="dns-summary-label">最近同步</span>
+          <span className="dns-summary-value dns-summary-value-muted">{formatTime(setting.lastSyncAt)}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+        <Card className="dns-surface xl:col-span-1">
+          <CardHeader className="dns-card-header">
+            <div className="flex items-start justify-between w-full gap-4">
               <div>
-                <h2 className="text-base font-semibold text-foreground">Cloudflare DNS</h2>
-                <p className="text-xs text-default-500">DNS-only / DDNS</p>
+                <p className="dns-section-kicker">基础设置</p>
+                <h2 className="dns-section-title">同步配置</h2>
+                <p className="dns-section-description">控制 Cloudflare API 和默认解析行为。</p>
               </div>
               <Chip color={setting.enabled === 1 ? "success" : "default"} variant="flat" size="sm">
                 {setting.enabled === 1 ? "已启用" : "未启用"}
               </Chip>
             </div>
           </CardHeader>
-          <CardBody className="space-y-4">
-            <Switch
-              isSelected={setting.enabled === 1}
-              onValueChange={(checked) => setSetting((prev) => ({ ...prev, enabled: checked ? 1 : 0 }))}
-              color="primary"
-            >
-              <span className="text-sm">{setting.enabled === 1 ? "启用同步" : "关闭同步"}</span>
-            </Switch>
+          <CardBody className="dns-card-body space-y-5">
+            <div className="dns-control-row">
+              <div>
+                <p className="text-sm font-medium text-foreground">自动同步</p>
+                <p className="dns-helper-text">按设定间隔检查并更新托管记录。</p>
+              </div>
+              <Switch
+                aria-label="启用 DNS 自动同步"
+                isSelected={setting.enabled === 1}
+                onValueChange={(checked) => setSetting((prev) => ({ ...prev, enabled: checked ? 1 : 0 }))}
+                color="primary"
+              />
+            </div>
 
-            <Input
+            <div className="dns-form-section">
+              <p className="dns-form-section-title">Cloudflare 连接</p>
+              <Input
               label="API Token"
               type="password"
               placeholder={setting.apiTokenConfigured ? "已配置，留空保留原 Token" : "请输入 Cloudflare API Token"}
@@ -655,13 +754,14 @@ export default function CloudflareDnsPage() {
               title="DNS-only"
               description="本功能只写入 DNS 记录，不开启 Cloudflare 代理。"
             />
+            </div>
 
             <Divider />
 
-            <div className="space-y-2">
+            <div className="dns-form-section space-y-3">
               <div>
-                <h3 className="text-sm font-semibold text-foreground">Android 探针同步</h3>
-                <p className="text-xs text-default-500">把这个 Key 填入 APK 的“转发面板同步”页面。</p>
+                <p className="dns-form-section-title">Android 探针</p>
+                <p className="dns-helper-text">将这个 Key 填入 APK 的“面板同步”页面，用于回传节点可达性。</p>
               </div>
               <Input
                 label="面板 API Key"
@@ -685,21 +785,18 @@ export default function CloudflareDnsPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="dns-action-row">
               <Button size="sm" color="primary" onPress={handleSaveSetting} isLoading={settingLoading}>
                 保存配置
               </Button>
               <Button size="sm" variant="flat" onPress={handleTestSetting} isLoading={testLoading}>
                 测试连接
               </Button>
-              <Button size="sm" variant="flat" color="secondary" onPress={handleSyncAll} isLoading={syncAllLoading}>
-                全量同步
-              </Button>
             </div>
 
             <Divider />
 
-            <div className="grid grid-cols-1 gap-2 text-xs">
+            <div className="dns-sync-meta text-xs">
               <div className="flex justify-between gap-2">
                 <span className="text-default-500">最近同步</span>
                 <span className="text-right">{formatTime(setting.lastSyncAt)}</span>
@@ -717,53 +814,61 @@ export default function CloudflareDnsPage() {
           </CardBody>
         </Card>
 
-        <div className="xl:col-span-2 space-y-4">
-          <div className="flex justify-end">
-            <Button size="sm" color="primary" variant="flat" onPress={openAddBinding}>
-              新增绑定
-            </Button>
+        <div className="xl:col-span-2 space-y-5">
+          <div className="dns-content-heading">
+            <div>
+              <p className="dns-section-kicker">托管记录</p>
+              <h2 className="dns-section-title">DNS 绑定</h2>
+              <p className="dns-section-description">每条绑定独立控制节点来源、轮训分组和 APK 状态过滤。</p>
+            </div>
+            <span className="text-xs text-default-500 tabular-nums">{bindings.length} 条配置</span>
           </div>
 
           {bindings.length === 0 ? (
-            <Card className="shadow-sm border border-divider">
-              <CardBody className="text-center py-16">
-                <h3 className="text-base font-semibold text-foreground">暂无 DNS 绑定</h3>
+            <Card className="dns-surface">
+              <CardBody className="dns-empty-state">
+                <div className="dns-empty-icon" aria-hidden="true">⌁</div>
+                <h3 className="text-base font-semibold text-foreground">还没有 DNS 绑定</h3>
+                <p className="dns-section-description max-w-sm">创建第一条绑定后，面板会按节点状态维护对应的 A / AAAA 记录。</p>
+                <Button size="sm" color="primary" onPress={openAddBinding}>新增绑定</Button>
               </CardBody>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               {bindings.map((binding) => {
                 const nodeIds = getBindingNodeIds(binding);
                 const activePoolNodeIds = getPoolNodeIds(binding.smartPoolActiveNodeIds);
+                const rotationGroups = filterRotationGroups(normalizeRotationGroups(binding.rotationGroups), nodeIds);
+                const currentGroupIndex = Math.max(binding.rotationCurrentGroupIndex || 0, 0);
+                const currentRotationGroup = rotationGroups[currentGroupIndex] || [];
                 return (
-                  <Card key={binding.id} className="shadow-sm border border-divider">
-                    <CardHeader className="pb-2">
+                  <Card key={binding.id} className="dns-surface dns-binding-card">
+                    <CardHeader className="dns-card-header pb-3">
                       <div className="flex justify-between items-start w-full gap-3">
                         <div className="min-w-0">
-                          <h3 className="font-semibold text-sm text-foreground truncate">{getBindingDomainSummary(binding)}</h3>
-                          <p className="text-xs text-default-500 truncate">{getTunnelName(binding.tunnelId)}</p>
+                          <p className="dns-section-kicker">DNS BINDING</p>
+                          <h3 className="dns-binding-title truncate">{getBindingDomainSummary(binding)}</h3>
+                          <p className="text-xs text-default-500 truncate mt-1">{getTunnelName(binding.tunnelId)}</p>
                         </div>
                         <Chip size="sm" variant="flat" color={getStatusColor(binding.lastSyncStatus) as any}>
                           {getStatusText(binding.lastSyncStatus)}
                         </Chip>
                       </div>
                     </CardHeader>
-                    <CardBody className="pt-0 space-y-3">
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="p-2 rounded border border-default-200 bg-default-50 dark:bg-default-100/50">
-                          <div className="text-default-500 mb-1">节点来源</div>
-                          <div className="font-medium">
-                            {binding.useTunnelNodes === undefined || binding.useTunnelNodes === 1 ? "跟随隧道入口" : "手动选择"}
-                          </div>
+                    <CardBody className="dns-card-body pt-0 space-y-4">
+                      <div className="dns-binding-facts">
+                        <div>
+                          <span className="dns-fact-label">节点来源</span>
+                          <span className="dns-fact-value">{binding.useTunnelNodes === undefined || binding.useTunnelNodes === 1 ? "跟随隧道入口" : "手动选择"}</span>
                         </div>
-                        <div className="p-2 rounded border border-default-200 bg-default-50 dark:bg-default-100/50">
-                          <div className="text-default-500 mb-1">记录类型</div>
-                          <div className="font-medium">{binding.recordType || "AUTO"}</div>
+                        <div>
+                          <span className="dns-fact-label">记录类型</span>
+                          <span className="dns-fact-value">{binding.recordType || "AUTO"}</span>
                         </div>
                       </div>
 
-                      <div className="text-xs">
-                        <div className="text-default-500 mb-1">当前节点</div>
+                      <div className="dns-node-list text-xs">
+                        <div className="dns-fact-label mb-2">绑定节点</div>
                         <div className="flex flex-wrap gap-1">
                           {nodeIds.length > 0 ? nodeIds.map((nodeId) => (
                             <Chip key={nodeId} size="sm" variant="flat">
@@ -775,10 +880,28 @@ export default function CloudflareDnsPage() {
                         </div>
                       </div>
 
-                      {binding.smartPoolEnabled === 1 && (
-                        <div className="text-xs space-y-2">
+                      {binding.rotationEnabled === 1 && (
+                        <div className="dns-strategy-block dns-strategy-rotation text-xs space-y-2">
                           <div className="flex items-center gap-2">
-                            <span className="text-default-500">智能解析池</span>
+                            <span className="dns-fact-label">分组轮训</span>
+                            <Chip size="sm" variant="flat" color="secondary">每 {binding.rotationIntervalMinutes || 60} 分钟</Chip>
+                          </div>
+                          <div>
+                            <div className="text-default-500 mb-1">当前组（第 {currentGroupIndex + 1} 组）</div>
+                            <div className="flex flex-wrap gap-1">
+                              {currentRotationGroup.length > 0 ? currentRotationGroup.map((nodeId) => (
+                                <Chip key={nodeId} size="sm" variant="flat" color="secondary">{getNodeName(nodeId)}</Chip>
+                              )) : <Chip size="sm" variant="flat" color="warning">无节点</Chip>}
+                            </div>
+                          </div>
+                          <div className="text-default-500">下次切换：{formatTime(binding.rotationNextSwitchAt)}</div>
+                        </div>
+                      )}
+
+                      {binding.smartPoolEnabled === 1 && (
+                        <div className="dns-strategy-block dns-strategy-pool text-xs space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="dns-fact-label">智能解析池</span>
                             <Chip size="sm" variant="flat" color="primary">按 APK 状态自动解析</Chip>
                           </div>
                           <div>
@@ -796,12 +919,12 @@ export default function CloudflareDnsPage() {
                         </div>
                       )}
 
-                      <div className="text-xs text-default-500">
+                      <div className="dns-binding-footer text-xs text-default-500">
                         <div>{formatTime(binding.lastSyncAt)}</div>
                         {binding.lastSyncMessage && <div className="break-words mt-1">{binding.lastSyncMessage}</div>}
                       </div>
 
-                      <div className="flex gap-2">
+                      <div className="dns-binding-actions">
                         <Button
                           size="sm"
                           variant="flat"
@@ -908,6 +1031,7 @@ export default function CloudflareDnsPage() {
                         ...prev,
                         tunnelId,
                         smartPoolPreferredNodeIds: filterNodeIds(prev.smartPoolPreferredNodeIds, allowedNodeIds),
+                        rotationGroups: filterRotationGroups(prev.rotationGroups, allowedNodeIds),
                       }));
                     }}
                     variant="bordered"
@@ -946,6 +1070,7 @@ export default function CloudflareDnsPage() {
                         ...prev,
                         useTunnelNodes: checked,
                         smartPoolPreferredNodeIds: filterNodeIds(prev.smartPoolPreferredNodeIds, allowedNodeIds),
+                        rotationGroups: filterRotationGroups(prev.rotationGroups, allowedNodeIds),
                       };
                     })}
                     color="primary"
@@ -958,8 +1083,83 @@ export default function CloudflareDnsPage() {
                     onValueChange={(checked) => setBindingForm((prev) => ({ ...prev, smartPoolEnabled: checked }))}
                     color="primary"
                   >
-                    <span className="text-sm">智能解析池（按 APK 状态自动切换）</span>
+                    <span className="text-sm">智能解析池（按 APK 状态过滤当前组）</span>
                   </Switch>
+
+                  <Switch
+                    isSelected={bindingForm.rotationEnabled}
+                    onValueChange={(checked) => setBindingForm((prev) => ({ ...prev, rotationEnabled: checked }))}
+                    color="primary"
+                  >
+                    <span className="text-sm">分组轮训（故障时立即切换，正常时按间隔轮换）</span>
+                  </Switch>
+
+                  {bindingForm.rotationEnabled && (
+                    <div className="space-y-3 rounded border border-default-200 p-3">
+                      <p className="text-xs text-default-500">当前组全部不可用时会立即切换到下一个可用组；节点换 IP 由后台异步处理。</p>
+                      <Input
+                        label="轮训间隔"
+                        type="number"
+                        min={5}
+                        value={bindingForm.rotationIntervalMinutes.toString()}
+                        onChange={(e) => setBindingForm((prev) => ({ ...prev, rotationIntervalMinutes: Math.max(parseInt(e.target.value, 10) || 5, 5) }))}
+                        endContent={<span className="text-xs text-default-400">分钟</span>}
+                        variant="bordered"
+                      />
+                      {bindingForm.rotationGroups.map((group, groupIndex) => {
+                        const availableNodeIds = getFormBindingNodeIds();
+                        return (
+                          <div key={groupIndex} className="flex items-start gap-2">
+                            <Select
+                              label={`节点组 ${groupIndex + 1}`}
+                              selectionMode="multiple"
+                              selectedKeys={nodeIdsToSelectedKeys(filterNodeIds(group, availableNodeIds))}
+                              onSelectionChange={(keys) => {
+                                const nodeIds = filterNodeIds(selectedKeysToNodeIds(keys), getFormBindingNodeIds());
+                                setBindingForm((prev) => {
+                                  const rotationGroups = prev.rotationGroups.map((item, index) => index === groupIndex ? nodeIds : item);
+                                  return { ...prev, rotationGroups };
+                                });
+                              }}
+                              variant="bordered"
+                              className="flex-1"
+                            >
+                              {getPriorityOptionNodes().map((node) => (
+                                <SelectItem key={node.id} textValue={node.name}>
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="shrink-0">{node.name}</span>
+                                    <span className="text-xs text-default-500 truncate text-right min-w-0">{getNodeAddressSummary(node)}</span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </Select>
+                            <Button
+                              size="sm"
+                              variant="flat"
+                              color="danger"
+                              isIconOnly
+                              aria-label="删除节点组"
+                              isDisabled={bindingForm.rotationGroups.length <= 1}
+                              onPress={() => setBindingForm((prev) => ({
+                                ...prev,
+                                rotationGroups: prev.rotationGroups.filter((_, index) => index !== groupIndex),
+                              }))}
+                            >
+                              ×
+                            </Button>
+                          </div>
+                        );
+                      })}
+                      <Button
+                        size="sm"
+                        variant="flat"
+                        color="primary"
+                        onPress={() => setBindingForm((prev) => ({ ...prev, rotationGroups: [...prev.rotationGroups, []] }))}
+                      >
+                        新增节点组
+                      </Button>
+                    </div>
+                  )}
 
                   {!bindingForm.useTunnelNodes && (
                     <Select
@@ -972,6 +1172,7 @@ export default function CloudflareDnsPage() {
                           ...prev,
                           nodeIds,
                           smartPoolPreferredNodeIds: filterNodeIds(prev.smartPoolPreferredNodeIds, nodeIds),
+                          rotationGroups: filterRotationGroups(prev.rotationGroups, nodeIds),
                         }));
                       }}
                       variant="bordered"

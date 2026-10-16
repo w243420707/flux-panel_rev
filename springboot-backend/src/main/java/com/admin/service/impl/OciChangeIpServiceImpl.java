@@ -30,6 +30,9 @@ public class OciChangeIpServiceImpl implements OciChangeIpService {
     @Resource
     private AwsEc2ServiceImpl awsEc2Service;
 
+    @Resource
+    private com.admin.service.NodeService nodeService;
+
     @Resource(name = "ociChangeIpExecutor")
     private Executor executor;
 
@@ -38,7 +41,14 @@ public class OciChangeIpServiceImpl implements OciChangeIpService {
 
     @Override
     public void requestAfterUnreachableReport(Long nodeId) {
+        requestAfterUnreachableReport(nodeId, null, null);
+    }
+
+    @Override
+    public void requestAfterUnreachableReport(Long nodeId, String reportedHost, Long checkedAt) {
         if (nodeId == null) return;
+        Node current = nodeMapper.selectById(nodeId);
+        if (current == null || !matchesCurrentProbeAddress(current, reportedHost)) return;
         long attemptAt = System.currentTimeMillis();
         if (nodeMapper.reserveChangeIpAttempt(nodeId, attemptAt) != 1) return;
         broadcast(nodeId, attemptAt, RESULT_PENDING);
@@ -68,7 +78,10 @@ public class OciChangeIpServiceImpl implements OciChangeIpService {
                 if (node.getOciAccountId() == null || node.getOciInstanceOcid() == null) return;
                 var account = accountService.requireAccount(node.getOciAccountId());
                 String privateKey = accountService.decryptPrivateKey(account);
-                ociCloudService.changePublicIp(account, privateKey, node.getOciInstanceOcid());
+                String newIp = ociCloudService.changePublicIp(account, privateKey, node.getOciInstanceOcid());
+                if (!refreshNodeAddress(nodeId, attemptAt, newIp)) {
+                    throw new IllegalStateException("OCI 已换出新 IP，但节点地址回写失败");
+                }
             } else {
                 return;
             }
@@ -84,7 +97,12 @@ public class OciChangeIpServiceImpl implements OciChangeIpService {
         String result = RESULT_FAILED;
         try {
             var changed = awsEc2Service.changeIpForNode(accountId, instanceId, region);
-            if (changed != null && "SUCCEEDED".equals(changed.get("status"))) result = RESULT_SUCCEEDED;
+            String newIp = changed == null || changed.get("publicIp") == null
+                    ? null : String.valueOf(changed.get("publicIp")).trim();
+            if (changed != null && "SUCCEEDED".equals(changed.get("status"))
+                    && refreshNodeAddress(nodeId, attemptAt, newIp)) {
+                result = RESULT_SUCCEEDED;
+            }
         } catch (Exception e) {
             log.warn("AWS change IP failed, nodeId={}, errorType={}", nodeId, e.getClass().getSimpleName());
         } finally {
@@ -96,6 +114,18 @@ public class OciChangeIpServiceImpl implements OciChangeIpService {
         if (nodeMapper.finishChangeIpAttempt(nodeId, attemptAt, result) == 1) {
             broadcast(nodeId, attemptAt, result);
         }
+    }
+
+    private boolean refreshNodeAddress(Long nodeId, long attemptAt, String newIp) {
+        if (newIp == null || newIp.trim().isEmpty()) return false;
+        return nodeService.refreshAddressAfterChangeIp(nodeId, attemptAt, newIp.trim());
+    }
+
+    private boolean matchesCurrentProbeAddress(Node node, String reportedHost) {
+        if (reportedHost == null || reportedHost.trim().isEmpty()) return true;
+        String host = reportedHost.trim();
+        return host.equals(node.getServerIp()) || host.equals(node.getServerIpv4())
+                || host.equals(node.getServerIpv6()) || host.equals(node.getIp());
     }
 
     private void broadcast(Long nodeId, long attemptAt, String result) {

@@ -36,9 +36,21 @@ public interface NodeMapper extends BaseMapper<Node> {
             + "WHERE id = #{id} AND cloud_provider IN ('OCI', 'AWS') "
             + "AND ((cloud_provider = 'OCI' AND oci_account_id IS NOT NULL AND oci_instance_ocid IS NOT NULL AND TRIM(oci_instance_ocid) <> '') "
             + "OR (cloud_provider = 'AWS' AND aws_account_id IS NOT NULL AND aws_instance_id IS NOT NULL AND TRIM(aws_instance_id) <> '' AND aws_region IS NOT NULL AND TRIM(aws_region) <> '')) "
-            + "AND (change_ip_last_attempt_at IS NULL OR change_ip_last_attempt_at <= "
-            + "#{attemptAt} - GREATEST(COALESCE(change_ip_min_interval_minutes, 3), 3) * 60000)")
+            + "AND ((change_ip_last_attempt_at IS NULL OR change_ip_last_attempt_at <= "
+            + "#{attemptAt} - GREATEST(COALESCE(change_ip_min_interval_minutes, 3), 3) * 60000) "
+            + "OR (change_ip_last_result = 'SUCCEEDED' AND wall_monitor_external_status = 'UNKNOWN'))")
     int reserveChangeIpAttempt(@Param("id") Long id, @Param("attemptAt") long attemptAt);
+
+    @Update("UPDATE node SET ip = CASE WHEN ip IS NULL OR ip = '' OR ip = server_ip OR ip = server_ipv4 OR ip = server_ipv6 THEN #{ip} ELSE ip END, "
+            + "server_ip = #{ip}, server_ipv4 = #{ip}, updated_time = #{attemptAt}, "
+            + "wall_monitor_status = 'UNKNOWN', wall_monitor_last_check_at = NULL, "
+            + "wall_monitor_consecutive_failures = 0, wall_monitor_message = '公网 IP 已更换，等待 APK 确认', "
+            + "wall_monitor_external_status = 'UNKNOWN', wall_monitor_external_last_check_at = NULL, "
+            + "wall_monitor_external_consecutive_failures = 0, wall_monitor_external_message = '公网 IP 已更换，等待 APK 确认' "
+            + "WHERE id = #{id} AND change_ip_last_attempt_at = #{attemptAt} AND change_ip_last_result = 'PENDING'")
+    int updateAddressAfterChangeIp(@Param("id") Long id,
+                                   @Param("attemptAt") long attemptAt,
+                                   @Param("ip") String ip);
 
     @Update("UPDATE node SET change_ip_last_result = #{result} WHERE id = #{id} "
             + "AND change_ip_last_attempt_at = #{attemptAt} AND change_ip_last_result = 'PENDING'")

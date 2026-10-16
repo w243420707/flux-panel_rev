@@ -31,6 +31,11 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
 
     @Override
     public R markNodeUnavailableByExternalProbe(Long nodeId, String message) {
+        return markNodeUnavailableByExternalProbe(nodeId, message, null, null);
+    }
+
+    @Override
+    public R markNodeUnavailableByExternalProbe(Long nodeId, String message, String reportedHost, Long checkedAt) {
         if (nodeId == null) {
             return R.err("node id is required");
         }
@@ -38,9 +43,13 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         if (node == null) {
             return R.err("node not found");
         }
+        if (!matchesCurrentAddress(node, reportedHost) || isStaleReport(node, checkedAt)) {
+            return R.ok("stale external probe report ignored");
+        }
 
         String previousStatus = normalizeStatus(node.getWallMonitorExternalStatus());
         long now = System.currentTimeMillis();
+        long eventAt = checkedAt != null && checkedAt > 0L ? checkedAt : now;
         int nextFailures = safeInt(node.getWallMonitorExternalConsecutiveFailures()) + 1;
         if (!shouldPersistExternalResult(node, STATUS_SUSPECTED_BLOCKED, now)) {
             return R.ok("external probe status unchanged");
@@ -50,19 +59,24 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         update.setId(nodeId);
         update.setWallMonitorEnabled(1);
         update.setWallMonitorExternalStatus(STATUS_SUSPECTED_BLOCKED);
-        update.setWallMonitorExternalLastCheckAt(now);
+        update.setWallMonitorExternalLastCheckAt(eventAt);
         update.setWallMonitorExternalConsecutiveFailures(nextFailures);
         String normalizedMessage = trimMessage(message, "Android probe marked the node unreachable");
-        applyExternalStatusAsPrimary(update, STATUS_SUSPECTED_BLOCKED, now, nextFailures, normalizedMessage);
+        applyExternalStatusAsPrimary(update, STATUS_SUSPECTED_BLOCKED, eventAt, nextFailures, normalizedMessage);
         update.setWallMonitorExternalMessage(normalizedMessage);
         nodeService.updateById(update);
         broadcastMonitorUpdate(update);
-        syncCloudflareDnsIfStatusChanged(previousStatus, STATUS_SUSPECTED_BLOCKED, "android-probe");
+        syncCloudflareDnsIfStatusChanged(nodeId, previousStatus, STATUS_SUSPECTED_BLOCKED, "android-probe");
         return R.ok("node marked as unreachable");
     }
 
     @Override
     public R markNodeAvailableByExternalProbe(Long nodeId, String message) {
+        return markNodeAvailableByExternalProbe(nodeId, message, null, null);
+    }
+
+    @Override
+    public R markNodeAvailableByExternalProbe(Long nodeId, String message, String reportedHost, Long checkedAt) {
         if (nodeId == null) {
             return R.err("node id is required");
         }
@@ -70,9 +84,13 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         if (node == null) {
             return R.err("node not found");
         }
+        if (!matchesCurrentAddress(node, reportedHost) || isStaleReport(node, checkedAt)) {
+            return R.ok("stale external probe report ignored");
+        }
 
         String previousStatus = normalizeStatus(node.getWallMonitorExternalStatus());
         long now = System.currentTimeMillis();
+        long eventAt = checkedAt != null && checkedAt > 0L ? checkedAt : now;
         if (!shouldPersistExternalResult(node, STATUS_OK, now)) {
             return R.ok("external probe status unchanged");
         }
@@ -81,14 +99,14 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         update.setId(nodeId);
         update.setWallMonitorEnabled(1);
         update.setWallMonitorExternalStatus(STATUS_OK);
-        update.setWallMonitorExternalLastCheckAt(now);
+        update.setWallMonitorExternalLastCheckAt(eventAt);
         update.setWallMonitorExternalConsecutiveFailures(0);
         String normalizedMessage = trimMessage(message, "Android probe marked the node reachable");
-        applyExternalStatusAsPrimary(update, STATUS_OK, now, 0, normalizedMessage);
+        applyExternalStatusAsPrimary(update, STATUS_OK, eventAt, 0, normalizedMessage);
         update.setWallMonitorExternalMessage(normalizedMessage);
         nodeService.updateById(update);
         broadcastMonitorUpdate(update);
-        syncCloudflareDnsIfStatusChanged(previousStatus, STATUS_OK, "android-probe");
+        syncCloudflareDnsIfStatusChanged(nodeId, previousStatus, STATUS_OK, "android-probe");
         return R.ok("node marked as reachable");
     }
 
@@ -126,11 +144,30 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
         }
     }
 
-    private void syncCloudflareDnsIfStatusChanged(String previousStatus, String nextStatus, String trigger) {
+    private void syncCloudflareDnsIfStatusChanged(Long nodeId, String previousStatus, String nextStatus, String trigger) {
         if (Objects.equals(normalizeStatus(previousStatus), normalizeStatus(nextStatus))) {
             return;
         }
-        cloudflareDnsSyncService.requestSyncAll(trigger);
+        cloudflareDnsSyncService.requestSyncByNode(nodeId, trigger);
+    }
+
+    private boolean matchesCurrentAddress(Node node, String reportedHost) {
+        if (reportedHost == null || reportedHost.trim().isEmpty()) return true;
+        String host = reportedHost.trim();
+        return host.equals(normalizeAddress(node.getServerIp()))
+                || host.equals(normalizeAddress(node.getServerIpv4()))
+                || host.equals(normalizeAddress(node.getServerIpv6()))
+                || host.equals(normalizeAddress(node.getIp()));
+    }
+
+    private boolean isStaleReport(Node node, Long checkedAt) {
+        if (checkedAt == null || checkedAt <= 0L) return false;
+        Long previous = node.getWallMonitorExternalLastCheckAt();
+        return previous != null && checkedAt <= previous;
+    }
+
+    private String normalizeAddress(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private boolean shouldPersistExternalResult(Node previous, String nextStatus, long now) {

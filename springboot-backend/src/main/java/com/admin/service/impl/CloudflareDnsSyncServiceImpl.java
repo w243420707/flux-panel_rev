@@ -107,6 +107,21 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
     }
 
     @Override
+    public void requestSyncByNode(Long nodeId, String trigger) {
+        if (nodeId == null || nodeId <= 0) {
+            return;
+        }
+        cloudflareDnsExecutor.execute(() -> {
+            try {
+                syncBindingsByNode(nodeId, StringUtils.hasText(trigger) ? trigger : "node-status-change");
+            } catch (Exception e) {
+                log.warn("Queued Cloudflare DNS node sync failed, nodeId={}, trigger={}, error={}",
+                        nodeId, trigger, e.getMessage());
+            }
+        });
+    }
+
+    @Override
     public R syncBinding(Long bindingId, String trigger) {
         CloudflareDnsBinding binding = cloudflareDnsBindingService.getBindingById(bindingId);
         if (binding == null) {
@@ -165,11 +180,18 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         }
 
         long now = System.currentTimeMillis();
+        boolean rotationDue = cloudflareDnsBindingService.list(
+                new QueryWrapper<CloudflareDnsBinding>()
+                        .eq("status", 1)
+                        .eq("rotation_enabled", 1)
+                        .and(wrapper -> wrapper.isNull("rotation_next_switch_at")
+                                .or().le("rotation_next_switch_at", now))
+        ).size() > 0;
         long intervalMillis = Math.max(resolveInterval(setting.getSyncIntervalSeconds()), 60) * 1000L;
-        if (setting.getLastSyncAt() != null && now - setting.getLastSyncAt() < intervalMillis) {
+        if (!rotationDue && setting.getLastSyncAt() != null && now - setting.getLastSyncAt() < intervalMillis) {
             return R.ok("距离上次同步时间未超过间隔");
         }
-        return syncAllBindings("scheduler");
+        return syncAllBindings(rotationDue ? "rotation-scheduler" : "scheduler");
     }
 
     @Override
@@ -322,17 +344,11 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             List<CloudflareDnsRecord> primaryExistingRecords = fetchManagedRecords(setting, binding, domains.get(0));
             List<CloudflareDnsRecord> primaryAddressRecords = filterManagedRecords(primaryExistingRecords, record ->
                     RECORD_TYPE_A.equalsIgnoreCase(record.getType()) || RECORD_TYPE_AAAA.equalsIgnoreCase(record.getType()));
-            deleteRecordsByType(setting, primaryExistingRecords, RECORD_TYPE_CNAME);
-
             boolean smartPoolEnabled = isEnabled(binding.getSmartPoolEnabled());
-            List<CloudflareDnsTarget> desiredTargets = new ArrayList<>();
-            Set<String> preservedRecordKeys = new HashSet<>();
-            Set<Long> preservedNodeIds = new LinkedHashSet<>();
+            Map<Long, Boolean> usableByNode = new LinkedHashMap<>();
             Set<Long> unresolvedNodeIds = new HashSet<>();
             Set<Long> offlineNodeIds = new HashSet<>();
             Set<Long> blockedNodeIds = new HashSet<>();
-            List<Long> effectiveNodeIds = new ArrayList<>();
-
             for (Long nodeId : nodeIds) {
                 NodeDnsState state = nodeStates.get(nodeId);
                 String wallStatus = resolveEffectiveWallStatus(state == null ? null : state.node);
@@ -341,35 +357,56 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                 boolean hasTargets = state != null && !state.targets.isEmpty();
                 boolean probeOk = WALL_STATUS_OK.equals(wallStatus);
                 boolean blocked = WALL_STATUS_SUSPECTED_BLOCKED.equals(wallStatus);
-
                 if (blocked) {
                     blockedNodeIds.add(nodeId);
-                    continue;
                 }
+                boolean usable = !blocked && online && hasTargets
+                        && (smartPoolEnabled ? probeOk : !isCriticalWallStatus(wallStatus));
+                usableByNode.put(nodeId, usable);
+                if (!usable) {
+                    unresolvedNodeIds.add(nodeId);
+                    if (!online) {
+                        offlineNodeIds.add(nodeId);
+                    }
+                }
+            }
 
-                boolean usable = online && hasTargets && (smartPoolEnabled ? probeOk : !isCriticalWallStatus(wallStatus));
-                if (usable) {
+            List<Long> selectedNodeIds = selectRotationNodeIds(binding, nodeIds, usableByNode);
+            boolean selectedGroupUnavailable = isRotationEnabled(binding)
+                    && selectedNodeIds.stream().noneMatch(id -> Boolean.TRUE.equals(usableByNode.get(id)));
+            List<CloudflareDnsTarget> desiredTargets = new ArrayList<>();
+            Set<String> preservedRecordKeys = new HashSet<>();
+            Set<Long> preservedNodeIds = new LinkedHashSet<>();
+            List<Long> effectiveNodeIds = new ArrayList<>();
+            for (Long nodeId : selectedNodeIds) {
+                NodeDnsState state = nodeStates.get(nodeId);
+                if (Boolean.TRUE.equals(usableByNode.get(nodeId))) {
                     effectiveNodeIds.add(nodeId);
                     desiredTargets.addAll(state.targets);
                     continue;
                 }
-
-                unresolvedNodeIds.add(nodeId);
-                if (!online) {
-                    offlineNodeIds.add(nodeId);
+                if (!smartPoolEnabled && blockedNodeIds.contains(nodeId)) {
                     continue;
                 }
-                preserveExistingRecordsForUnresolvedNode(
-                        primaryAddressRecords,
-                        primaryDomain,
-                        state,
-                        preservedRecordKeys,
-                        preservedNodeIds
-                );
+                if (!smartPoolEnabled && state != null && state.node != null
+                        && !Objects.equals(state.node.getStatus(), NODE_ONLINE)) {
+                    continue;
+                }
+                if (!smartPoolEnabled) {
+                    preserveExistingRecordsForUnresolvedNode(
+                            primaryAddressRecords,
+                            primaryDomain,
+                            state,
+                            preservedRecordKeys,
+                            preservedNodeIds
+                    );
+                }
             }
 
             desiredTargets = deduplicateTargets(desiredTargets);
-            effectiveNodeIds.addAll(preservedNodeIds);
+            if (!smartPoolEnabled) {
+                effectiveNodeIds.addAll(preservedNodeIds);
+            }
             SmartPoolPlan smartPoolPlan = null;
             if (smartPoolEnabled) {
                 smartPoolPlan = selectSmartPoolNodes(binding, effectiveNodeIds);
@@ -382,10 +419,13 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                 desiredRecordKeys.add(targetRecordKey(primaryDomain, target));
             }
 
-            if (desiredTargets.isEmpty() && desiredRecordKeys.isEmpty()
-                    && blockedNodeIds.isEmpty() && offlineNodeIds.isEmpty()) {
+            if (selectedGroupUnavailable
+                    || (desiredTargets.isEmpty() && desiredRecordKeys.isEmpty()
+                    && blockedNodeIds.isEmpty() && offlineNodeIds.isEmpty())) {
                 String message = "未解析到任何可用公网 " + recordTypeLabel(recordType) + "，已保留旧 DNS 记录";
-                if (smartPoolPlan != null && smartPoolPlan.activeNodeIds.isEmpty()) {
+                if (selectedGroupUnavailable) {
+                    message = "当前节点组没有可用节点，已保留旧 DNS 记录";
+                } else if (smartPoolPlan != null && smartPoolPlan.activeNodeIds.isEmpty()) {
                     message = "智能池没有可用活跃节点，已保留旧 DNS 记录";
                 }
                 markBinding(binding, SYNC_SKIPPED, message, null);
@@ -394,6 +434,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             }
 
             // Primary records were loaded before node evaluation so unresolved nodes can be preserved.
+            deleteRecordsByType(setting, primaryExistingRecords, RECORD_TYPE_CNAME);
 
             upsertDesiredRecords(setting, binding, primaryDomain, desiredTargets, primaryAddressRecords);
             deleteStaleRecords(setting, binding, primaryAddressRecords, desiredRecordKeys);
@@ -677,12 +718,11 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                                                           List<String> domains) {
         List<CloudflareDnsRecord> records = new ArrayList<>();
         for (String domain : domains) {
-            for (String type : MANAGED_RECORD_TYPES) {
-                records.addAll(cloudflareApiClient.listDnsRecords(setting.getZoneId(), setting.getApiToken(), domain, type)
-                        .stream()
-                        .filter(record -> isManagedRecord(binding, record))
-                        .collect(Collectors.toList()));
-            }
+            records.addAll(cloudflareApiClient.listDnsRecords(setting.getZoneId(), setting.getApiToken(), domain, null)
+                    .stream()
+                    .filter(record -> MANAGED_RECORD_TYPES.stream().anyMatch(type -> type.equalsIgnoreCase(record.getType())))
+                    .filter(record -> isManagedRecord(binding, record))
+                    .collect(Collectors.toList()));
         }
         return records;
     }
@@ -705,6 +745,98 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             return new ArrayList<>();
         }
         return records.stream().filter(predicate).collect(Collectors.toList());
+    }
+
+    private boolean isRotationEnabled(CloudflareDnsBinding binding) {
+        return binding != null && isEnabled(binding.getRotationEnabled());
+    }
+
+    private List<Long> selectRotationNodeIds(CloudflareDnsBinding binding,
+                                             List<Long> nodeIds,
+                                             Map<Long, Boolean> usableByNode) {
+        List<Long> normalizedNodeIds = normalizeNodeIdList(nodeIds);
+        if (!isRotationEnabled(binding)) {
+            return normalizedNodeIds;
+        }
+        List<List<Long>> groups = parseRotationGroups(binding.getRotationGroups());
+        if (groups.size() < 2) {
+            return normalizedNodeIds;
+        }
+        Set<Long> allowed = new LinkedHashSet<>(normalizedNodeIds);
+        groups = groups.stream()
+                .map(group -> group.stream().filter(allowed::contains).collect(Collectors.toList()))
+                .filter(group -> !group.isEmpty())
+                .collect(Collectors.toList());
+        if (groups.size() < 2) {
+            return normalizedNodeIds;
+        }
+
+        long now = System.currentTimeMillis();
+        int currentIndex = binding.getRotationCurrentGroupIndex() == null
+                ? 0 : Math.floorMod(binding.getRotationCurrentGroupIndex(), groups.size());
+        boolean currentHasUsable = groups.get(currentIndex).stream()
+                .anyMatch(id -> Boolean.TRUE.equals(usableByNode.get(id)));
+        boolean due = binding.getRotationNextSwitchAt() != null && now >= binding.getRotationNextSwitchAt();
+        int selectedIndex = currentIndex;
+        if (!currentHasUsable || due) {
+            for (int offset = 1; offset <= groups.size(); offset++) {
+                int candidate = (currentIndex + offset) % groups.size();
+                boolean candidateHasUsable = groups.get(candidate).stream()
+                        .anyMatch(id -> Boolean.TRUE.equals(usableByNode.get(id)));
+                if (candidateHasUsable) {
+                    selectedIndex = candidate;
+                    break;
+                }
+            }
+        }
+        if (selectedIndex != currentIndex) {
+            binding.setRotationCurrentGroupIndex(selectedIndex);
+            binding.setRotationLastSwitchAt(now);
+        }
+        int intervalMinutes = binding.getRotationIntervalMinutes() == null
+                ? 5 : Math.max(binding.getRotationIntervalMinutes(), 5);
+        if (binding.getRotationNextSwitchAt() == null || selectedIndex != currentIndex || due) {
+            binding.setRotationNextSwitchAt(now + intervalMinutes * 60_000L);
+        }
+        if (selectedIndex != currentIndex || due || binding.getRotationNextSwitchAt() == null) {
+            binding.setUpdatedTime(now);
+            cloudflareDnsBindingService.updateById(binding);
+        }
+        return new ArrayList<>(groups.get(selectedIndex));
+    }
+
+    private List<List<Long>> parseRotationGroups(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return new ArrayList<>();
+        }
+        try {
+            List<?> groups = JSON.parseObject(raw, List.class);
+            List<List<Long>> normalized = new ArrayList<>();
+            if (groups != null) {
+                for (Object rawGroup : groups) {
+                    if (!(rawGroup instanceof List)) {
+                        continue;
+                    }
+                    List<Long> group = new ArrayList<>();
+                    for (Object rawId : (List<?>) rawGroup) {
+                        try {
+                            long id = Long.parseLong(String.valueOf(rawId));
+                            if (id > 0 && !group.contains(id)) {
+                                group.add(id);
+                            }
+                        } catch (Exception ignored) {
+                            // Ignore malformed node ids in legacy JSON.
+                        }
+                    }
+                    if (!group.isEmpty()) {
+                        normalized.add(group);
+                    }
+                }
+            }
+            return normalized;
+        } catch (Exception ignored) {
+            return new ArrayList<>();
+        }
     }
 
     private List<Long> resolveNodeIds(CloudflareDnsBinding binding) {

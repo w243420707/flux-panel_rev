@@ -41,13 +41,16 @@ class ProbeSyncOciDispatchTest {
         when(configs.getOne(any(QueryWrapper.class))).thenReturn(apiKey);
         when(wallMonitor.markNodeUnavailableByExternalProbe(anyLong(), anyString())).thenReturn(R.ok());
         when(wallMonitor.markNodeAvailableByExternalProbe(anyLong(), anyString())).thenReturn(R.ok());
+        when(wallMonitor.markNodeUnavailableByExternalProbe(anyLong(), anyString(), anyString(), any())).thenReturn(R.ok());
+        when(wallMonitor.markNodeAvailableByExternalProbe(anyLong(), anyString(), anyString(), any())).thenReturn(R.ok());
     }
 
     @Test
     void onlyUnreachableBatchReportsRequestAnOciChange() {
         ProbeNodeReportDto unreachable = result(false);
         controller.report("probe-test-key", null, report(unreachable));
-        verify(changeIp).requestAfterUnreachableReport(7L);
+        verify(changeIp).requestAfterUnreachableReport(7L, "203.0.113.7", null);
+        verify(wallMonitor).markNodeUnavailableByExternalProbe(7L, "探针未提供检测说明", "203.0.113.7", null);
 
         clearInvocations(changeIp);
         controller.report("probe-test-key", null, report(result(true)));
@@ -76,6 +79,7 @@ class ProbeSyncOciDispatchTest {
     private static ProbeNodeReportDto result(boolean reachable) {
         ProbeNodeReportDto result = new ProbeNodeReportDto();
         result.setNodeId(7L);
+        result.setHost("203.0.113.7");
         result.setReachable(reachable);
         return result;
     }

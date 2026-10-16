@@ -22,6 +22,12 @@ public class CloudflareDnsBinding extends BaseEntity {
     private String smartPoolBackupNodeIds;
     private Long smartPoolLastSwitchAt;
     private Long smartPoolNextRotateAt;
+    private Integer rotationEnabled;
+    private String rotationGroups;
+    private Integer rotationIntervalMinutes;
+    private Integer rotationCurrentGroupIndex;
+    private Long rotationLastSwitchAt;
+    private Long rotationNextSwitchAt;
     private Long lastSyncAt;
     private String lastSyncStatus;
     private String lastSyncMessage;

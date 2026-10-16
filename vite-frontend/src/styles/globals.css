@@ -1,5 +1,5 @@
 @import "tailwindcss";
-
+@config "../../tailwind.config.js";
 
 /* 移动端视口高度优化 */
 html, body {
@@ -85,4 +85,102 @@ html, body {
   }
 }
 
-@config "../../tailwind.config.js"
+/* DNS 管理页：克制的 SaaS 工作台视觉层 */
+:root {
+  --dns-page-bg: oklch(97.5% 0.008 250);
+  --dns-surface: oklch(99.5% 0.003 250);
+  --dns-surface-muted: oklch(96.5% 0.012 250);
+  --dns-border: oklch(89% 0.018 250);
+  --dns-border-strong: oklch(82% 0.028 250);
+  --dns-ink: oklch(24% 0.028 250);
+  --dns-muted: oklch(48% 0.025 250);
+  --dns-subtle: oklch(60% 0.022 250);
+  --dns-primary: oklch(49% 0.16 255);
+  --dns-success: oklch(46% 0.14 155);
+  --dns-warning: oklch(52% 0.16 75);
+  --dns-shadow: 0 1px 2px oklch(20% 0.03 250 / 0.04), 0 12px 28px oklch(20% 0.03 250 / 0.035);
+}
+
+.dark {
+  --dns-page-bg: oklch(18% 0.018 250);
+  --dns-surface: oklch(22% 0.022 250);
+  --dns-surface-muted: oklch(25% 0.026 250);
+  --dns-border: oklch(32% 0.028 250);
+  --dns-border-strong: oklch(40% 0.035 250);
+  --dns-ink: oklch(94% 0.012 250);
+  --dns-muted: oklch(74% 0.02 250);
+  --dns-subtle: oklch(62% 0.022 250);
+  --dns-primary: oklch(76% 0.13 250);
+  --dns-success: oklch(76% 0.13 155);
+  --dns-warning: oklch(82% 0.14 80);
+  --dns-shadow: 0 1px 2px oklch(5% 0.02 250 / 0.24), 0 16px 36px oklch(5% 0.02 250 / 0.16);
+}
+
+.dns-page {
+  min-height: 100%;
+  padding: clamp(1.25rem, 2.5vw, 2.5rem) clamp(0.75rem, 2.8vw, 2.5rem) 3rem;
+  background: var(--dns-page-bg);
+  color: var(--dns-ink);
+}
+.dns-page-loading { display: grid; min-height: 20rem; place-items: center; }
+.dns-page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; max-width: 108rem; margin: 0 auto 1.5rem; }
+.dns-page-actions, .dns-action-row, .dns-binding-actions { display: flex; flex-wrap: wrap; gap: 0.625rem; }
+.dns-page-actions { justify-content: flex-end; }
+.dns-binding-actions > button { flex: 1 1 6rem; }
+.dns-eyebrow, .dns-section-kicker, .dns-form-section-title { margin: 0; color: var(--dns-subtle); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.1em; line-height: 1.2; text-transform: uppercase; }
+.dns-page-title { margin: 0.35rem 0 0; color: var(--dns-ink); font-size: clamp(1.5rem, 2.4vw, 2rem); font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; text-wrap: balance; }
+.dns-page-description, .dns-section-description, .dns-helper-text { color: var(--dns-muted); font-size: 0.8125rem; line-height: 1.55; text-wrap: pretty; }
+.dns-page-description { margin: 0.5rem 0 0; }
+.dns-section-description { margin: 0.35rem 0 0; }
+.dns-helper-text { margin: 0.2rem 0 0; font-size: 0.75rem; }
+.dns-summary-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 108rem; margin: 0 auto 1.5rem; overflow: hidden; border: 1px solid var(--dns-border); border-radius: 0.75rem; background: var(--dns-surface); box-shadow: var(--dns-shadow); }
+.dns-summary-item { display: flex; min-width: 0; flex-direction: column; gap: 0.35rem; padding: 0.9rem 1rem; border-inline-end: 1px solid var(--dns-border); }
+.dns-summary-item:last-child { border-inline-end: 0; }
+.dns-summary-label, .dns-fact-label { color: var(--dns-subtle); font-size: 0.6875rem; font-weight: 600; line-height: 1.3; }
+.dns-summary-value, .dns-fact-value { display: flex; min-width: 0; align-items: center; gap: 0.45rem; color: var(--dns-ink); font-size: 0.8125rem; font-weight: 600; line-height: 1.35; }
+.dns-summary-value-muted { color: var(--dns-muted); font-weight: 500; }
+.dns-status-dot { width: 0.45rem; height: 0.45rem; flex: 0 0 auto; border-radius: 999px; background: var(--dns-subtle); }
+.dns-status-dot.is-success { background: var(--dns-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dns-success) 15%, transparent); }
+.dns-status-dot.is-warning { background: var(--dns-warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dns-warning) 16%, transparent); }
+.dns-surface { border: 1px solid var(--dns-border) !important; border-radius: 0.75rem !important; background: var(--dns-surface) !important; box-shadow: var(--dns-shadow) !important; }
+.dns-card-header { padding: 1.15rem 1.25rem 0.8rem !important; }
+.dns-card-body { padding: 0.8rem 1.25rem 1.25rem !important; }
+.dns-section-title { margin: 0.35rem 0 0; color: var(--dns-ink); font-size: 1rem; font-weight: 700; line-height: 1.25; }
+.dns-control-row, .dns-content-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.dns-form-section { display: grid; gap: 0.75rem; }
+.dns-form-section-title { color: var(--dns-muted); letter-spacing: 0.04em; }
+.dns-action-row { padding-top: 0.25rem; }
+.dns-sync-meta { display: grid; gap: 0.5rem; }
+.dns-sync-meta > div { display: flex; justify-content: space-between; gap: 1rem; }
+.dns-content-heading { align-items: flex-end; }
+.dns-binding-title { margin-top: 0.35rem; color: var(--dns-ink); font-size: 0.9375rem; font-weight: 700; line-height: 1.25; }
+.dns-binding-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--dns-border); }
+.dns-binding-facts > div { display: grid; gap: 0.28rem; min-width: 0; }
+.dns-node-list { padding-top: 0.15rem; }
+.dns-strategy-block { padding: 0.75rem; border: 1px solid var(--dns-border); border-radius: 0.625rem; background: var(--dns-surface-muted); }
+.dns-strategy-rotation { border-inline-start: 3px solid var(--dns-warning); }
+.dns-strategy-pool { border-inline-start: 3px solid var(--dns-primary); }
+.dns-binding-footer { padding-top: 0.25rem; border-top: 1px solid var(--dns-border); }
+.dns-empty-state { display: grid; place-items: center; gap: 0.65rem; min-height: 18rem; text-align: center; }
+.dns-empty-icon { display: grid; width: 2.75rem; height: 2.75rem; place-items: center; border: 1px solid var(--dns-border-strong); border-radius: 0.75rem; color: var(--dns-primary); font-size: 1.5rem; }
+.dns-page button, .dns-page input, .dns-page [role="button"] { transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out, transform 150ms ease-out; }
+.dns-page button:active { transform: scale(0.98); }
+.dns-page button:focus-visible, .dns-page input:focus-visible, .dns-page [role="button"]:focus-visible { outline: 2px solid var(--dns-primary); outline-offset: 2px; }
+@media (max-width: 900px) {
+  .dns-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dns-summary-item:nth-child(2) { border-inline-end: 0; }
+  .dns-summary-item:nth-child(-n + 2) { border-bottom: 1px solid var(--dns-border); }
+}
+@media (max-width: 640px) {
+  .dns-page-header { align-items: stretch; flex-direction: column; gap: 1rem; }
+  .dns-page-actions > button { flex: 1 1 8rem; }
+  .dns-summary-strip { grid-template-columns: 1fr 1fr; }
+  .dns-summary-item { padding: 0.8rem; }
+  .dns-content-heading { align-items: flex-start; flex-direction: column; gap: 0.35rem; }
+  .dns-card-header { padding-inline: 1rem !important; }
+  .dns-card-body { padding-inline: 1rem !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dns-page button, .dns-page input, .dns-page [role="button"] { transition: none; }
+  .dns-page button:active { transform: none; }
+}

@@ -36,6 +36,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("widen tunnel ip columns", () -> widenIpColumns(connection));
             runStep("create cloudflare dns tables", () -> createCloudflareTables(connection));
             runStep("add cloudflare dns smart pool columns", () -> addCloudflareSmartPoolColumns(connection));
+            runStep("add cloudflare dns rotation columns", () -> addCloudflareDnsRotationColumns(connection));
             runStep("widen cloudflare dns domain storage", () -> widenCloudflareDnsDomainStorage(connection));
             runStep("seed cloudflare dns setting", () -> seedCloudflareSetting(connection));
             runStep("normalize cloudflare dns ttl", () -> normalizeCloudflareDnsTtl(connection));
@@ -367,6 +368,12 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                     "smart_pool_backup_node_ids LONGTEXT NULL," +
                     "smart_pool_last_switch_at BIGINT NULL," +
                     "smart_pool_next_rotate_at BIGINT NULL," +
+                    "rotation_enabled TINYINT NOT NULL DEFAULT 0," +
+                    "rotation_groups LONGTEXT NULL," +
+                    "rotation_interval_minutes INT NULL," +
+                    "rotation_current_group_index INT NULL," +
+                    "rotation_last_switch_at BIGINT NULL," +
+                    "rotation_next_switch_at BIGINT NULL," +
                     "last_sync_at BIGINT NULL," +
                     "last_sync_status VARCHAR(32) NULL," +
                     "last_sync_message VARCHAR(1000) NULL," +
@@ -389,6 +396,21 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_last_switch_at BIGINT NULL AFTER smart_pool_backup_node_ids");
         ensureColumn(connection, "cloudflare_dns_binding", "smart_pool_next_rotate_at",
                 "ALTER TABLE cloudflare_dns_binding ADD COLUMN smart_pool_next_rotate_at BIGINT NULL AFTER smart_pool_last_switch_at");
+    }
+
+    private void addCloudflareDnsRotationColumns(Connection connection) throws Exception {
+        ensureColumn(connection, "cloudflare_dns_binding", "rotation_enabled",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN rotation_enabled TINYINT NOT NULL DEFAULT 0 AFTER smart_pool_next_rotate_at");
+        ensureColumn(connection, "cloudflare_dns_binding", "rotation_groups",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN rotation_groups LONGTEXT NULL AFTER rotation_enabled");
+        ensureColumn(connection, "cloudflare_dns_binding", "rotation_interval_minutes",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN rotation_interval_minutes INT NULL AFTER rotation_groups");
+        ensureColumn(connection, "cloudflare_dns_binding", "rotation_current_group_index",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN rotation_current_group_index INT NULL AFTER rotation_interval_minutes");
+        ensureColumn(connection, "cloudflare_dns_binding", "rotation_last_switch_at",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN rotation_last_switch_at BIGINT NULL AFTER rotation_current_group_index");
+        ensureColumn(connection, "cloudflare_dns_binding", "rotation_next_switch_at",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN rotation_next_switch_at BIGINT NULL AFTER rotation_last_switch_at");
     }
 
     private void widenCloudflareDnsDomainStorage(Connection connection) throws Exception {

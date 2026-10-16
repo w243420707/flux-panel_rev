@@ -15,4 +15,7 @@ public class CloudflareDnsBindingDto {
     private String recordType;
     private Integer smartPoolEnabled;
     private List<Long> smartPoolPreferredNodeIds;
+    private Integer rotationEnabled;
+    private List<List<Long>> rotationGroups;
+    private Integer rotationIntervalMinutes;
 }
