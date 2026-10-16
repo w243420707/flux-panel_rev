@@ -276,17 +276,17 @@ install_packages() {
     apt)
       export DEBIAN_FRONTEND=noninteractive
       apt-get update
-      apt-get install -y ca-certificates curl gnupg lsb-release git nginx certbot python3-certbot-nginx openssl dnsutils iproute2 util-linux
+      apt-get install -y ca-certificates curl gnupg lsb-release git nginx logrotate certbot python3-certbot-nginx openssl dnsutils iproute2 util-linux
       ;;
     dnf)
-      dnf install -y ca-certificates curl gnupg2 git nginx certbot python3-certbot-nginx openssl bind-utils iproute util-linux
+      dnf install -y ca-certificates curl gnupg2 git nginx logrotate certbot python3-certbot-nginx openssl bind-utils iproute util-linux
       ;;
     yum)
-      yum install -y ca-certificates curl gnupg2 git nginx certbot python3-certbot-nginx openssl bind-utils iproute util-linux
+      yum install -y ca-certificates curl gnupg2 git nginx logrotate certbot python3-certbot-nginx openssl bind-utils iproute util-linux
       ;;
     apk)
       apk update
-      apk add --no-cache ca-certificates curl git nginx certbot certbot-nginx openssl bind-tools iproute2 util-linux docker docker-cli-compose
+      apk add --no-cache ca-certificates curl git nginx logrotate certbot certbot-nginx openssl bind-tools iproute2 util-linux docker docker-cli-compose
       ;;
   esac
 }
@@ -1828,6 +1828,61 @@ reload_nginx() {
   systemctl reload nginx || systemctl restart nginx
 }
 
+configure_nginx_logrotate() {
+  local config_path="/etc/logrotate.d/${APP_SLUG}-nginx"
+  command -v logrotate >/dev/null 2>&1 || {
+    warn "logrotate is not installed; Nginx log rotation was not configured."
+    return 0
+  }
+  cat > "${config_path}" <<EOF
+/var/log/nginx/${APP_SLUG}-access.log /var/log/nginx/${APP_SLUG}-error.log /var/log/nginx/access.log /var/log/nginx/error.log {
+    daily
+    rotate 7
+    size 100M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+}
+EOF
+  chmod 0644 "${config_path}"
+  log "Configured Nginx log rotation: ${config_path}"
+}
+
+nginx_log_files() {
+  find /var/log/nginx -maxdepth 1 -type f \
+    \( -name "*.log" -o -name "*.log.*" -o -name "*.log-*" \) \
+    -print 2>/dev/null | sort
+}
+
+show_nginx_log_usage() {
+  [[ -d /var/log/nginx ]] || return 0
+  log "Nginx log usage:"
+  du -h -d 1 /var/log/nginx 2>/dev/null | sort -h || true
+}
+
+cleanup_nginx_logs() {
+  [[ -d /var/log/nginx ]] || return 0
+  local total file
+  local -a files=()
+  mapfile -t files < <(nginx_log_files)
+  ((${#files[@]} > 0)) || return 0
+  total="$(du -ch -- "${files[@]}" 2>/dev/null | tail -n 1 | awk '{print $1}')"
+  [[ -n "${total}" ]] || return 0
+  warn "Nginx logs currently use approximately ${total}."
+  printf '%s\n' "${files[@]}"
+  if ! confirm "Truncate current panel Nginx logs and remove rotated copies?"; then
+    log "Nginx log cleanup cancelled."
+    return 0
+  fi
+  for file in "${files[@]}"; do
+    [[ -f "${file}" ]] || continue
+    : > "${file}" || warn "Could not truncate ${file}"
+  done
+  log "Panel Nginx logs truncated."
+}
+
 write_nginx_http_config() {
   local server_name="$1"
   local frontend_port="$2"
@@ -1843,6 +1898,8 @@ map \$http_upgrade \$connection_upgrade_${APP_SLUG//-/_} {
 server {
     listen 80;
 $(nginx_ipv6_listen 80)    server_name ${server_name};
+    access_log off;
+    error_log /var/log/nginx/${APP_SLUG}-error.log warn;
 
     client_max_body_size 100m;
 
@@ -1906,6 +1963,8 @@ map \$http_upgrade \$connection_upgrade_${APP_SLUG//-/_} {
 server {
     listen 80;
 $(nginx_ipv6_listen 80)    server_name ${domain};
+    access_log off;
+    error_log /var/log/nginx/${APP_SLUG}-error.log warn;
 
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/${APP_SLUG};
@@ -1920,6 +1979,8 @@ $(nginx_ipv6_listen 80)    server_name ${domain};
 server {
     listen 443 ssl http2;
 $(if [[ "${NGINX_IPV6_ENABLED}" -eq 1 ]]; then printf '    listen [::]:443 ssl http2;\n'; fi)    server_name ${domain};
+    access_log off;
+    error_log /var/log/nginx/${APP_SLUG}-error.log warn;
 
     ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
@@ -2161,6 +2222,7 @@ configure_nginx() {
   fi
 
   log "Writing Nginx reverse proxy config..."
+  configure_nginx_logrotate
   write_nginx_http_config "${server_name}" "${FRONTEND_PORT}"
   activate_nginx_conf
   reload_nginx
@@ -2336,7 +2398,11 @@ cleanup_flow() {
 
   log "Current Docker disk usage:"
   docker system df || true
+  show_nginx_log_usage
   show_host_disk_usage
+
+  configure_nginx_logrotate
+  cleanup_nginx_logs
 
   if ! confirm "Clean unused containers, networks, dangling images, and package cache?"; then
     log "Cancelled."
