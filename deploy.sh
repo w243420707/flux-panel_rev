@@ -1709,17 +1709,35 @@ cleanup_package_cache() {
 }
 
 cleanup_builder_cache() {
-  local keep="${DOCKER_BUILD_CACHE_KEEP:-512MB}"
-  log "Cleaning Docker build cache, keeping up to ${keep}..."
+  local keep="${1:-${DOCKER_BUILD_CACHE_KEEP:-512MB}}"
+  local -a prune_args=(builder prune -af)
+  if [[ "${keep}" != "all" ]]; then
+    prune_args+=(--keep-storage "${keep}")
+    log "Cleaning Docker build cache, keeping up to ${keep}..."
+  else
+    log "Cleaning all unused Docker build cache..."
+  fi
   if command -v timeout >/dev/null 2>&1; then
     if command -v ionice >/dev/null 2>&1; then
-      timeout 300s ionice -c3 nice -n 19 docker builder prune -af --keep-storage "${keep}" >/dev/null 2>&1 || warn "Docker build-cache cleanup timed out or failed; skipped remaining cache cleanup."
+      timeout 300s ionice -c3 nice -n 19 docker "${prune_args[@]}" >/dev/null 2>&1 || warn "Docker build-cache cleanup timed out or failed; skipped remaining cache cleanup."
     else
-      timeout 300s nice -n 19 docker builder prune -af --keep-storage "${keep}" >/dev/null 2>&1 || warn "Docker build-cache cleanup timed out or failed; skipped remaining cache cleanup."
+      timeout 300s nice -n 19 docker "${prune_args[@]}" >/dev/null 2>&1 || warn "Docker build-cache cleanup timed out or failed; skipped remaining cache cleanup."
     fi
   else
-    nice -n 19 docker builder prune -af --keep-storage "${keep}" >/dev/null 2>&1 || warn "Docker build-cache cleanup failed; skipped remaining cache cleanup."
+    nice -n 19 docker "${prune_args[@]}" >/dev/null 2>&1 || warn "Docker build-cache cleanup failed; skipped remaining cache cleanup."
   fi
+}
+
+show_host_disk_usage() {
+  log "Host disk usage:"
+  df -h / || true
+  log "Largest top-level directories on the root filesystem:"
+  du -xhd1 / 2>/dev/null | sort -h | tail -n 12 || true
+  log "Largest deployment and runtime directories:"
+  for path in /opt /var /root /home /tmp; do
+    [[ -d "${path}" ]] || continue
+    du -xhd1 "${path}" 2>/dev/null | sort -h | tail -n 8 || true
+  done
 }
 
 detect_nginx_ipv6() {
@@ -2272,6 +2290,7 @@ cleanup_flow() {
 
   log "Current Docker disk usage:"
   docker system df || true
+  show_host_disk_usage
 
   if ! confirm "Clean unused containers, networks, dangling images, and package cache?"; then
     log "Cancelled."
@@ -2284,12 +2303,13 @@ cleanup_flow() {
   cleanup_package_cache
 
   warn "Docker build-cache cleanup can cause high disk I/O and may stall SSH on small VPS."
-  if confirm "Also clean Docker build cache now?"; then
-    cleanup_builder_cache
+  if confirm "Also clean ALL unused Docker build cache now?"; then
+    cleanup_builder_cache all
   fi
 
   log "Docker disk usage after cleanup:"
   docker system df || true
+  show_host_disk_usage
 }
 
 renew_cert_flow() {
