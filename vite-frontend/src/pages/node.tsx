@@ -104,6 +104,25 @@ const supportsNodeVersion = (version: string | undefined, minimumPatch: number):
 
 const supportsReboot = (version?: string) => supportsNodeVersion(version, 6);
 
+const IP_CHANGE_WINDOW_MS = 60 * 60 * 1000;
+
+const isIpv4Literal = (value: string): boolean =>
+  /^(?:\d{1,3}\.){3}\d{1,3}$/.test(value.trim()) &&
+  value.trim().split('.').every(part => Number(part) >= 0 && Number(part) <= 255);
+
+const getIpSignature = (ip: {
+  ipv4?: string;
+  ipv6?: string;
+  primary?: string;
+}): string => {
+  const primary = ip.primary?.trim() || '';
+  const ipv4Value = ip.ipv4?.trim() || (isIpv4Literal(primary) ? primary : '');
+  const ipv6Value = ip.ipv6?.trim() || (primary.includes(':') ? primary : '');
+  const ipv4 = isIpv4Literal(ipv4Value) ? ipv4Value : '';
+  const ipv6 = ipv6Value.includes(':') ? ipv6Value : '';
+  return ipv4 || ipv6 ? `${ipv4}|${ipv6}` : '';
+};
+
 interface NodeForm {
   id: number | null;
   name: string;
@@ -148,6 +167,7 @@ export default function NodePage() {
   const [usageConfirmLoading, setUsageConfirmLoading] = useState<'same' | 'replace' | null>(null);
   const usageHistoryRef = useRef({ nodeId: null as number | null, request: 0, confirming: false });
   const [usageNow, setUsageNow] = useState(() => Date.now());
+  const [ipChangeCounts, setIpChangeCounts] = useState<Record<number, number>>({});
   const [form, setForm] = useState<NodeForm>({
     id: null,
     name: '',
@@ -184,6 +204,8 @@ export default function NodePage() {
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const runtimeIpCacheRef = useRef<Map<number, Partial<Node>>>(new Map());
+  const ipSignatureRef = useRef<Map<number, string>>(new Map());
+  const ipChangeTimesRef = useRef<Map<number, number[]>>(new Map());
   const systemInfoCacheRef = useRef<Map<number, NonNullable<Node['systemInfo']>>>(new Map());
   const statusUpdatedAtRef = useRef<Map<number, { at: number; status: number }>>(new Map());
   const scheduleUpdatedAtRef = useRef<Map<number, { at: number; fields: NodeRebootSchedule }>>(new Map());
@@ -240,6 +262,40 @@ export default function NodePage() {
 
   useEffect(() => {
     const timer = window.setInterval(() => setUsageNow(Date.now()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const recordIpObservation = (nodeId: number, signature: string, now = Date.now()) => {
+    if (!signature) return;
+    const previousSignature = ipSignatureRef.current.get(nodeId);
+    const cutoff = now - IP_CHANGE_WINDOW_MS;
+    const activeTimes = (ipChangeTimesRef.current.get(nodeId) || [])
+      .filter(timestamp => timestamp >= cutoff);
+    if (previousSignature && previousSignature !== signature) {
+      activeTimes.push(now);
+    }
+    ipSignatureRef.current.set(nodeId, signature);
+    ipChangeTimesRef.current.set(nodeId, activeTimes);
+    setIpChangeCounts(previous => ({ ...previous, [nodeId]: activeTimes.length }));
+  };
+
+  const pruneIpChangeTimes = (now = Date.now()) => {
+    const cutoff = now - IP_CHANGE_WINDOW_MS;
+    const nextCounts: Record<number, number> = {};
+    ipChangeTimesRef.current.forEach((times, nodeId) => {
+      const activeTimes = times.filter(timestamp => timestamp >= cutoff);
+      if (activeTimes.length > 0) {
+        ipChangeTimesRef.current.set(nodeId, activeTimes);
+        nextCounts[nodeId] = activeTimes.length;
+      } else {
+        ipChangeTimesRef.current.delete(nodeId);
+      }
+    });
+    setIpChangeCounts(nextCounts);
+  };
+
+  useEffect(() => {
+    const timer = window.setInterval(() => pruneIpChangeTimes(), 60000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -423,15 +479,37 @@ export default function NodePage() {
             runtimeIpCacheRef.current.delete(nodeId);
           }
         });
+        ipSignatureRef.current.forEach((_, nodeId) => {
+          if (!nodeIds.has(nodeId)) {
+            ipSignatureRef.current.delete(nodeId);
+            ipChangeTimesRef.current.delete(nodeId);
+          }
+        });
+        setIpChangeCounts(previous => {
+          const next = { ...previous };
+          Object.keys(next).forEach(nodeId => {
+            if (!nodeIds.has(Number(nodeId))) delete next[Number(nodeId)];
+          });
+          return next;
+        });
         systemInfoCacheRef.current.forEach((_, nodeId) => {
           if (!nodeIds.has(nodeId)) {
             systemInfoCacheRef.current.delete(nodeId);
           }
         });
-        setNodeList(nextNodes.map((node: Node) => {
+        const mergedNodes = nextNodes.map((node: Node) => {
           const cachedRuntime = runtimeIpCacheRef.current.get(node.id);
           return cachedRuntime ? { ...node, ...cachedRuntime } : node;
-        }));
+        });
+        mergedNodes.forEach((node: Node) => {
+          recordIpObservation(node.id, getIpSignature({
+            ipv4: node.serverIpv4,
+            ipv6: node.serverIpv6,
+            primary: node.serverIp,
+          }));
+        });
+        pruneIpChangeTimes();
+        setNodeList(mergedNodes);
         const historyNodeId = usageHistoryRef.current.nodeId;
         if (historyNodeId !== null) {
           const previousUsageId = currentNodes.get(historyNodeId)?.vpsUsage?.current?.id;
@@ -635,7 +713,6 @@ export default function NodePage() {
         const publicIpv6 = getRuntimeIp("public_ipv6", "publicIpv6");
         const hasRuntimeIp = Boolean(publicIp || publicIpv4 || publicIpv6);
         const nextServerIp = publicIp || publicIpv4 || publicIpv6;
-        const isIpv4Literal = (value: string) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value.trim());
         const isIpv6Literal = (value: string) => value.includes(':');
         const getMetric = (...keys: string[]): number | undefined => {
           for (const key of keys) {
@@ -651,11 +728,20 @@ export default function NodePage() {
           return undefined;
         };
 
+        const normalizedPublicIpv4 = (publicIpv4 && isIpv4Literal(publicIpv4) ? publicIpv4 : '')
+          || (isIpv4Literal(nextServerIp) ? nextServerIp : '');
+        const normalizedPublicIpv6 = (publicIpv6 && isIpv6Literal(publicIpv6) ? publicIpv6 : '')
+          || (isIpv6Literal(nextServerIp) ? nextServerIp : '');
         const baseRuntimeIpPatch = hasRuntimeIp ? {
           serverIp: nextServerIp,
-          serverIpv4: publicIpv4 || (isIpv4Literal(nextServerIp) ? nextServerIp : ''),
-          serverIpv6: publicIpv6 || (isIpv6Literal(nextServerIp) ? nextServerIp : ''),
+          serverIpv4: normalizedPublicIpv4 || (isIpv4Literal(nextServerIp) ? nextServerIp : ''),
+          serverIpv6: normalizedPublicIpv6 || (isIpv6Literal(nextServerIp) ? nextServerIp : ''),
         } : {};
+        recordIpObservation(nodeId, getIpSignature({
+          ipv4: normalizedPublicIpv4,
+          ipv6: normalizedPublicIpv6,
+          primary: nextServerIp,
+        }));
         if (hasRuntimeIp) {
           runtimeIpCacheRef.current.set(nodeId, {
             ...baseRuntimeIpPatch,
@@ -1269,6 +1355,13 @@ export default function NodePage() {
         toast.success('删除成功');
         systemInfoCacheRef.current.delete(nodeToDelete.id);
         runtimeIpCacheRef.current.delete(nodeToDelete.id);
+        ipSignatureRef.current.delete(nodeToDelete.id);
+        ipChangeTimesRef.current.delete(nodeToDelete.id);
+        setIpChangeCounts(previous => {
+          const next = { ...previous };
+          delete next[nodeToDelete.id];
+          return next;
+        });
         statusUpdatedAtRef.current.delete(nodeToDelete.id);
         scheduleUpdatedAtRef.current.delete(nodeToDelete.id);
         changeIpUpdatedAtRef.current.delete(nodeToDelete.id);
@@ -1796,6 +1889,10 @@ export default function NodePage() {
                         <span>{node.changeIpLastAttemptAt
                           ? formatMonitorTime(node.changeIpLastAttemptAt)
                           : `${node.changeIpMinIntervalMinutes || 3} 分钟`}</span>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2 text-default-400">
+                        <span>近1小时IP变更</span>
+                        <span className="font-mono font-semibold text-default-600 dark:text-default-300">{ipChangeCounts[node.id] || 0} 次</span>
                       </div>
                       {node.remoteChangeIpUrl && (
                         <div className="mt-2 flex items-center gap-2">
