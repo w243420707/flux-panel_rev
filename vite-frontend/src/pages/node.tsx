@@ -31,11 +31,26 @@ import {
   getNodeUsageHistory,
   confirmNodeUsage,
   getNodeInstallCommand,
+  getCloudflareDnsBindingList,
   type NodeInstallSource,
   type NodeRebootSchedule,
   type VpsUsage,
   type VpsUsageRecord
 } from "@/api";
+
+interface CloudflareDnsBindingSummary {
+  id: number;
+  tunnelId?: number;
+  nodeIds?: string | number[];
+  useTunnelNodes?: number;
+  smartPoolEnabled?: number;
+  smartPoolActiveNodeIds?: string | number[];
+  rotationEnabled?: number;
+  rotationGroups?: string | number[][];
+  rotationCurrentGroupIndex?: number;
+  lastSyncStatus?: string;
+  lastResolvedIps?: string;
+}
 
 interface Node {
   id: number;
@@ -142,6 +157,7 @@ interface NodeForm {
 
 export default function NodePage() {
   const [nodeList, setNodeList] = useState<Node[]>([]);
+  const [inUseNodeIds, setInUseNodeIds] = useState<Set<number>>(() => new Set());
   const [showAllNodes, setShowAllNodes] = useState(false);
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<number>>(() => new Set());
   const [loading, setLoading] = useState(false);
@@ -243,16 +259,59 @@ export default function NodePage() {
   };
 
   const [totalSpeed, setTotalSpeed] = useState({ upload: 0, download: 0 });
+  const loadDnsUsage = async () => {
+    try {
+      const res = await getCloudflareDnsBindingList();
+      if (res.code !== 0 || !Array.isArray(res.data)) return;
+
+      const usedIds = new Set<number>();
+      const addIds = (value: unknown) => {
+        let parsed: unknown = value;
+        if (typeof parsed === 'string') {
+          const raw = parsed;
+          try {
+            parsed = JSON.parse(raw);
+          } catch {
+            parsed = raw.split(',');
+          }
+        }
+        if (!Array.isArray(parsed)) return;
+        parsed.forEach(item => {
+          const id = typeof item === 'object' && item !== null && 'nodeId' in item
+            ? Number((item as { nodeId?: unknown }).nodeId)
+            : Number(item);
+          if (Number.isFinite(id) && id > 0) usedIds.add(id);
+        });
+      };
+
+      res.data.forEach((binding: CloudflareDnsBindingSummary) => {
+        // lastResolvedIps 代表最近一次实际写入 Cloudflare 的节点；即使本次同步跳过，旧记录仍可能继续生效。
+        if (binding.lastResolvedIps) {
+          addIds(binding.lastResolvedIps);
+        }
+      });
+      setInUseNodeIds(usedIds);
+    } catch {
+      // DNS 绑定状态不是节点列表的阻塞数据，保留上次成功结果。
+    }
+  };
   nodeListRef.current = nodeList;
   const visibleNodeList = showAllNodes
     ? nodeList
     : nodeList.filter(node => node.connectionStatus === 'online');
+  const sortedVisibleNodeList = [...visibleNodeList].sort((left, right) => {
+    const leftInUse = inUseNodeIds.has(left.id) ? 1 : 0;
+    const rightInUse = inUseNodeIds.has(right.id) ? 1 : 0;
+    return rightInUse - leftInUse;
+  });
 
   useEffect(() => {
     initWebSocket();
     loadNodes();
-    
+    loadDnsUsage();
+    const timer = window.setInterval(() => loadDnsUsage(), 15000);
     return () => {
+      window.clearInterval(timer);
       if (quietRefreshTimerRef.current !== null) {
         window.clearTimeout(quietRefreshTimerRef.current);
       }
@@ -1666,7 +1725,7 @@ export default function NodePage() {
           </Card>
         ) : (
           <div className="node-card-grid">
-            {visibleNodeList.map((node) => (
+            {sortedVisibleNodeList.map((node) => (
               <Card 
                 key={node.id} 
                 className="node-monitor-card shadow-sm border border-divider hover:shadow-md transition-shadow duration-200"
@@ -1696,6 +1755,11 @@ export default function NodePage() {
                             <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.51a.75.75 0 01-1.08 0l-4.25-4.51a.75.75 0 01.02-1.06z" clipRule="evenodd" />
                           </svg>
                         </Button>
+                        {inUseNodeIds.has(node.id) && (
+                          <Chip color="primary" variant="flat" size="sm" className="node-card-status">
+                            在用
+                          </Chip>
+                        )}
                         <Chip color={getWallMonitorColor(node)} variant="flat" size="sm" className="node-card-status">
                           {getWallMonitorLabel(node)}
                         </Chip>
