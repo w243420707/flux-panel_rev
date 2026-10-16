@@ -1729,7 +1729,7 @@ cleanup_builder_cache() {
 }
 
 show_host_disk_usage_one() {
-  local path="$1" depth="${2:-1}" seconds="${DISK_SCAN_TIMEOUT_SECONDS:-20}" output status
+  local path="$1" depth="${2:-1}" seconds="${3:-${DISK_SCAN_TIMEOUT_SECONDS:-20}}" output status
   [[ -e "${path}" ]] || return 0
   printf '[INFO] Scanning %s (timeout %ss)...\n' "${path}" "${seconds}"
   if command -v timeout >/dev/null 2>&1; then
@@ -1769,6 +1769,21 @@ show_host_disk_usage() {
     [[ -d "${path}" ]] || continue
     show_host_disk_usage_one "${path}" 1
   done
+
+  log "Focused usage checks for common disk-growth locations:"
+  for path in /var/log /var/lib /var/cache /var/tmp /usr/local /usr/src /opt/flux-panel_rev; do
+    [[ -d "${path}" ]] || continue
+    show_host_disk_usage_one "${path}" 1 45
+  done
+
+  if command -v journalctl >/dev/null 2>&1; then
+    log "Systemd journal usage:"
+    journalctl --disk-usage 2>/dev/null || true
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    log "Deleted files still held open by running processes:"
+    lsof +L1 2>/dev/null | head -n 30 || true
+  fi
 }
 
 detect_nginx_ipv6() {
