@@ -1728,15 +1728,46 @@ cleanup_builder_cache() {
   fi
 }
 
+show_host_disk_usage_one() {
+  local path="$1" depth="${2:-1}" seconds="${DISK_SCAN_TIMEOUT_SECONDS:-20}" output status
+  [[ -e "${path}" ]] || return 0
+  printf '[INFO] Scanning %s (timeout %ss)...\n' "${path}" "${seconds}"
+  if command -v timeout >/dev/null 2>&1; then
+    if output="$(timeout "${seconds}s" du -x -h -d "${depth}" -- "${path}" 2>/dev/null)"; then
+      status=0
+    else
+      status=$?
+    fi
+  else
+    if output="$(du -x -h -d "${depth}" -- "${path}" 2>/dev/null)"; then
+      status=0
+    else
+      status=$?
+    fi
+  fi
+  if [[ "${status}" -eq 0 ]]; then
+    printf '%s\n' "${output}" | sort -h | tail -n 12
+  else
+    warn "Skipping ${path}: disk scan timed out or failed."
+  fi
+}
+
 show_host_disk_usage() {
+  local path base
   log "Host disk usage:"
   df -h / || true
-  log "Largest top-level directories on the root filesystem:"
-  du -xhd1 / 2>/dev/null | sort -h | tail -n 12 || true
+  log "Top-level directory usage on the root filesystem:"
+  for path in /*; do
+    base="${path##*/}"
+    case "${base}" in
+      proc|sys|dev|run) continue ;;
+    esac
+    show_host_disk_usage_one "${path}" 0
+  done
   log "Largest deployment and runtime directories:"
   for path in /opt /var /root /home /tmp; do
     [[ -d "${path}" ]] || continue
-    du -xhd1 "${path}" 2>/dev/null | sort -h | tail -n 8 || true
+    show_host_disk_usage_one "${path}" 1
   done
 }
 
