@@ -880,13 +880,15 @@ export default function NodePage() {
   
   // 格式化速度
   const formatSpeed = (bytesPerSecond: number): string => {
-    if (bytesPerSecond === 0) return '0 B/s';
-    
+    if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return '0 B/s';
+
     const k = 1024;
     const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
-    const i = Math.floor(Math.log(bytesPerSecond) / Math.log(k));
-    
-    return parseFloat((bytesPerSecond / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    const unitIndex = Math.min(Math.floor(Math.log(bytesPerSecond) / Math.log(k)), sizes.length - 1);
+    const value = bytesPerSecond / Math.pow(k, unitIndex);
+    const significantDigits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+
+    return `${value.toFixed(significantDigits)} ${sizes[unitIndex]}`;
   };
 
   // 格式化开机时间
@@ -1663,7 +1665,7 @@ export default function NodePage() {
             </CardBody>
           </Card>
         ) : (
-          <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,620px),1fr))]">
+          <div className="node-card-grid">
             {visibleNodeList.map((node) => (
               <Card 
                 key={node.id} 
