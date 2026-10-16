@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardBody, CardHeader } from "@heroui/card";
 import { Button } from "@heroui/button";
 import { Input } from "@heroui/input";
@@ -37,7 +37,8 @@ import {
   getForwardList, 
   updateForward, 
   deleteForward,
-  batchDeleteForwards,
+  submitBatchDelete,
+  getBatchDeleteProgress,
   forceDeleteForward,
   userTunnel, 
   pauseForwardService,
@@ -92,19 +93,6 @@ interface ApiResult<T = any> {
   code: number;
   msg: string;
   data?: T;
-}
-
-interface BatchDeleteFailure {
-  id: number;
-  message: string;
-}
-
-interface BatchDeleteResult {
-  total: number;
-  success: number;
-  failed: number;
-  failures: BatchDeleteFailure[];
-  force?: boolean;
 }
 
 const PORT_CONFLICT_CODE = -409;
@@ -187,6 +175,15 @@ export default function ForwardPage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [batchDeleteMode, setBatchDeleteMode] = useState(false);
   const [batchDeleteLoading, setBatchDeleteLoading] = useState(false);
+  const [batchDeleteTaskId, setBatchDeleteTaskId] = useState<string | null>(null);
+  const [batchDeleteProgress, setBatchDeleteProgress] = useState<{
+    status: number;
+    total: number;
+    processed: number;
+    success: number;
+    fail: number;
+    failReasons: any[];
+  } | null>(null);
   const [selectedForwardIds, setSelectedForwardIds] = useState<number[]>([]);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
   const [forwardToDelete, setForwardToDelete] = useState<Forward | null>(null);
@@ -554,6 +551,8 @@ export default function ForwardPage() {
     setBatchDeleteMode((prev) => !prev);
   };
 
+  const batchDeleteTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const executeBatchDelete = async () => {
     const validIds = selectedForwardIds.filter((id) => forwards.some((forward) => forward.id === id));
     if (validIds.length === 0) {
@@ -561,75 +560,160 @@ export default function ForwardPage() {
       return;
     }
 
-    const confirmed = window.confirm(`确定批量删除选中的 ${validIds.length} 个转发吗？\n\n会一次性调用后端批处理清理节点端转发服务。`);
+    const confirmed = window.confirm(`确定批量删除选中的 ${validIds.length} 个转发吗？\n\n会提交到后端异步处理，界面会显示处理进度。`);
     if (!confirmed) {
       return;
     }
 
     setBatchDeleteLoading(true);
-    let remainingFailedIds: number[] = [];
     const progressToastId = `batch-delete-${Date.now()}`;
 
     try {
-      toast.loading(`正在批量删除 ${validIds.length} 个转发...`, { id: progressToastId });
+      toast.loading(`正在提交批量删除任务...`, { id: progressToastId });
 
-      const result = await batchDeleteForwards(validIds, false);
-      const payload = result.data as BatchDeleteResult | undefined;
+      // 提交异步任务，立即返回 task_id
+      const result = await submitBatchDelete({ ids: validIds, force: false });
+      const taskId = (result.data as { taskId?: string; task_id?: string })?.taskId
+        || (result.data as { taskId?: string; task_id?: string })?.task_id;
 
-      if (!payload) {
-        throw new Error(result.msg || '批量删除失败');
+      if (!taskId) {
+        throw new Error(result.msg || '批量删除任务提交失败');
       }
 
-      remainingFailedIds = payload.failures
-        .map((failure: BatchDeleteFailure) => failure.id)
-        .filter((id): id is number => Boolean(id));
+      toast.dismiss(progressToastId);
+      toast.loading(`批量删除任务已提交，正在处理 ${validIds.length} 个转发...`, { id: progressToastId });
 
-      if (payload.success > 0) {
-        toast.success(`已删除 ${payload.success} 个转发`);
-      }
+      setBatchDeleteTaskId(taskId);
+      setBatchDeleteProgress({
+        status: 0,
+        total: validIds.length,
+        processed: 0,
+        success: 0,
+        fail: 0,
+        failReasons: []
+      });
 
-      if (remainingFailedIds.length > 0) {
-        const failedPreview = payload.failures
-          .slice(0, 5)
-          .map((failure: BatchDeleteFailure) => `#${failure.id}: ${failure.message}`)
-          .join('\n');
-        const forceConfirmed = window.confirm(
-          `常规批量删除完成：成功 ${payload.success} 个，失败 ${remainingFailedIds.length} 个。\n\n${failedPreview}${payload.failures.length > 5 ? '\n...' : ''}\n\n是否强制删除失败项？\n\n注意：强制删除只删除面板记录，不验证节点端服务是否已清理。`
-        );
-
-        if (forceConfirmed) {
-          const forceResult = await batchDeleteForwards(remainingFailedIds, true);
-          const forcePayload = forceResult.data as BatchDeleteResult | undefined;
-          if (!forcePayload) {
-            throw new Error(forceResult.msg || '强制删除失败');
-          }
-          remainingFailedIds = forcePayload.failures
-            .map((failure: BatchDeleteFailure) => failure.id)
-            .filter((id): id is number => Boolean(id));
-          if (forcePayload.success > 0) {
-            toast.success(`已强制删除 ${forcePayload.success} 个失败项`);
-          }
-          if (remainingFailedIds.length > 0) {
-            toast.error(`仍有 ${remainingFailedIds.length} 个转发删除失败`);
-          }
-        } else {
-          toast.error(`有 ${remainingFailedIds.length} 个转发删除失败`);
-        }
-      }
-
-      await loadData(false);
-      setSelectedForwardIds(remainingFailedIds);
-      if (remainingFailedIds.length === 0) {
-        setBatchDeleteMode(false);
-      }
     } catch (error) {
-      console.error('批量删除失败:', error);
-      toast.error('批量删除失败');
-    } finally {
+      console.error('批量删除任务提交失败:', error);
+      toast.error('批量删除任务提交失败');
       toast.dismiss(progressToastId);
       setBatchDeleteLoading(false);
     }
   };
+
+  // 轮询批量删除任务进度
+  useEffect(() => {
+    if (!batchDeleteTaskId) {
+      return;
+    }
+
+    let pollCount = 0;
+    const MAX_POLL_COUNT = 600; // 10 分钟兜底
+    const progressToastId = `batch-delete-progress`;
+
+    const poll = async () => {
+      pollCount++;
+      if (pollCount > MAX_POLL_COUNT) {
+        if (batchDeleteTimerRef.current) {
+          clearInterval(batchDeleteTimerRef.current);
+          batchDeleteTimerRef.current = null;
+        }
+        toast.error('任务处理超时，请稍后刷新查看结果');
+        setBatchDeleteLoading(false);
+        setBatchDeleteTaskId(null);
+        return;
+      }
+
+      try {
+        const res = await getBatchDeleteProgress(batchDeleteTaskId);
+        if (res.code === 0 && res.data) {
+          const progress = res.data as {
+            status: number;
+            total: number;
+            processed: number;
+            success: number;
+            fail: number;
+            failReasons: any[];
+          };
+          setBatchDeleteProgress(progress);
+
+          const status = progress.status;
+          if (status === 2 || status === 3 || status === 4) {
+            // 任务完成
+            if (batchDeleteTimerRef.current) {
+              clearInterval(batchDeleteTimerRef.current);
+              batchDeleteTimerRef.current = null;
+            }
+            toast.dismiss(progressToastId);
+
+            if (status === 2) {
+              toast.success(`批量删除完成，成功 ${progress.success} 个转发`);
+            } else if (status === 3) {
+              toast.error(`批量删除完��：成功 ${progress.success} 个，失败 ${progress.fail} 个`);
+              // 询问是否强制删除失败项
+              const failedIds = (progress.failReasons || []).map((f: any) => f.id).filter(Boolean);
+              if (failedIds.length > 0) {
+                const forceConfirmed = window.confirm(
+                  `常规批量删除完成：成功 ${progress.success} 个，失败 ${failedIds.length} 个。\n\n${(progress.failReasons || []).slice(0, 5).map((f: any) => `#${f.id}: ${f.message}`).join('\n')}${(progress.failReasons || []).length > 5 ? '\n...' : ''}\n\n是否强制删除失败项？\n\n注意：强制删除只删除面板记录，不验证节点端服务是否已清理。`
+                );
+                if (forceConfirmed) {
+                  try {
+                    const forceResult = await submitBatchDelete({ ids: failedIds, force: true });
+                    const forceTaskId = (forceResult.data as { taskId?: string; task_id?: string })?.taskId
+                      || (forceResult.data as { taskId?: string; task_id?: string })?.task_id;
+                    if (forceTaskId) {
+                      toast.loading(`强制删除任务已提交...`);
+                      setBatchDeleteTaskId(forceTaskId);
+                      setBatchDeleteProgress({
+                        status: 0,
+                        total: failedIds.length,
+                        processed: 0,
+                        success: 0,
+                        fail: 0,
+                        failReasons: []
+                      });
+                      return;
+                    }
+                  } catch (forceErr) {
+                    console.error('强制删除提交失败:', forceErr);
+                    toast.error('强制删除提交失败');
+                  }
+                }
+              }
+            } else {
+              toast.error('批量删除失败');
+            }
+
+            // 刷新列表，保留失败项选中态
+            await loadData(false);
+            const remainingFailedIds = (progress.failReasons || []).map((f: any) => f.id).filter(Boolean);
+            setSelectedForwardIds(remainingFailedIds);
+            if (remainingFailedIds.length === 0) {
+              setBatchDeleteMode(false);
+            }
+            setBatchDeleteLoading(false);
+            setBatchDeleteTaskId(null);
+          } else {
+            // 进行中，更新进度 toast
+            toast.loading(`正在批量删除 ${progress.processed}/${progress.total}...`, { id: progressToastId });
+          }
+        }
+      } catch (pollErr) {
+        console.error('查询批量删除进度失败:', pollErr);
+      }
+    };
+
+    // 立即执行一次，然后每秒轮询
+    poll();
+    batchDeleteTimerRef.current = setInterval(poll, 1000);
+
+    return () => {
+      if (batchDeleteTimerRef.current) {
+        clearInterval(batchDeleteTimerRef.current);
+        batchDeleteTimerRef.current = null;
+      }
+    };
+  }, [batchDeleteTaskId]);
 
   // 处理隧道选择变化
   const handleTunnelChange = (tunnelId: string) => {
@@ -1734,6 +1818,15 @@ export default function ForwardPage() {
                 >
                   删除所选
                 </Button>
+                {batchDeleteTaskId && batchDeleteProgress && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-default-500">{batchDeleteProgress.processed}/{batchDeleteProgress.total}</span>
+                    <progress max={batchDeleteProgress.total || 1} value={batchDeleteProgress.processed} className="w-24 h-1" />
+                    {batchDeleteProgress.status === 3 && <span className="text-xs text-danger">部分失败</span>}
+                    {batchDeleteProgress.status === 2 && <span className="text-xs text-success">完成</span>}
+                    {batchDeleteProgress.status === 4 && <span className="text-xs text-danger">失败</span>}
+                  </div>
+                )}
               </>
             )}
             <Button

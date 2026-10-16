@@ -5,6 +5,7 @@ import com.admin.common.annotation.RequireRole;
 import com.admin.common.dto.ForwardDto;
 import com.admin.common.dto.ForwardUpdateDto;
 import com.admin.common.lang.R;
+import com.admin.service.ForwardBatchDeleteTaskService;
 import com.admin.service.ForwardService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
@@ -30,6 +31,9 @@ public class ForwardController extends BaseController {
 
     @Autowired
     private ForwardService forwardService;
+
+    @Autowired
+    private ForwardBatchDeleteTaskService forwardBatchDeleteTaskService;
 
     @LogAnnotation
     @PostMapping("/create")
@@ -63,6 +67,31 @@ public class ForwardController extends BaseController {
         boolean force = Boolean.TRUE.equals(params.get("force"))
                 || "true".equalsIgnoreCase(String.valueOf(params.get("force")));
         return forwardService.batchDeleteForwards(ids, force);
+    }
+
+    /**
+     * 提交批量删除任务（异步）
+     * @param params 包含ids和force的参数
+     * @return 包含taskId的结果
+     */
+    @LogAnnotation
+    @PostMapping("/batch-delete/submit")
+    public R submitBatchDelete(@RequestBody Map<String, Object> params) {
+        List<Long> ids = parseIds(params.get("ids"));
+        boolean force = Boolean.TRUE.equals(params.get("force"))
+                || "true".equalsIgnoreCase(String.valueOf(params.get("force")));
+        return forwardBatchDeleteTaskService.submitBatchDelete(ids, force);
+    }
+
+    /**
+     * 查询批量删除任务进度
+     * @param taskId 任务ID
+     * @return 进度信息
+     */
+    @LogAnnotation
+    @GetMapping("/batch-delete/{taskId}/progress")
+    public R getBatchDeleteProgress(@PathVariable String taskId) {
+        return forwardBatchDeleteTaskService.getBatchDeleteProgress(taskId);
     }
 
     @LogAnnotation

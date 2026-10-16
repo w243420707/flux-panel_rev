@@ -200,7 +200,9 @@ Swap 是内存不足时的缓冲，可以降低节点进程被 OOM 强制终止�
 
 ### 2026-10-16 v1.3.105
 
-- 优化 HTTPS 证书申请：申请前验证 Nginx 的 ACME challenge 路由，检查 IPv6 是否可用并提示错误 AAAA 记录，避免 Let’s Encrypt 失败原因不明确；证书申请失败时继续保留 HTTP，并明确写入 HTTP 面板地址。
+- 优化 HTTPS 证书申请：申请前验证 Nginx 的 ACME challenge 路由，检查 IPv6 是否可用并提示错误 AAAA 记录，避免 Let's Encrypt 失败原因不明确；证书申请失败时继续保留 HTTP，并明确写入 HTTP 面板地址。
+
+- **修复转发配置批量删除超时问题**：替换同步批量删除为异步任务模式。提交任务后立即返回 task_id，前端轮询进度，彻底解决少量能删、大量超时的问题。新增 `POST /forward/batch-delete/submit` 提交任务、`GET /forward/batch-delete/{taskId}/progress` 查询进度。新增任务表 `forward_batch_delete_task` 持久化任务状态。后台并行处理批量删除，缩小全局锁范围，提升大批量删除性能。
 
 ### 2026-10-16 v1.3.104
 

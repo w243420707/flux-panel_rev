@@ -113,6 +113,12 @@ export const getForwardList = () => Network.post("/forward/list");
 export const updateForward = (data: any) => Network.post("/forward/update", data);
 export const deleteForward = (id: number) => Network.post("/forward/delete", { id });
 export const batchDeleteForwards = (ids: number[], force = false) => Network.post("/forward/batch-delete", { ids, force });
+
+// 异步批量删除任务提交（立即返回 task_id，避免 30 秒超时）
+export const submitBatchDelete = (data: { ids: number[]; force?: boolean }) => Network.post("/forward/batch-delete/submit", data);
+
+// 查询异步批量删除任务进度
+export const getBatchDeleteProgress = (taskId: string) => Network.get(`/forward/batch-delete/${taskId}/progress`);
 export const forceDeleteForward = (id: number) => Network.post("/forward/force-delete", { id });
 
 // 转发服务控制操作 - 通过Java后端接口
