@@ -30,6 +30,12 @@ public interface ForwardBatchDeleteTaskService {
     R getBatchDeleteProgress(String taskId);
 
     /**
+     * 执行批量删除任务
+     * @param taskId 任务 ID
+     */
+    void processBatchDeleteTask(String taskId);
+
+    /**
      * 清理过期任务（24h 前的终态任务）
      */
     void cleanExpiredTasks();

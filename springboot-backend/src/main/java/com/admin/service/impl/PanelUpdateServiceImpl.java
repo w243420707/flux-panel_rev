@@ -67,7 +67,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     @Value("${PANEL_UPDATE_REPOSITORY:${UPDATE_REPOSITORY:w243420707/flux-panel_rev}}")
     private String configuredRepository;
 
-    @Value("${PANEL_VERSION:${APP_VERSION:1.3.107}}")
+    @Value("${PANEL_VERSION:${APP_VERSION:1.3.108}}")
     private String configuredCurrentVersion;
 
     @Value("${PANEL_COMMIT:}")
@@ -407,7 +407,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     }
 
     private String currentVersion() {
-        return StringUtils.hasText(configuredCurrentVersion) ? configuredCurrentVersion.trim() : "1.3.107";
+        return StringUtils.hasText(configuredCurrentVersion) ? configuredCurrentVersion.trim() : "1.3.108";
     }
 
     private String currentCommit() {
