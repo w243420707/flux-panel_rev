@@ -1680,10 +1680,13 @@ start_stack() {
 }
 
 post_deploy_cleanup() {
-  log "Running lightweight cleanup after deploy..."
+  log "Running bounded Docker cleanup after deploy..."
+  docker system df || true
   docker image prune -f >/dev/null 2>&1 || true
   cleanup_package_cache
-  log "Skipping automatic Docker build-cache pruning to avoid SSH stalls on small VPS."
+  cleanup_builder_cache
+  log "Docker disk usage after deploy cleanup:"
+  docker system df || true
 }
 
 cleanup_package_cache() {

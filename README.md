@@ -873,7 +873,7 @@ Swap 是内存不足时的缓冲，可以降低节点进程被 OOM 强制终止�
 - 节点上线时可自动识别公网 IP 并更新节点服务器 IP，适配动态 IP 节点。
 - 节点端上线前会通过 ip.sb、ifconfig、icanhazip、Cloudflare trace 等公网 IP 接口辅助判断真实出口 IP，后端优先采用节点上报 IP，失败时回退 WebSocket 来源 IP。
 - 节点端启动日志不再输出带 `secret` 的 WebSocket 完整 URL，并重新构建 Linux `amd64`、`arm64`、`armv7`、`armv6` 二进制。
-- 面板更新后改为轻量清理悬空镜像和系统包缓存，不再默认清理 Docker build cache，避免低配 VPS SSH 断连。
+- 面板更新后会执行受控的 Docker 清理：清理悬空镜像、系统包缓存和 BuildKit 构建缓存，构建缓存默认保留约 512MB，并带低优先级与 5 分钟超时保护，避免磁盘长期增长或卡住 SSH。
 - 菜单 `7. 清理 Docker 缓存` 保留 Docker build cache 清理能力，执行前会二次确认，并使用低优先级和超时保护。
 - Cloudflare DNS 同步采用差异更新，只管理本项目写入的记录，失败时保留旧记录，避免误删用户已有解析。
 - Cloudflare DNS 定时同步默认 120 秒，最低 60 秒，同时支持手动全量同步和单个域名同步。
