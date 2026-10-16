@@ -48,6 +48,7 @@ interface CloudflareDnsBindingSummary {
   rotationEnabled?: number;
   rotationGroups?: string | number[][];
   rotationCurrentGroupIndex?: number;
+  status?: number;
   lastSyncStatus?: string;
   lastResolvedIps?: string;
 }
@@ -285,6 +286,7 @@ export default function NodePage() {
       };
 
       res.data.forEach((binding: CloudflareDnsBindingSummary) => {
+        if (binding.status === 0) return;
         // lastResolvedIps 代表最近一次实际写入 Cloudflare 的节点；即使本次同步跳过，旧记录仍可能继续生效。
         if (binding.lastResolvedIps) {
           addIds(binding.lastResolvedIps);
