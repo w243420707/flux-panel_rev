@@ -48,7 +48,8 @@ public class OciChangeIpServiceImpl implements OciChangeIpService {
     public void requestAfterUnreachableReport(Long nodeId, String reportedHost, Long checkedAt) {
         if (nodeId == null) return;
         Node current = nodeMapper.selectById(nodeId);
-        if (current == null || !matchesCurrentProbeAddress(current, reportedHost)) return;
+        if (current == null || !matchesCurrentProbeAddress(current, reportedHost)
+                || isStaleProbe(current, checkedAt)) return;
         long attemptAt = System.currentTimeMillis();
         if (nodeMapper.reserveChangeIpAttempt(nodeId, attemptAt) != 1) return;
         broadcast(nodeId, attemptAt, RESULT_PENDING);
@@ -74,7 +75,9 @@ public class OciChangeIpServiceImpl implements OciChangeIpService {
                         node.getAwsAccountId(), node.getAwsInstanceId(), node.getAwsRegion()));
                 deferred = true;
             } else if ("OCI".equalsIgnoreCase(node.getCloudProvider())
-                    || (node.getCloudProvider() == null && Integer.valueOf(1).equals(node.getOracleNode()))) {
+                    || ((node.getCloudProvider() == null || node.getCloudProvider().trim().isEmpty()
+                    || "NONE".equalsIgnoreCase(node.getCloudProvider()))
+                    && Integer.valueOf(1).equals(node.getOracleNode()))) {
                 if (node.getOciAccountId() == null || node.getOciInstanceOcid() == null) return;
                 var account = accountService.requireAccount(node.getOciAccountId());
                 String privateKey = accountService.decryptPrivateKey(account);
@@ -126,6 +129,12 @@ public class OciChangeIpServiceImpl implements OciChangeIpService {
         String host = reportedHost.trim();
         return host.equals(node.getServerIp()) || host.equals(node.getServerIpv4())
                 || host.equals(node.getServerIpv6()) || host.equals(node.getIp());
+    }
+
+    private boolean isStaleProbe(Node node, Long checkedAt) {
+        if (checkedAt == null || checkedAt <= 0L) return false;
+        Long previous = node.getWallMonitorExternalLastCheckAt();
+        return previous != null && checkedAt <= previous;
     }
 
     private void broadcast(Long nodeId, long attemptAt, String result) {

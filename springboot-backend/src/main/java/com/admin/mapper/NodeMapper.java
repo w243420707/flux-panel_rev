@@ -33,8 +33,10 @@ public interface NodeMapper extends BaseMapper<Node> {
     List<Node> findDueReboots(@Param("now") long now);
 
     @Update("UPDATE node SET change_ip_last_attempt_at = #{attemptAt}, change_ip_last_result = 'PENDING' "
-            + "WHERE id = #{id} AND cloud_provider IN ('OCI', 'AWS') "
-            + "AND ((cloud_provider = 'OCI' AND oci_account_id IS NOT NULL AND oci_instance_ocid IS NOT NULL AND TRIM(oci_instance_ocid) <> '') "
+            + "WHERE id = #{id} AND ((cloud_provider = 'OCI' "
+            + "AND oci_account_id IS NOT NULL AND oci_instance_ocid IS NOT NULL AND TRIM(oci_instance_ocid) <> '') "
+            + "OR ((cloud_provider IS NULL OR cloud_provider = '' OR cloud_provider = 'NONE') AND oracle_node = 1 "
+            + "AND oci_account_id IS NOT NULL AND oci_instance_ocid IS NOT NULL AND TRIM(oci_instance_ocid) <> '') "
             + "OR (cloud_provider = 'AWS' AND aws_account_id IS NOT NULL AND aws_instance_id IS NOT NULL AND TRIM(aws_instance_id) <> '' AND aws_region IS NOT NULL AND TRIM(aws_region) <> '')) "
             + "AND ((change_ip_last_attempt_at IS NULL OR change_ip_last_attempt_at <= "
             + "#{attemptAt} - GREATEST(COALESCE(change_ip_min_interval_minutes, 3), 3) * 60000) "

@@ -97,6 +97,12 @@ class NodeChangeIpDatabaseTest {
     }
 
     @Test
+    void legacyOracleFlagCanReserveWhenCloudProviderWasNotNormalized() {
+        jdbc.update("UPDATE node SET cloud_provider = 'NONE', change_ip_last_attempt_at = NULL, change_ip_last_result = 'UNKNOWN' WHERE id = ?", NODE_ID);
+        assertEquals(1, nodes.reserveChangeIpAttempt(NODE_ID, 2_100_000));
+    }
+
+    @Test
     void succeededUnknownCanRetryImmediatelyButBlockedCannot() {
         assertEquals(1, nodes.reserveChangeIpAttempt(NODE_ID, 2_000_000));
         assertEquals(1, nodes.finishChangeIpAttempt(NODE_ID, 2_000_000, "SUCCEEDED"));

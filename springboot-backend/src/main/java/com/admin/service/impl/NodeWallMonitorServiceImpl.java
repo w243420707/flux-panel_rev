@@ -44,7 +44,7 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
             return R.err("node not found");
         }
         if (!matchesCurrentAddress(node, reportedHost) || isStaleReport(node, checkedAt)) {
-            return R.ok("stale external probe report ignored");
+            return R.err("stale external probe report ignored");
         }
 
         String previousStatus = normalizeStatus(node.getWallMonitorExternalStatus());
@@ -85,7 +85,7 @@ public class NodeWallMonitorServiceImpl implements NodeWallMonitorService {
             return R.err("node not found");
         }
         if (!matchesCurrentAddress(node, reportedHost) || isStaleReport(node, checkedAt)) {
-            return R.ok("stale external probe report ignored");
+            return R.err("stale external probe report ignored");
         }
 
         String previousStatus = normalizeStatus(node.getWallMonitorExternalStatus());
