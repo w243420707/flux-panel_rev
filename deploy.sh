@@ -1850,6 +1850,21 @@ EOF
   log "Configured Nginx log rotation: ${config_path}"
 }
 
+disable_nginx_access_logs() {
+  nginx_conf_path
+  [[ -f "${NGINX_CONF:-}" ]] || return 0
+  if ! grep -Eq '^[[:space:]]*access_log[[:space:]]+' "${NGINX_CONF}"; then
+    return 0
+  fi
+  sed -i -E 's|^[[:space:]]*access_log[[:space:]].*;[[:space:]]*$|    access_log off;|' "${NGINX_CONF}"
+  if nginx -t >/dev/null 2>&1; then
+    systemctl reload nginx >/dev/null 2>&1 || warn "Nginx reload failed after disabling access logs."
+    log "Disabled Nginx access logging for the panel."
+  else
+    warn "Nginx configuration check failed after disabling access logs; restoring requires the next panel update."
+  fi
+}
+
 nginx_log_files() {
   find /var/log/nginx -maxdepth 1 -type f \
     \( -name "*.log" -o -name "*.log.*" -o -name "*.log-*" \) \
@@ -2402,6 +2417,7 @@ cleanup_flow() {
   show_host_disk_usage
 
   configure_nginx_logrotate
+  disable_nginx_access_logs
   cleanup_nginx_logs
 
   if ! confirm "Clean unused containers, networks, dangling images, and package cache?"; then
