@@ -361,7 +361,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                     blockedNodeIds.add(nodeId);
                 }
                 boolean usable = !blocked && online && hasTargets
-                        && (smartPoolEnabled ? probeOk : !isCriticalWallStatus(wallStatus));
+                        && ((smartPoolEnabled || isSupplementEnabled(binding)) ? probeOk : !isCriticalWallStatus(wallStatus));
                 usableByNode.put(nodeId, usable);
                 if (!usable) {
                     unresolvedNodeIds.add(nodeId);
@@ -374,6 +374,9 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             List<Long> selectedNodeIds = selectRotationNodeIds(binding, nodeIds, usableByNode);
             boolean selectedGroupUnavailable = isRotationEnabled(binding)
                     && selectedNodeIds.stream().noneMatch(id -> Boolean.TRUE.equals(usableByNode.get(id)));
+            if (isSupplementEnabled(binding) && !selectedGroupUnavailable) {
+                selectedNodeIds = selectSupplementNodeIds(binding, selectedNodeIds, usableByNode, primaryAddressRecords, nodeStates);
+            }
             List<CloudflareDnsTarget> desiredTargets = new ArrayList<>();
             Set<String> preservedRecordKeys = new HashSet<>();
             Set<Long> preservedNodeIds = new LinkedHashSet<>();
@@ -385,14 +388,14 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
                     desiredTargets.addAll(state.targets);
                     continue;
                 }
-                if (!smartPoolEnabled && blockedNodeIds.contains(nodeId)) {
+                if ((isSupplementEnabled(binding) || !smartPoolEnabled) && blockedNodeIds.contains(nodeId)) {
                     continue;
                 }
-                if (!smartPoolEnabled && state != null && state.node != null
+                if ((isSupplementEnabled(binding) || !smartPoolEnabled) && state != null && state.node != null
                         && !Objects.equals(state.node.getStatus(), NODE_ONLINE)) {
                     continue;
                 }
-                if (!smartPoolEnabled) {
+                if (!smartPoolEnabled && !isSupplementEnabled(binding)) {
                     preserveExistingRecordsForUnresolvedNode(
                             primaryAddressRecords,
                             primaryDomain,
@@ -404,7 +407,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
             }
 
             desiredTargets = deduplicateTargets(desiredTargets);
-            if (!smartPoolEnabled) {
+            if (!smartPoolEnabled && !isSupplementEnabled(binding)) {
                 effectiveNodeIds.addAll(preservedNodeIds);
             }
             SmartPoolPlan smartPoolPlan = null;
@@ -481,7 +484,7 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
         }
         List<Node> nodes = nodeService.list(new QueryWrapper<Node>()
                 .select("id", "status", "wall_monitor_status", "wall_monitor_external_status",
-                        "server_ip", "server_ipv4", "server_ipv6")
+                        "server_ip", "server_ipv4", "server_ipv6", "change_ip_last_attempt_at")
                 .in("id", normalizedIds));
         Map<Long, Node> snapshot = new LinkedHashMap<>();
         if (nodes != null) {
@@ -749,6 +752,61 @@ public class CloudflareDnsSyncServiceImpl implements CloudflareDnsSyncService {
 
     private boolean isRotationEnabled(CloudflareDnsBinding binding) {
         return binding != null && isEnabled(binding.getRotationEnabled());
+    }
+
+    private boolean isSupplementEnabled(CloudflareDnsBinding binding) {
+        return binding != null && isEnabled(binding.getSupplementEnabled())
+                && binding.getSupplementTargetCount() != null && binding.getSupplementTargetCount() > 0;
+    }
+
+    private List<Long> selectSupplementNodeIds(CloudflareDnsBinding binding,
+                                               List<Long> selectedNodeIds,
+                                               Map<Long, Boolean> usableByNode,
+                                               List<CloudflareDnsRecord> existingRecords,
+                                               Map<Long, NodeDnsState> nodeStates) {
+        List<Long> currentGroup = normalizeNodeIdList(selectedNodeIds);
+        int targetCount = Math.min(binding.getSupplementTargetCount(), currentGroup.size());
+        if (targetCount <= 0) {
+            return currentGroup;
+        }
+        Set<Long> activeRecordNodeIds = new LinkedHashSet<>();
+        if (existingRecords != null) {
+            for (CloudflareDnsRecord record : existingRecords) {
+                Long nodeId = extractCommentLong(record == null ? null : record.getComment(), "node");
+                if (nodeId != null && currentGroup.contains(nodeId)) {
+                    activeRecordNodeIds.add(nodeId);
+                }
+            }
+        }
+        List<Long> retained = currentGroup.stream()
+                .filter(activeRecordNodeIds::contains)
+                .filter(id -> Boolean.TRUE.equals(usableByNode.get(id)))
+                .limit(targetCount)
+                .collect(Collectors.toCollection(ArrayList::new));
+        Set<Long> selected = new LinkedHashSet<>(retained);
+        List<Long> idleCandidates = currentGroup.stream()
+                .filter(id -> !selected.contains(id))
+                .filter(id -> Boolean.TRUE.equals(usableByNode.get(id)))
+                .collect(Collectors.toCollection(ArrayList::new));
+        idleCandidates.sort((left, right) -> compareSupplementAge(left, right, nodeStates));
+        for (Long nodeId : idleCandidates) {
+            if (selected.size() >= targetCount) {
+                break;
+            }
+            selected.add(nodeId);
+        }
+        return currentGroup.stream().filter(selected::contains).collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    private int compareSupplementAge(Long left, Long right, Map<Long, NodeDnsState> nodeStates) {
+        NodeDnsState leftState = nodeStates.get(left);
+        NodeDnsState rightState = nodeStates.get(right);
+        Node leftNode = leftState == null ? null : leftState.node;
+        Node rightNode = rightState == null ? null : rightState.node;
+        long leftAt = leftNode == null || leftNode.getChangeIpLastAttemptAt() == null ? 0L : leftNode.getChangeIpLastAttemptAt();
+        long rightAt = rightNode == null || rightNode.getChangeIpLastAttemptAt() == null ? 0L : rightNode.getChangeIpLastAttemptAt();
+        int byAge = Long.compare(leftAt, rightAt);
+        return byAge != 0 ? byAge : Long.compare(left, right);
     }
 
     private List<Long> selectRotationNodeIds(CloudflareDnsBinding binding,

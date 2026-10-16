@@ -18,4 +18,6 @@ public class CloudflareDnsBindingDto {
     private Integer rotationEnabled;
     private List<List<Long>> rotationGroups;
     private Integer rotationIntervalMinutes;
+    private Integer supplementEnabled;
+    private Integer supplementTargetCount;
 }

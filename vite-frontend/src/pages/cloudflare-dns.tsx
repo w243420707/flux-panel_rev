@@ -59,6 +59,8 @@ interface CloudflareDnsBinding {
   rotationIntervalMinutes?: number;
   rotationCurrentGroupIndex?: number;
   rotationNextSwitchAt?: number;
+  supplementEnabled?: number;
+  supplementTargetCount?: number;
   lastSyncAt?: number;
   lastSyncStatus?: string;
   lastSyncMessage?: string;
@@ -93,6 +95,8 @@ interface BindingForm {
   rotationEnabled: boolean;
   rotationGroups: number[][];
   rotationIntervalMinutes: number;
+  supplementEnabled: boolean;
+  supplementTargetCount: number;
 }
 
 const defaultSetting: CloudflareDnsSetting = {
@@ -114,6 +118,8 @@ const defaultBindingForm: BindingForm = {
   rotationEnabled: false,
   rotationGroups: [[]],
   rotationIntervalMinutes: 60,
+  supplementEnabled: false,
+  supplementTargetCount: 1,
 };
 
 export default function CloudflareDnsPage() {
@@ -497,6 +503,8 @@ export default function CloudflareDnsPage() {
       rotationEnabled: binding.rotationEnabled === 1,
       rotationGroups: normalizeRotationGroups(binding.rotationGroups),
       rotationIntervalMinutes: Math.max(binding.rotationIntervalMinutes || 60, 5),
+      supplementEnabled: binding.supplementEnabled === 1,
+      supplementTargetCount: Math.max(binding.supplementTargetCount || 1, 1),
     });
     setBindingModalOpen(true);
   };
@@ -543,6 +551,8 @@ export default function CloudflareDnsPage() {
         rotationEnabled: bindingForm.rotationEnabled ? 1 : 0,
         rotationGroups: filterRotationGroups(bindingForm.rotationGroups, getFormBindingNodeIds()).filter((group) => group.length > 0),
         rotationIntervalMinutes: Math.max(bindingForm.rotationIntervalMinutes, 5),
+        supplementEnabled: bindingForm.supplementEnabled ? 1 : 0,
+        supplementTargetCount: Math.max(bindingForm.supplementTargetCount, 1),
       });
       if (res.code === 0) {
         toast.success(res.msg || "DNS 绑定已保存");
@@ -898,6 +908,16 @@ export default function CloudflareDnsPage() {
                         </div>
                       )}
 
+                      {binding.supplementEnabled === 1 && (
+                        <div className="dns-strategy-block dns-strategy-supplement text-xs space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="dns-fact-label">增补模式</span>
+                            <Chip size="sm" variant="flat" color="warning">固定 {binding.supplementTargetCount || 1} 台</Chip>
+                          </div>
+                          <div className="text-default-500">当前轮训组内按换 IP 时间补足，需 APK 确认后才会进入解析。</div>
+                        </div>
+                      )}
+
                       {binding.smartPoolEnabled === 1 && (
                         <div className="dns-strategy-block dns-strategy-pool text-xs space-y-2">
                           <div className="flex items-center gap-2">
@@ -1078,21 +1098,56 @@ export default function CloudflareDnsPage() {
                     <span className="text-sm">跟随隧道入口节点</span>
                   </Switch>
 
-                  <Switch
-                    isSelected={bindingForm.smartPoolEnabled}
-                    onValueChange={(checked) => setBindingForm((prev) => ({ ...prev, smartPoolEnabled: checked }))}
-                    color="primary"
-                  >
-                    <span className="text-sm">智能解析池（按 APK 状态过滤当前组）</span>
-                  </Switch>
+                  <Divider />
+                  <div className="space-y-2 rounded border border-default-200 p-3">
+                    <div>
+                      <p className="text-sm font-semibold">智能解析池</p>
+                      <p className="text-xs text-default-500">独立控制 APK 状态过滤和当前组内的解析优先顺序。</p>
+                    </div>
+                    <Switch
+                      isSelected={bindingForm.smartPoolEnabled}
+                      onValueChange={(checked) => setBindingForm((prev) => ({ ...prev, smartPoolEnabled: checked }))}
+                      color="primary"
+                    >
+                      <span className="text-sm">启用智能解析池</span>
+                    </Switch>
+                    {bindingForm.smartPoolEnabled && getPriorityOptionNodes().length > 0 && (
+                      <Select
+                        label="解析优先顺序（可选）"
+                        selectionMode="multiple"
+                        selectedKeys={nodeIdsToSelectedKeys(filterNodeIds(bindingForm.smartPoolPreferredNodeIds, getFormBindingNodeIds()))}
+                        onSelectionChange={(keys) => {
+                          const nodeIds = filterNodeIds(selectedKeysToNodeIds(keys), getFormBindingNodeIds());
+                          setBindingForm((prev) => ({ ...prev, smartPoolPreferredNodeIds: nodeIds }));
+                        }}
+                        variant="bordered"
+                      >
+                        {getPriorityOptionNodes().map((node) => (
+                          <SelectItem key={node.id} textValue={node.name}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="shrink-0">{node.name}</span>
+                              <span className="text-xs text-default-500 truncate text-right min-w-0">{getNodeAddressSummary(node)}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </Select>
+                    )}
+                  </div>
 
-                  <Switch
-                    isSelected={bindingForm.rotationEnabled}
-                    onValueChange={(checked) => setBindingForm((prev) => ({ ...prev, rotationEnabled: checked }))}
-                    color="primary"
-                  >
-                    <span className="text-sm">分组轮训（故障时立即切换，正常时按间隔轮换）</span>
-                  </Switch>
+                  <Divider />
+                  <div className="space-y-2 rounded border border-default-200 p-3">
+                    <div>
+                      <p className="text-sm font-semibold">分组轮训</p>
+                      <p className="text-xs text-default-500">独立控制当前使用哪一组节点；当前组全部不可用时立即切换。</p>
+                    </div>
+                    <Switch
+                      isSelected={bindingForm.rotationEnabled}
+                      onValueChange={(checked) => setBindingForm((prev) => ({ ...prev, rotationEnabled: checked }))}
+                      color="primary"
+                    >
+                      <span className="text-sm">启用分组轮训</span>
+                    </Switch>
+                  </div>
 
                   {bindingForm.rotationEnabled && (
                     <div className="space-y-3 rounded border border-default-200 p-3">
@@ -1161,6 +1216,33 @@ export default function CloudflareDnsPage() {
                     </div>
                   )}
 
+                  <Divider />
+                  <div className="space-y-3 rounded border border-default-200 p-3">
+                    <div>
+                      <p className="text-sm font-semibold">增补模式</p>
+                      <p className="text-xs text-default-500">只从当前轮训组的闲置节点中补足解析数量，按上次换 IP 时间最久优先。</p>
+                    </div>
+                    <Switch
+                      isSelected={bindingForm.supplementEnabled}
+                      onValueChange={(checked) => setBindingForm((prev) => ({ ...prev, supplementEnabled: checked }))}
+                      color="primary"
+                    >
+                      <span className="text-sm">启用增补模式</span>
+                    </Switch>
+                    {bindingForm.supplementEnabled && (
+                      <Input
+                        label="固定解析节点数量"
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={bindingForm.supplementTargetCount.toString()}
+                        onChange={(e) => setBindingForm((prev) => ({ ...prev, supplementTargetCount: Math.min(Math.max(parseInt(e.target.value, 10) || 1, 1), 100) }))}
+                        endContent={<span className="text-xs text-default-400">台</span>}
+                        variant="bordered"
+                      />
+                    )}
+                  </div>
+
                   {!bindingForm.useTunnelNodes && (
                     <Select
                       label="节点"
@@ -1178,28 +1260,6 @@ export default function CloudflareDnsPage() {
                       variant="bordered"
                     >
                       {nodes.map((node) => (
-                        <SelectItem key={node.id} textValue={node.name}>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="shrink-0">{node.name}</span>
-                            <span className="text-xs text-default-500 truncate text-right min-w-0">{getNodeAddressSummary(node)}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </Select>
-                  )}
-
-                  {bindingForm.smartPoolEnabled && getPriorityOptionNodes().length > 0 && (
-                    <Select
-                      label="解析优先顺序（可选）"
-                      selectionMode="multiple"
-                      selectedKeys={nodeIdsToSelectedKeys(filterNodeIds(bindingForm.smartPoolPreferredNodeIds, getFormBindingNodeIds()))}
-                      onSelectionChange={(keys) => {
-                        const nodeIds = filterNodeIds(selectedKeysToNodeIds(keys), getFormBindingNodeIds());
-                        setBindingForm((prev) => ({ ...prev, smartPoolPreferredNodeIds: nodeIds }));
-                      }}
-                      variant="bordered"
-                    >
-                      {getPriorityOptionNodes().map((node) => (
                         <SelectItem key={node.id} textValue={node.name}>
                           <div className="flex items-center justify-between gap-2">
                             <span className="shrink-0">{node.name}</span>

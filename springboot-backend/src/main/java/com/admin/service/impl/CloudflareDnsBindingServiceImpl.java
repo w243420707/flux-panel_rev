@@ -48,6 +48,8 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
             return R.err(e.getMessage());
         }
         boolean rotationEnabled = dto.getRotationEnabled() != null && dto.getRotationEnabled() == 1;
+        boolean supplementEnabled = dto.getSupplementEnabled() != null && dto.getSupplementEnabled() == 1;
+        int supplementTargetCount = dto.getSupplementTargetCount() == null ? 1 : Math.max(dto.getSupplementTargetCount(), 1);
         if (useTunnelNodes == 0 && nodeIds.isEmpty()) {
             return R.err("手动模式下请选择至少一个节点");
         }
@@ -100,6 +102,8 @@ public class CloudflareDnsBindingServiceImpl extends ServiceImpl<CloudflareDnsBi
         binding.setRotationEnabled(rotationEnabled ? 1 : 0);
         binding.setRotationGroups(rotationEnabled ? JSON.toJSONString(rotationGroups) : null);
         binding.setRotationIntervalMinutes(rotationEnabled ? Math.max(dto.getRotationIntervalMinutes() == null ? 5 : dto.getRotationIntervalMinutes(), 5) : null);
+        binding.setSupplementEnabled(supplementEnabled ? 1 : 0);
+        binding.setSupplementTargetCount(supplementEnabled ? Math.min(supplementTargetCount, 100) : null);
         if (!rotationEnabled) {
             binding.setRotationCurrentGroupIndex(null);
             binding.setRotationLastSwitchAt(null);

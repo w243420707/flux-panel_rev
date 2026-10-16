@@ -37,6 +37,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("create cloudflare dns tables", () -> createCloudflareTables(connection));
             runStep("add cloudflare dns smart pool columns", () -> addCloudflareSmartPoolColumns(connection));
             runStep("add cloudflare dns rotation columns", () -> addCloudflareDnsRotationColumns(connection));
+            runStep("add cloudflare dns supplement columns", () -> addCloudflareDnsSupplementColumns(connection));
             runStep("widen cloudflare dns domain storage", () -> widenCloudflareDnsDomainStorage(connection));
             runStep("seed cloudflare dns setting", () -> seedCloudflareSetting(connection));
             runStep("normalize cloudflare dns ttl", () -> normalizeCloudflareDnsTtl(connection));
@@ -374,6 +375,8 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                     "rotation_current_group_index INT NULL," +
                     "rotation_last_switch_at BIGINT NULL," +
                     "rotation_next_switch_at BIGINT NULL," +
+                    "supplement_enabled TINYINT NOT NULL DEFAULT 0," +
+                    "supplement_target_count INT NULL," +
                     "last_sync_at BIGINT NULL," +
                     "last_sync_status VARCHAR(32) NULL," +
                     "last_sync_message VARCHAR(1000) NULL," +
@@ -411,6 +414,13 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 "ALTER TABLE cloudflare_dns_binding ADD COLUMN rotation_last_switch_at BIGINT NULL AFTER rotation_current_group_index");
         ensureColumn(connection, "cloudflare_dns_binding", "rotation_next_switch_at",
                 "ALTER TABLE cloudflare_dns_binding ADD COLUMN rotation_next_switch_at BIGINT NULL AFTER rotation_last_switch_at");
+    }
+
+    private void addCloudflareDnsSupplementColumns(Connection connection) throws Exception {
+        ensureColumn(connection, "cloudflare_dns_binding", "supplement_enabled",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN supplement_enabled TINYINT NOT NULL DEFAULT 0 AFTER rotation_next_switch_at");
+        ensureColumn(connection, "cloudflare_dns_binding", "supplement_target_count",
+                "ALTER TABLE cloudflare_dns_binding ADD COLUMN supplement_target_count INT NULL AFTER supplement_enabled");
     }
 
     private void widenCloudflareDnsDomainStorage(Connection connection) throws Exception {

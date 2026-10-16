@@ -28,6 +28,8 @@ public class CloudflareDnsBinding extends BaseEntity {
     private Integer rotationCurrentGroupIndex;
     private Long rotationLastSwitchAt;
     private Long rotationNextSwitchAt;
+    private Integer supplementEnabled;
+    private Integer supplementTargetCount;
     private Long lastSyncAt;
     private String lastSyncStatus;
     private String lastSyncMessage;
