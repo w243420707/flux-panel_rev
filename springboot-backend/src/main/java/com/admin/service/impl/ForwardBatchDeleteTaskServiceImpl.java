@@ -4,10 +4,11 @@ import com.admin.common.lang.R;
 import com.admin.common.utils.JwtUtil;
 import com.admin.entity.Forward;
 import com.admin.entity.ForwardBatchDeleteTask;
-import com.admin.entity.UserInfo;
+import com.admin.entity.User;
 import com.admin.mapper.ForwardBatchDeleteTaskMapper;
 import com.admin.service.ForwardBatchDeleteTaskService;
 import com.admin.service.ForwardService;
+import com.admin.service.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -49,6 +50,9 @@ public class ForwardBatchDeleteTaskServiceImpl
 
     @Resource
     private ForwardService forwardService;
+
+    @Resource
+    private UserService userService;
 
     @Resource(name = "forwardConfigExecutor")
     private Executor forwardConfigExecutor;
@@ -95,7 +99,8 @@ public class ForwardBatchDeleteTaskServiceImpl
     public R getBatchDeleteProgress(String taskId) {
         ForwardBatchDeleteTask task = this.getOne(
                 new LambdaQueryWrapper<ForwardBatchDeleteTask>()
-                        .eq(ForwardBatchDeleteTask::getTaskId, taskId));
+                        .eq(ForwardBatchDeleteTask::getTaskId, taskId)
+                        .eq(ForwardBatchDeleteTask::getUserId, JwtUtil.getUserIdFromToken()));
         if (task == null) {
             return R.err("任务不存在");
         }
@@ -131,7 +136,9 @@ public class ForwardBatchDeleteTaskServiceImpl
 
         List<Long> ids = parseIds(task.getIdsJson());
         boolean force = Boolean.TRUE.equals(task.getForce());
-        UserInfo currentUser = getCurrentUserInfo();
+        User taskOwner = task.getUserId() == null ? null : userService.getById(task.getUserId());
+        Integer roleId = taskOwner == null || taskOwner.getRoleId() == null ? 1 : taskOwner.getRoleId();
+        UserInfo currentUser = new UserInfo(task.getUserId(), roleId);
 
         List<Forward> forwardList = forwardService.listByIds(ids);
         Map<Long, Forward> forwardMap = forwardList.stream()
@@ -159,8 +166,8 @@ public class ForwardBatchDeleteTaskServiceImpl
 
                 try {
                     R result = force
-                            ? forwardService.forceDeleteForward(id)
-                            : forwardService.deleteForward(id);
+                            ? forwardService.forceDeleteForwardForUser(id, currentUser.getUserId(), currentUser.getRoleId())
+                            : forwardService.deleteForwardForUser(id, currentUser.getUserId(), currentUser.getRoleId());
                     if (result.getCode() == 0) {
                         successCount.incrementAndGet();
                     } else {
@@ -272,14 +279,29 @@ public class ForwardBatchDeleteTaskServiceImpl
     }
 
     private UserInfo getCurrentUserInfo() {
-        UserInfo userInfo = new UserInfo();
-        userInfo.setUserId(JwtUtil.getUserIdFromToken());
-        userInfo.setRoleId(JwtUtil.getRoleIdFromToken());
-        return userInfo;
+        return new UserInfo(JwtUtil.getUserIdFromToken(), JwtUtil.getRoleIdFromToken());
     }
 
     private boolean canOperateForward(Forward forward, UserInfo currentUser) {
         return currentUser.getRoleId() == 0
                 || Objects.equals(currentUser.getUserId(), forward.getUserId());
+    }
+
+    private static class UserInfo {
+        private final Integer userId;
+        private final Integer roleId;
+
+        private UserInfo(Integer userId, Integer roleId) {
+            this.userId = userId;
+            this.roleId = roleId;
+        }
+
+        private Integer getUserId() {
+            return userId;
+        }
+
+        private Integer getRoleId() {
+            return roleId;
+        }
     }
 }

@@ -423,9 +423,14 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Override
     public R deleteForward(Long id) {
-        synchronized (forwardConfigLock) {
-            UserInfo currentUser = getCurrentUserInfo();
+        UserInfo currentUser = getCurrentUserInfo();
+        return deleteForwardForUser(id, currentUser.getUserId(), currentUser.getRoleId());
+    }
 
+    @Override
+    public R deleteForwardForUser(Long id, Integer userId, Integer roleId) {
+        synchronized (forwardConfigLock) {
+            UserInfo currentUser = new UserInfo(userId, roleId, null);
             Forward forward = validateForwardExists(id, currentUser);
             if (forward == null) {
                 return R.err("端口转发不存在");
@@ -505,9 +510,14 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Override
     public R forceDeleteForward(Long id) {
-        synchronized (forwardConfigLock) {
-            UserInfo currentUser = getCurrentUserInfo();
+        UserInfo currentUser = getCurrentUserInfo();
+        return forceDeleteForwardForUser(id, currentUser.getUserId(), currentUser.getRoleId());
+    }
 
+    @Override
+    public R forceDeleteForwardForUser(Long id, Integer userId, Integer roleId) {
+        synchronized (forwardConfigLock) {
+            UserInfo currentUser = new UserInfo(userId, roleId, null);
             Forward forward = validateForwardExists(id, currentUser);
             if (forward == null) {
                 return R.err("端口转发不存在");

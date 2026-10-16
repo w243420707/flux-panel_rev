@@ -63,6 +63,16 @@ public interface ForwardService extends IService<Forward> {
     R forceDeleteForward(Long id);
 
     /**
+     * 使用已解析的用户上下文删除转发，供异步任务调用。
+     */
+    R deleteForwardForUser(Long id, Integer userId, Integer roleId);
+
+    /**
+     * 使用已解析的用户上下文强制删除转发，供异步任务调用。
+     */
+    R forceDeleteForwardForUser(Long id, Integer userId, Integer roleId);
+
+    /**
      * 暂停转发服务
      * @param id 转发ID
      * @return 结果
