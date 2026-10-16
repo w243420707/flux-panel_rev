@@ -40,7 +40,8 @@ public interface NodeMapper extends BaseMapper<Node> {
             + "OR (cloud_provider = 'AWS' AND aws_account_id IS NOT NULL AND aws_instance_id IS NOT NULL AND TRIM(aws_instance_id) <> '' AND aws_region IS NOT NULL AND TRIM(aws_region) <> '')) "
             + "AND ((change_ip_last_attempt_at IS NULL OR change_ip_last_attempt_at <= "
             + "#{attemptAt} - GREATEST(COALESCE(change_ip_min_interval_minutes, 3), 3) * 60000) "
-            + "OR (change_ip_last_result = 'SUCCEEDED' AND wall_monitor_external_status = 'UNKNOWN'))")
+            + "OR (change_ip_last_result = 'SUCCEEDED' AND wall_monitor_external_last_check_at IS NULL "
+            + "AND (wall_monitor_external_status IS NULL OR wall_monitor_external_status = 'UNKNOWN')))" )
     int reserveChangeIpAttempt(@Param("id") Long id, @Param("attemptAt") long attemptAt);
 
     @Update("UPDATE node SET ip = CASE WHEN ip IS NULL OR ip = '' OR ip = server_ip OR ip = server_ipv4 OR ip = server_ipv6 THEN #{ip} ELSE ip END, "
