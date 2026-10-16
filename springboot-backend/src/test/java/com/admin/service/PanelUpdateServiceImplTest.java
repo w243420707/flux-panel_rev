@@ -197,6 +197,22 @@ class PanelUpdateServiceImplTest {
         assertNotNull(setting.getUpdateRequestId());
     }
 
+    @Test
+    void disablingAutomaticUpdatesRemovesPendingHostRequestAndToken() throws Exception {
+        setting.setEnabled(1);
+        setting.setUpdateRequestId("pending-request");
+        Files.writeString(stateDirectory.resolve("request.json"), "{\"requestId\":\"pending-request\"}");
+        Files.writeString(stateDirectory.resolve("github-token"), "fixture-token");
+        PanelUpdateSettingsRequest request = new PanelUpdateSettingsRequest();
+        request.setEnabled(false);
+
+        assertEquals(0, service.saveSettings(request).getCode());
+
+        assertFalse(Files.exists(stateDirectory.resolve("request.json")));
+        assertFalse(Files.exists(stateDirectory.resolve("github-token")));
+        assertFalse(Files.exists(stateDirectory.resolve("auto-update-enabled")));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "cccccccccccccccccccccccccccccccccccccccc"})

@@ -837,7 +837,7 @@ restore_saved_install_artifacts() {
 
   if [[ -d "${backup_dir}/update-state" ]]; then
     mkdir -p "${APP_DIR}/update-state"
-    for artifact in request.json result.json github-token self-heal.state; do
+    for artifact in request.json result.json github-token auto-update-enabled self-heal.state; do
       if [[ -e "${backup_dir}/update-state/${artifact}" ]]; then
         cp -a "${backup_dir}/update-state/${artifact}" "${APP_DIR}/update-state/${artifact}"
       fi
@@ -1313,7 +1313,14 @@ auto_update_flow() {
 
   local request_file="${UPDATE_STATE_DIR}/request.json"
   local token_file="${UPDATE_STATE_DIR}/github-token"
+  local enabled_file="${UPDATE_STATE_DIR}/auto-update-enabled"
   local result_file="${UPDATE_STATE_DIR}/result.json"
+  if [[ ! -f "${enabled_file}" ]]; then
+    rm -f "${request_file}"
+    rm -f "${token_file}"
+    release_deploy_lock
+    return 0
+  fi
   [[ -f "${request_file}" ]] || { release_deploy_lock; return 0; }
 
   local request_id tag commit previous_id previous_status

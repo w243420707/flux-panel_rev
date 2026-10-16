@@ -58,6 +58,7 @@ prepare_case() {
   ENV_FILE="${APP_DIR}/.env"
   EVENTS="${CASE_DIR}/events"
   mkdir -p "${UPDATE_STATE_DIR}"
+  : > "${UPDATE_STATE_DIR}/auto-update-enabled"
   printf '# Test fixture only\n' > "${ENV_FILE}"
   : > "${EVENTS}"
   APP_NAME=flux-panel-test
@@ -146,6 +147,14 @@ test_no_request() {
   assert_count apply 0
   assert_absent "${UPDATE_STATE_DIR}/result.json"
   assert_equal '' "${DEPLOY_LOCK_FD}" 'Lock release'
+}
+test_disabled_request_is_discarded_without_deployment() {
+  mv "${UPDATE_STATE_DIR}/auto-update-enabled" "${CASE_DIR}/disabled-marker"
+  write_request
+  expect_status 0 auto_update_flow
+  assert_count apply 0
+  assert_absent "${UPDATE_STATE_DIR}/request.json"
+  assert_absent "${UPDATE_STATE_DIR}/github-token"
 }
 test_same_commit() {
   write_request "${REQUEST_ID}" main "${NEW_SHA^^}"
@@ -349,6 +358,7 @@ run_test() {
 }
 
 run_test 'No request performs no deployment' test_no_request
+run_test 'Disabled update request is discarded without deployment' test_disabled_request_is_discarded_without_deployment
 run_test 'Same SHA is consumed without deployment (case-insensitive)' test_same_commit
 run_test 'New SHA is pinned and applied exactly once across timer ticks' test_new_commit
 run_test 'Failed application is consumed and never loops' test_failed_apply

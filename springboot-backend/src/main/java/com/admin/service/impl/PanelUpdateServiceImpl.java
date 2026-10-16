@@ -55,6 +55,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
     private static final String STATE_REQUEST = "request.json";
     private static final String STATE_RESULT = "result.json";
     private static final String STATE_TOKEN = "github-token";
+    private static final String STATE_ENABLED = "auto-update-enabled";
     private static final Pattern REPOSITORY_PATTERN = Pattern.compile("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$");
     private static final Pattern COMMIT_PATTERN = Pattern.compile("^[a-fA-F0-9]{40}$");
 
@@ -123,6 +124,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
         setting.setCurrentCommit(currentCommit());
         setting.setNextCheckAt(nextCheckAt(setting));
         saveSetting(setting);
+        syncHostAutoUpdateState(setting.getEnabled() != null && setting.getEnabled() == 1);
         return R.ok(settingsView(setting));
     }
 
@@ -235,6 +237,7 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
 
     private void enqueueIfNeeded(PanelUpdateSetting setting, String commit, String token, long now) {
         Path directory = Path.of(stateDirectory);
+        syncHostAutoUpdateState(true);
         // The host owns a published request until it consumes it, including retries.
         // Never replace its request ID or credential while an update is pending/running.
         if (Files.exists(directory.resolve(STATE_REQUEST))) {
@@ -266,6 +269,22 @@ public class PanelUpdateServiceImpl implements PanelUpdateService {
             saveSetting(setting);
         } catch (IOException e) {
             throw new IllegalStateException("无法写入宿主机更新请求");
+        }
+    }
+
+    private void syncHostAutoUpdateState(boolean enabled) {
+        Path directory = Path.of(stateDirectory);
+        try {
+            Files.createDirectories(directory);
+            if (enabled) {
+                writeRestricted(directory.resolve(STATE_ENABLED), "1");
+                return;
+            }
+            Files.deleteIfExists(directory.resolve(STATE_ENABLED));
+            Files.deleteIfExists(directory.resolve(STATE_REQUEST));
+            Files.deleteIfExists(directory.resolve(STATE_TOKEN));
+        } catch (IOException e) {
+            log.warn("同步宿主机自动更新开关失败: {}", e.getMessage());
         }
     }
 
