@@ -80,6 +80,21 @@
   .node-card-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .node-card-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .node-card-identity,
+  .node-card-controls {
+    flex-basis: 100%;
+  }
+
+  .node-card-controls {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
 }
 
 @container (min-width: 28rem) {
