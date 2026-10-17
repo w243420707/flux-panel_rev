@@ -215,7 +215,49 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             forwardList = baseMapper.selectAllForwardsWithTunnel();
         }
 
+        enrichLegacyPendingNodeDetails(forwardList);
         return R.ok(forwardList);
+    }
+
+    /**
+     * 兼容旧版本留下的待确认转发：旧记录只有状态，没有保存失败节点明细。
+     * 这种情况下至少返回当前隧道节点名单，避免页面只能显示笼统的“待确认”。
+     */
+    private void enrichLegacyPendingNodeDetails(List<ForwardWithTunnelDto> forwards) {
+        if (forwards == null || forwards.isEmpty()) {
+            return;
+        }
+        for (ForwardWithTunnelDto forward : forwards) {
+            if (forward == null
+                    || !Objects.equals(forward.getStatus(), FORWARD_STATUS_PENDING)
+                    || hasText(forward.getPendingNodes())
+                    || forward.getTunnelId() == null) {
+                continue;
+            }
+
+            Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
+            if (tunnel == null) {
+                continue;
+            }
+
+            List<String> pendingNodes = new ArrayList<>();
+            appendLegacyPendingNodes(pendingNodes, loadNodes(TunnelNodeUtil.getInNodeIds(tunnel)), "入口");
+            if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
+                appendLegacyPendingNodes(pendingNodes, loadNodes(TunnelNodeUtil.getOutNodeIds(tunnel)), "出口");
+            }
+            if (!pendingNodes.isEmpty()) {
+                forward.setPendingNodes(JSON.toJSONString(pendingNodes));
+            }
+        }
+    }
+
+    private void appendLegacyPendingNodes(List<String> pendingNodes, List<Node> nodes, String role) {
+        if (nodes == null) {
+            return;
+        }
+        for (Node node : nodes) {
+            pendingNodes.add(role + formatNode(node) + "：历史任务未保存失败阶段，等待重新确认");
+        }
     }
 
     @Override

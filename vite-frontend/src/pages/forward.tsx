@@ -1322,7 +1322,9 @@ export default function ForwardPage() {
   };
 
   const getPendingNodeMessages = (forward: Forward): string[] => {
-    if (!forward.pendingNodes) return [];
+    if (!forward.pendingNodes) {
+      return forward.status === 2 ? ['节点明细尚未返回，后台正在重新确认'] : [];
+    }
     if (Array.isArray(forward.pendingNodes)) return forward.pendingNodes.filter(Boolean);
     try {
       const parsed = JSON.parse(forward.pendingNodes);
