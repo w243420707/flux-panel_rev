@@ -51,6 +51,7 @@
 .node-card-chevron { width: 1rem; height: 1rem; flex-shrink: 0; }
 .node-card-status { flex-shrink: 0; font-size: .625rem; }
 .node-card-status [data-slot="content"] { font-size: inherit; }
+.node-card-ip-count { white-space: nowrap; }
 
 .node-card-usage { grid-area: usage; min-width: 0; }
 .node-card-usage, .node-card-speed { display: grid; row-gap: .25rem; }

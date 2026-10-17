@@ -38,7 +38,7 @@ class NodeChangeIpDatabaseTest {
                 + "wall_monitor_last_check_at BIGINT, wall_monitor_consecutive_failures INT, wall_monitor_message VARCHAR(255), "
                 + "wall_monitor_external_last_check_at BIGINT, wall_monitor_external_consecutive_failures INT, wall_monitor_external_message VARCHAR(255), "
                 + "change_ip_min_interval_minutes INT, change_ip_last_attempt_at BIGINT, "
-                + "change_ip_last_result VARCHAR(16) NOT NULL DEFAULT 'UNKNOWN')");
+                + "change_ip_last_result VARCHAR(16) NOT NULL DEFAULT 'UNKNOWN', change_ip_count BIGINT NOT NULL DEFAULT 0)");
         jdbc.update("INSERT INTO node (id, oracle_node, cloud_provider, oci_account_id, oci_instance_ocid) VALUES (?, 1, 'OCI', 2, 'ocid1.instance.test')",
                 NODE_ID);
 
@@ -91,6 +91,7 @@ class NodeChangeIpDatabaseTest {
         }
 
         assertEquals(1, nodes.finishChangeIpAttempt(NODE_ID, 900_000, "FAILED"));
+        assertEquals(0L, jdbc.queryForObject("SELECT change_ip_count FROM node WHERE id = ?", Long.class, NODE_ID));
         assertEquals(0, nodes.reserveChangeIpAttempt(NODE_ID, 1_079_999));
         assertEquals("FAILED", jdbc.queryForObject(
                 "SELECT change_ip_last_result FROM node WHERE id = ?", String.class, NODE_ID));
@@ -106,9 +107,11 @@ class NodeChangeIpDatabaseTest {
     void succeededUnknownCanRetryImmediatelyButBlockedCannot() {
         assertEquals(1, nodes.reserveChangeIpAttempt(NODE_ID, 2_000_000));
         assertEquals(1, nodes.finishChangeIpAttempt(NODE_ID, 2_000_000, "SUCCEEDED"));
+        assertEquals(1L, jdbc.queryForObject("SELECT change_ip_count FROM node WHERE id = ?", Long.class, NODE_ID));
         jdbc.update("UPDATE node SET wall_monitor_external_status = 'UNKNOWN' WHERE id = ?", NODE_ID);
         assertEquals(1, nodes.reserveChangeIpAttempt(NODE_ID, 2_000_001));
         assertEquals(1, nodes.finishChangeIpAttempt(NODE_ID, 2_000_001, "SUCCEEDED"));
+        assertEquals(2L, jdbc.queryForObject("SELECT change_ip_count FROM node WHERE id = ?", Long.class, NODE_ID));
         jdbc.update("UPDATE node SET wall_monitor_external_status = 'SUSPECTED_BLOCKED' WHERE id = ?", NODE_ID);
         assertEquals(0, nodes.reserveChangeIpAttempt(NODE_ID, 2_000_002));
     }
@@ -126,6 +129,7 @@ class NodeChangeIpDatabaseTest {
         assertEquals(1, nodes.reserveChangeIpAttempt(NODE_ID, 1_000_000));
         assertEquals(1, nodes.reserveChangeIpAttempt(NODE_ID, 1_180_000));
         assertEquals(0, nodes.finishChangeIpAttempt(NODE_ID, 1_000_000, "FAILED"));
+        assertEquals(0L, jdbc.queryForObject("SELECT change_ip_count FROM node WHERE id = ?", Long.class, NODE_ID));
         assertEquals("PENDING", jdbc.queryForObject(
                 "SELECT change_ip_last_result FROM node WHERE id = ?", String.class, NODE_ID));
     }

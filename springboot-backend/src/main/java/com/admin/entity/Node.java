@@ -58,6 +58,10 @@ public class Node extends BaseEntity {
     @TableField(updateStrategy = FieldStrategy.NEVER)
     private String changeIpLastResult;
 
+    /** Number of successful cloud-provider public IP changes since the node was added. */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private Long changeIpCount;
+
     @TableField(exist = false)
     private String remoteChangeIpUrl;
 

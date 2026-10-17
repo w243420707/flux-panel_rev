@@ -39,5 +39,8 @@ class DatabaseMigrationOciTest {
         verify(ddl).executeUpdate("UPDATE node SET change_ip_min_interval_minutes = 3 "
                 + "WHERE change_ip_min_interval_minutes IS NOT NULL AND change_ip_min_interval_minutes < 3");
         verify(ddl).execute("ALTER TABLE node ADD COLUMN change_ip_last_result VARCHAR(16) NOT NULL DEFAULT 'UNKNOWN' AFTER change_ip_last_attempt_at");
+
+        ReflectionTestUtils.invokeMethod(new DatabaseMigrationConfig(), "addNodeChangeIpCount", connection);
+        verify(ddl).execute("ALTER TABLE node ADD COLUMN change_ip_count BIGINT NOT NULL DEFAULT 0 AFTER change_ip_last_result");
     }
 }

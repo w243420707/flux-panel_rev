@@ -68,6 +68,7 @@ CREATE TABLE `node` (
   `aws_region` varchar(80) DEFAULT NULL,
   `change_ip_last_attempt_at` bigint(20) DEFAULT NULL,
   `change_ip_last_result` varchar(16) NOT NULL DEFAULT 'UNKNOWN',
+  `change_ip_count` bigint(20) NOT NULL DEFAULT '0',
   `ip` longtext,
   `server_ip` varchar(100) NOT NULL DEFAULT '',
   `server_ipv4` varchar(100) NOT NULL DEFAULT '',

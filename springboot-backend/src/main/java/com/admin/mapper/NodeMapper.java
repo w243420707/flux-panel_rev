@@ -55,8 +55,9 @@ public interface NodeMapper extends BaseMapper<Node> {
                                    @Param("attemptAt") long attemptAt,
                                    @Param("ip") String ip);
 
-    @Update("UPDATE node SET change_ip_last_result = #{result} WHERE id = #{id} "
-            + "AND change_ip_last_attempt_at = #{attemptAt} AND change_ip_last_result = 'PENDING'")
+    @Update("UPDATE node SET change_ip_last_result = #{result}, "
+            + "change_ip_count = CASE WHEN #{result} = 'SUCCEEDED' THEN COALESCE(change_ip_count, 0) + 1 ELSE COALESCE(change_ip_count, 0) END "
+            + "WHERE id = #{id} AND change_ip_last_attempt_at = #{attemptAt} AND change_ip_last_result = 'PENDING'")
     int finishChangeIpAttempt(@Param("id") Long id,
                               @Param("attemptAt") long attemptAt,
                               @Param("result") String result);

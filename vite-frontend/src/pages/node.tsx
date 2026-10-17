@@ -100,6 +100,7 @@ interface Node {
   changeIpMinIntervalMinutes?: number | null;
   changeIpLastAttemptAt?: number | null;
   changeIpLastResult?: 'PENDING' | 'SUCCEEDED' | 'FAILED' | string | null;
+  changeIpCount?: number | null;
   rebootIntervalHours?: number;
   rebootNextAt?: number | null;
   vpsUsage?: VpsUsage;
@@ -738,6 +739,7 @@ export default function NodePage() {
       }
     } else if (type === 'changeIp') {
       applyChangeIpStatus(Number(id), messageData);
+      refreshNodesQuietly();
     } else if (type === 'cloudBinding') {
       // A replacement changes instance identity, not just its current public IP.
       // Reload the server-authoritative binding instead of deriving it from IP.
@@ -1767,6 +1769,9 @@ export default function NodePage() {
                         </Chip>
                         <Chip color={node.connectionStatus === 'online' ? 'success' : 'danger'} variant="flat" size="sm" className="node-card-status">
                           {node.connectionStatus === 'online' ? '在线' : '离线'}
+                        </Chip>
+                        <Chip color="secondary" variant="flat" size="sm" className="node-card-status node-card-ip-count" title="上线以来成功切换公网 IP 的次数">
+                          IP切换 {node.changeIpCount || 0} 次
                         </Chip>
                       </div>
                     </div>
