@@ -15,6 +15,7 @@ import com.admin.mapper.ForwardMapper;
 import com.admin.service.*;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -1451,24 +1452,37 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         String interfaceName = tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD ? null : forward.getInterfaceName();
 
         if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
-            R remoteResult = createRemoteServices(nodeInfo.getOutNodes(), serviceName, forward, tunnel.getProtocol(), forward.getInterfaceName());
-            if (remoteResult.getCode() != 0) {
+            NodeOperationBatchResult remoteResult = executeNodeOperationsDetailed(
+                    "create-remote-service",
+                    nodeInfo.getOutNodes(),
+                    node -> createRemoteService(node, serviceName, forward, tunnel.getProtocol(), forward.getInterfaceName()));
+            if (!remoteResult.getFailures().isEmpty()) {
+                updatePendingNodes(forward, remoteResult.getFailures());
                 cleanupGostServices(nodeInfo, serviceName, tunnel.getType());
-                return remoteResult;
+                return R.err("出口节点下发失败：" + String.join("；", remoteResult.getFailures()));
             }
 
-            R chainResult = createChainServices(nodeInfo.getInNodes(), serviceName, buildOutNodeAddresses(nodeInfo.getOutNodes(), forward.getOutPort()), tunnel.getProtocol(), tunnel.getInterfaceName(), forward.getStrategy());
-            if (chainResult.getCode() != 0) {
+            NodeOperationBatchResult chainResult = executeNodeOperationsDetailed(
+                    "create-chain-service",
+                    nodeInfo.getInNodes(),
+                    node -> createChainService(node, serviceName, buildOutNodeAddresses(nodeInfo.getOutNodes(), forward.getOutPort()), tunnel.getProtocol(), tunnel.getInterfaceName(), forward.getStrategy()));
+            if (!chainResult.getFailures().isEmpty()) {
+                updatePendingNodes(forward, chainResult.getFailures());
                 cleanupGostServices(nodeInfo, serviceName, tunnel.getType());
-                return chainResult;
+                return R.err("入口链服务下发失败：" + String.join("；", chainResult.getFailures()));
             }
         }
 
-        R serviceResult = createMainServices(nodeInfo.getInNodes(), serviceName, forward, limiter, tunnel.getType(), tunnel, forward.getStrategy(), interfaceName);
-        if (serviceResult.getCode() != 0) {
+        NodeOperationBatchResult serviceResult = executeNodeOperationsDetailed(
+                "create-main-service",
+                nodeInfo.getInNodes(),
+                node -> createMainService(node, serviceName, forward, limiter, tunnel.getType(), tunnel, forward.getStrategy(), interfaceName));
+        if (!serviceResult.getFailures().isEmpty()) {
+            updatePendingNodes(forward, serviceResult.getFailures());
             cleanupGostServices(nodeInfo, serviceName, tunnel.getType());
-            return serviceResult;
+            return R.err("主服务下发失败：" + String.join("；", serviceResult.getFailures()));
         }
+        clearPendingNodes(forward);
         return R.ok();
     }
 
@@ -1500,6 +1514,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                 String message = failures.isEmpty()
                         ? "没有可用出口节点，转发配置将在节点恢复后自动重试"
                         : "没有可用出口节点：" + String.join("；", failures);
+                updatePendingNodes(forward, failures);
                 updateForwardStatusToError(forward, markForwardError);
                 return R.err(message);
             }
@@ -1513,6 +1528,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                 String message = failures.isEmpty()
                         ? "没有可用入口节点，转发配置将在节点恢复后自动重试"
                         : "没有可用入口节点：" + String.join("；", failures);
+                updatePendingNodes(forward, failures);
                 updateForwardStatusToError(forward, markForwardError);
                 return R.err(message);
             }
@@ -1532,10 +1548,12 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
         if (!failures.isEmpty()) {
             String message = "部分节点下发失败，已保留成功节点并将在后台自动重试：" + String.join("；", failures);
+            updatePendingNodes(forward, failures);
             updateForwardStatusToError(forward, markForwardError);
             return R.err(message);
         }
 
+        clearPendingNodes(forward);
         return R.ok();
     }
 
@@ -2096,6 +2114,27 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     /**
      * 更新转发状态为错误
      */
+    private void updatePendingNodes(Forward forward, List<String> failures) {
+        if (forward == null) {
+            return;
+        }
+        List<String> normalized = failures == null ? new ArrayList<>() : failures.stream()
+                .filter(this::hasText)
+                .map(String::trim)
+                .distinct()
+                .collect(Collectors.toList());
+        forward.setPendingNodes(normalized.isEmpty() ? null : JSON.toJSONString(normalized));
+        // 后台补偿调用时不会修改转发状态，但失败节点明细仍必须立即落库。
+        this.updateById(forward);
+    }
+
+    private void clearPendingNodes(Forward forward) {
+        if (forward != null) {
+            forward.setPendingNodes(null);
+            this.updateById(forward);
+        }
+    }
+
     private void updateForwardStatusToError(Forward forward) {
         updateForwardStatusToError(forward, true);
     }

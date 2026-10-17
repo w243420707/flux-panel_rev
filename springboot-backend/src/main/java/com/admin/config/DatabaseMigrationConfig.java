@@ -30,6 +30,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
             runStep("add node remote change ip settings", () -> addNodeRemoteChangeIpSettings(connection));
             runStep("add OCI account and node binding", () -> addOciStorage(connection));
             runStep("add node change ip count", () -> addNodeChangeIpCount(connection));
+            runStep("add forward pending nodes", () -> ensureColumn(connection, "forward", "pending_nodes", "ALTER TABLE forward ADD COLUMN pending_nodes LONGTEXT NULL AFTER inx"));
             runStep("add node reboot settings", () -> addNodeRebootSettings(connection));
             runStep("create node VPS usage storage", () -> addNodeUsageStorage(connection));
             runStep("add node wall monitor columns", () -> addNodeWallMonitorColumns(connection));

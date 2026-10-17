@@ -89,4 +89,9 @@ public class ForwardWithTunnelDto {
     private Integer inx;
 
     private String interfaceName;
+
+    /**
+     * 尚未成功下发配置的节点明细（JSON数组）。
+     */
+    private String pendingNodes;
 }

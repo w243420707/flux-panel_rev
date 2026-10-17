@@ -63,6 +63,8 @@ interface Forward {
   outFlow: number;
   serviceRunning: boolean;
   pending?: boolean;
+  /** 尚未成功下发配置的节点明细，后端返回 JSON 数组字符串。 */
+  pendingNodes?: string | string[] | null;
   createdTime: string;
   userName?: string;
   userId?: number;
@@ -228,6 +230,21 @@ export default function ForwardPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  // 后台补偿可能早于页面操作完成，存在失败节点时短间隔刷新，全部成功后自动停止。
+  const hasPendingNodes = forwards.some(forward => {
+    if (forward.status !== 2 && forward.status !== -1) return false;
+    if (Array.isArray(forward.pendingNodes)) return forward.pendingNodes.length > 0;
+    return typeof forward.pendingNodes === 'string' && forward.pendingNodes.trim().length > 0;
+  });
+
+  useEffect(() => {
+    if (!hasPendingNodes) return;
+    const timer = window.setInterval(() => {
+      loadData(false);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [hasPendingNodes]);
 
   useEffect(() => {
     setSelectedForwardIds(prev => prev.filter(id => forwards.some(forward => forward.id === id)));
@@ -1304,6 +1321,17 @@ export default function ForwardPage() {
     }
   };
 
+  const getPendingNodeMessages = (forward: Forward): string[] => {
+    if (!forward.pendingNodes) return [];
+    if (Array.isArray(forward.pendingNodes)) return forward.pendingNodes.filter(Boolean);
+    try {
+      const parsed = JSON.parse(forward.pendingNodes);
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [];
+    } catch {
+      return forward.pendingNodes.trim() ? [forward.pendingNodes.trim()] : [];
+    }
+  };
+
   // 获取策略显示
   const getStrategyDisplay = (strategy: string) => {
     switch (strategy) {
@@ -1563,6 +1591,7 @@ export default function ForwardPage() {
   const renderForwardCard = (forward: Forward, listeners?: any) => {
     const statusDisplay = getStatusDisplay(forward.status);
     const strategyDisplay = getStrategyDisplay(forward.strategy);
+    const pendingNodeMessages = getPendingNodeMessages(forward);
     const selected = isForwardSelected(forward.id);
     
     return (
@@ -1619,6 +1648,17 @@ export default function ForwardPage() {
                 onValueChange={() => handleServiceToggle(forward)}
                 isDisabled={forward.status !== 1 && forward.status !== 0}
               />
+              {pendingNodeMessages.length > 0 && (
+                <Chip
+                  color="warning"
+                  variant="flat"
+                  size="sm"
+                  className="text-xs max-w-[min(18rem,45vw)]"
+                  title={pendingNodeMessages.join('；')}
+                >
+                  待确认节点 {pendingNodeMessages.length}
+                </Chip>
+              )}
               <Chip 
                 color={statusDisplay.color as any} 
                 variant="flat" 
@@ -1632,6 +1672,21 @@ export default function ForwardPage() {
         </CardHeader>
         
         <CardBody className="pt-0 pb-3">
+          {pendingNodeMessages.length > 0 && (
+            <Alert
+              color="warning"
+              variant="flat"
+              className="mb-3"
+              title="以下节点未下发成功"
+              description={(
+                <div className="mt-1 space-y-0.5 text-xs">
+                  {pendingNodeMessages.map((message, index) => (
+                    <div key={`${forward.id}-pending-${index}`} className="break-words">{message}</div>
+                  ))}
+                </div>
+              )}
+            />
+          )}
           <div className="space-y-2">
             {/* 地址信息 */}
             <div className="space-y-1">

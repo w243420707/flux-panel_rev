@@ -42,4 +42,9 @@ public class Forward extends BaseEntity{
 
     private Integer inx;
 
+    /**
+     * 尚未成功下发配置的节点明细（JSON数组）。
+     */
+    private String pendingNodes;
+
 }

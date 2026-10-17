@@ -32,7 +32,8 @@ public class TunnelConfigSyncTask {
     // 节点可能长时间离线，失败配置持续重试，直到隧道版本变化或转发被删除。
     private static final int MAX_FORWARD_RETRY_ATTEMPTS = 0;
     private static final int MAX_RETRY_SUBMISSIONS_PER_TICK = 50;
-    private static final long RETRY_BASE_DELAY_MILLIS = 15000L;
+    // 首次补偿尽快重试，后续仍按指数退避，避免节点短暂离线时长时间显示待确认。
+    private static final long RETRY_BASE_DELAY_MILLIS = 5000L;
     private static final long RETRY_MAX_DELAY_MILLIS = 300000L;
 
     @Resource
@@ -127,7 +128,7 @@ public class TunnelConfigSyncTask {
         queueForwardRetry(tunnelId, forwardId, oldTunnel, syncVersion, 1, reason, forceClearPort, true);
     }
 
-    @Scheduled(fixedDelay = 15000)
+    @Scheduled(fixedDelay = 5000)
     public void processForwardRetryQueue() {
         if (FORWARD_RETRY_QUEUE.isEmpty()) {
             return;
