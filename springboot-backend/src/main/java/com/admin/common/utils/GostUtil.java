@@ -22,7 +22,8 @@ public class GostUtil {
     private static final String DEFAULT_MUX_KEEPALIVE_INTERVAL = "15s";
     private static final String DEFAULT_MUX_KEEPALIVE_TIMEOUT = "90s";
     private static final String DEFAULT_QUIC_TTL = "10s";
-
+    // Go time.Duration is serialized as nanoseconds in the node's JSON config struct.
+    private static final long DEFAULT_SELECTOR_FAIL_TIMEOUT_NANOS = 600L * 1_000_000_000L;
 
     public static GostDto AddLimiters(Long node_id, Long name, String speed) {
         JSONObject data = createLimiterData(name, speed);
@@ -119,7 +120,7 @@ public class GostUtil {
         JSONObject selector = new JSONObject();
         selector.put("strategy", strategy);
         selector.put("maxFails", 1);
-        selector.put("failTimeout", "600s");
+        selector.put("failTimeout", DEFAULT_SELECTOR_FAIL_TIMEOUT_NANOS);
         forwarder.put("selector", selector);
 
         data.put("forwarder", forwarder);
@@ -169,7 +170,7 @@ public class GostUtil {
         JSONObject selector = new JSONObject();
         selector.put("strategy", strategy);
         selector.put("maxFails", 1);
-        selector.put("failTimeout", "600s");
+        selector.put("failTimeout", DEFAULT_SELECTOR_FAIL_TIMEOUT_NANOS);
         forwarder.put("selector", selector);
 
         data.put("forwarder", forwarder);
@@ -370,7 +371,7 @@ public class GostUtil {
         JSONObject selector = new JSONObject();
         selector.put("strategy", strategy);
         selector.put("maxFails", 1);
-        selector.put("failTimeout", "600s");
+        selector.put("failTimeout", DEFAULT_SELECTOR_FAIL_TIMEOUT_NANOS);
         return selector;
     }
 

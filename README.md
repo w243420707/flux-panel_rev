@@ -198,6 +198,12 @@ Swap 是内存不足时的缓冲，可以降低节点进程被 OOM 强制终止�
 
 ## 更新日志
 
+### 2026-10-18 v1.3.124
+
+- 修复转发下发配置中 `selector.failTimeout` 类型错误：面板改为发送 Go `time.Duration` 所需的纳秒整数，兼容当前线上旧版节点。
+- 待确认转发会在节点重新收到正确配置后自动补偿，不再因 `cannot unmarshal string into Go struct field SelectorConfig.hops.selector.failTimeout` 持续失败。
+- 前端版本更新为 `1.3.124`。
+
 ### 2026-10-18 v1.3.123
 
 - 修复部署脚本优先使用旧 `vite-frontend/prebuilt-dist` 导致源码更新后前端页面不变化的问题，同步最新预构建前端产物。
