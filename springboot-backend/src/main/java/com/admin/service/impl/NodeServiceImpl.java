@@ -291,30 +291,19 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
                     continue;
                 }
 
-                R result = forwardService.refreshForwardConfig(forward, null);
+                R result = forwardService.refreshForwardConfigAfterNodeReconnect(forward);
                 if (result != null && result.getCode() != 0) {
-                    tunnelConfigSyncTask.queueForwardConfigRetryNow(
-                            tunnel.getId(),
-                            forward.getId(),
-                            null,
-                            null,
-                            result.getMsg(),
-                            false);
+                    // 正常转发的重连确认失败只记录日志，不把一次超时误报为当前配置失效；
+                    // 下次节点重连时会再次确认，真正的配置变更仍走待确认补偿链路。
+                    log.warn("节点 {} 重连后转发 {} 自愈确认失败，保留原正常状态: {}",
+                            nodeId, forward.getId(), result.getMsg());
                 }
             } catch (Exception e) {
-                log.warn("Forward config self-healing failed for node {}, forward {}: {}",
+                // 正常转发的自愈异常也不能升级为待确认；真正的配置变更失败由变更链路负责入队。
+                log.warn("Forward config self-healing failed for node {}, forward {}, preserve current state: {}",
                         nodeId,
                         forward != null ? forward.getId() : null,
                         e.getMessage());
-                if (forward != null && forward.getId() != null && forward.getTunnelId() != null) {
-                    tunnelConfigSyncTask.queueForwardConfigRetryNow(
-                            forward.getTunnelId().longValue(),
-                            forward.getId().longValue(),
-                            null,
-                            null,
-                            e.getMessage(),
-                            false);
-                }
             }
         }
     }

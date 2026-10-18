@@ -1550,6 +1550,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     private R updateGostServices(Forward forward, Tunnel tunnel, Integer limiter, NodeInfo nodeInfo, UserTunnel userTunnel, boolean markForwardError) {
+        return updateGostServices(forward, tunnel, limiter, nodeInfo, userTunnel, markForwardError, true);
+    }
+
+    private R updateGostServices(Forward forward, Tunnel tunnel, Integer limiter, NodeInfo nodeInfo, UserTunnel userTunnel, boolean markForwardError, boolean recordFailures) {
         String serviceName = buildServiceName(forward.getId(), forward.getUserId(), userTunnel);
         String interfaceName = tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD ? null : forward.getInterfaceName();
         List<String> failures = new ArrayList<>();
@@ -1573,8 +1577,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                 String message = failures.isEmpty()
                         ? "没有可用出口节点，转发配置将在节点恢复后自动重试"
                         : "没有可用出口节点：" + String.join("；", failures);
-                updatePendingNodes(forward, failures);
-                updateForwardStatusToError(forward, markForwardError);
+                if (recordFailures) {
+                    updatePendingNodes(forward, failures);
+                    updateForwardStatusToError(forward, markForwardError);
+                }
                 return R.err(message);
             }
 
@@ -1587,8 +1593,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                 String message = failures.isEmpty()
                         ? "没有可用入口节点，转发配置将在节点恢复后自动重试"
                         : "没有可用入口节点：" + String.join("；", failures);
-                updatePendingNodes(forward, failures);
-                updateForwardStatusToError(forward, markForwardError);
+                if (recordFailures) {
+                    updatePendingNodes(forward, failures);
+                    updateForwardStatusToError(forward, markForwardError);
+                }
                 return R.err(message);
             }
 
@@ -1607,8 +1615,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
         if (!failures.isEmpty()) {
             String message = "部分节点下发失败，已保留成功节点并将在后台自动重试：" + String.join("；", failures);
-            updatePendingNodes(forward, failures);
-            updateForwardStatusToError(forward, markForwardError);
+            if (recordFailures) {
+                updatePendingNodes(forward, failures);
+                updateForwardStatusToError(forward, markForwardError);
+            }
             return R.err(message);
         }
 
@@ -2497,7 +2507,20 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     @Override
+    public R refreshForwardConfigAfterNodeReconnect(Forward forward) {
+        if (forward == null) {
+            return R.err("forward is null");
+        }
+        // 节点重连后的探测只用于补发配置，不改变原本成功转发的状态。
+        return refreshForwardConfigInternal(forward, null, false, false);
+    }
+
+    @Override
     public R refreshForwardConfig(Forward forward, Tunnel oldTunnel, boolean forceClearPort) {
+        return refreshForwardConfigInternal(forward, oldTunnel, forceClearPort, true);
+    }
+
+    private R refreshForwardConfigInternal(Forward forward, Tunnel oldTunnel, boolean forceClearPort, boolean markPendingOnFailure) {
         if (forward == null) {
             return R.err("forward is null");
         }
@@ -2536,15 +2559,17 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             forward.setStrategy(resolvedStrategy);
         }
 
-        R result = updateGostServices(forward, tunnel, limiter, nodeInfo, userTunnel, false);
+        R result = updateGostServices(forward, tunnel, limiter, nodeInfo, userTunnel, false, markPendingOnFailure);
         if (result.getCode() != 0) {
-            if (originalStatus == null || originalStatus == FORWARD_STATUS_ACTIVE || originalStatus == FORWARD_STATUS_PENDING) {
-                // 保持在待确认状态，应用重启后可由后台扫描任务继续补发。
+            if (markPendingOnFailure
+                    && (originalStatus == null || originalStatus == FORWARD_STATUS_ACTIVE || originalStatus == FORWARD_STATUS_PENDING)) {
+                // 配置变更失败才标记为待确认；节点重连自愈失败不覆盖原本成功状态。
                 forward.setStatus(FORWARD_STATUS_PENDING);
                 forward.setUpdatedTime(System.currentTimeMillis());
                 this.updateById(forward);
             }
-            log.info("刷新转发 {} 的节点配置失败，原状态 {}，当前标记为待确认: {}", forward.getId(), originalStatus, result.getMsg());
+            log.info("刷新转发 {} 的节点配置失败，原状态 {}，markPendingOnFailure={}, result={}",
+                    forward.getId(), originalStatus, markPendingOnFailure, result.getMsg());
             return result;
         }
 

@@ -109,4 +109,9 @@ public interface ForwardService extends IService<Forward> {
      * 刷新转发配置，可选先强制释放入口/出口端口。
      */
     R refreshForwardConfig(Forward forward, Tunnel oldTunnel, boolean forceClearPort);
+
+    /**
+     * 节点重连后的自愈确认。确认失败时不覆盖原本已经成功的转发状态。
+     */
+    R refreshForwardConfigAfterNodeReconnect(Forward forward);
 }
