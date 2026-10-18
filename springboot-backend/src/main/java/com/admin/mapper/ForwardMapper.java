@@ -4,6 +4,7 @@ import com.admin.entity.Forward;
 import com.admin.common.dto.ForwardWithTunnelDto;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
@@ -29,5 +30,11 @@ public interface ForwardMapper extends BaseMapper<Forward> {
      * @return 转发信息列表
      */
     List<ForwardWithTunnelDto> selectForwardsWithTunnelByUserId(@Param("userId") Integer userId);
+
+    /**
+     * 显式清除已恢复转发的历史失败明细。MyBatis 默认不会更新为 null 的字段。
+     */
+    @Update("UPDATE forward SET pending_nodes = NULL WHERE id = #{forwardId}")
+    int clearPendingNodes(@Param("forwardId") Long forwardId);
 
 }

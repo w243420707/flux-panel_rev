@@ -215,8 +215,25 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             forwardList = baseMapper.selectAllForwardsWithTunnel();
         }
 
+        clearResolvedPendingNodeDetails(forwardList);
         enrichLegacyPendingNodeDetails(forwardList);
         return R.ok(forwardList);
+    }
+
+    /**
+     * 正常或暂停的转发不应继续返回历史失败明细，避免把旧记录误显示为当前故障。
+     */
+    private void clearResolvedPendingNodeDetails(List<ForwardWithTunnelDto> forwards) {
+        if (forwards == null || forwards.isEmpty()) {
+            return;
+        }
+        for (ForwardWithTunnelDto forward : forwards) {
+            if (forward == null || Objects.equals(forward.getStatus(), FORWARD_STATUS_PENDING)
+                    || Objects.equals(forward.getStatus(), FORWARD_STATUS_ERROR)) {
+                continue;
+            }
+            forward.setPendingNodes(null);
+        }
     }
 
     /**
@@ -2167,13 +2184,18 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                 .collect(Collectors.toList());
         forward.setPendingNodes(normalized.isEmpty() ? null : JSON.toJSONString(normalized));
         // 后台补偿调用时不会修改转发状态，但失败节点明细仍必须立即落库。
-        this.updateById(forward);
+        if (normalized.isEmpty() && forward.getId() != null) {
+            baseMapper.clearPendingNodes(forward.getId());
+        } else {
+            this.updateById(forward);
+        }
     }
 
     private void clearPendingNodes(Forward forward) {
-        if (forward != null) {
+        if (forward != null && forward.getId() != null) {
             forward.setPendingNodes(null);
-            this.updateById(forward);
+            // 显式写 NULL，避免 MyBatis 的非空更新策略保留历史失败明细。
+            baseMapper.clearPendingNodes(forward.getId());
         }
     }
 

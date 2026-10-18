@@ -1322,6 +1322,8 @@ export default function ForwardPage() {
   };
 
   const getPendingNodeMessages = (forward: Forward): string[] => {
+    // 失败明细只代表当前仍未成功的下发，不展示正常转发的历史记录。
+    if (forward.status !== 2 && forward.status !== -1) return [];
     if (!forward.pendingNodes) {
       return forward.status === 2 ? ['节点明细尚未返回，后台正在重新确认'] : [];
     }
